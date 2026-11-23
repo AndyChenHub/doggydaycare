@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Paws &amp; Play — Doggy Daycare</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Paws &amp; Play">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2f4a2c">
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="tint"></div>
+<div id="ui">
+  <div id="hud-tl" class="plaque">
+    <div class="clockrow">
+      <div id="sundial"><div id="sun"></div></div>
+      <div class="clocktext"><div id="dayname">Day 1</div><div id="clock">8:00 AM</div></div>
+      <div id="cashbox" title="Cash"><span class="coin"></span><span id="cash">$0</span></div>
+    </div>
+    <div class="daytrack"><div id="daybar"></div></div>
+    <div class="statrow">
+      <div class="stat" title="Reputation — more stars bring more customers"><span id="rep"></span></div>
+      <div class="stat" title="Level — unlocks new buildings, land and upgrades"><span class="lvnum" id="lvl">1</span><div class="bar"><div id="xpbar"></div></div></div>
+      <div class="stat" title="Dogs in your care / capacity">🐕 <span id="cap"></span></div>
+      <div class="stat" title="Charm from decorations — bigger tips, more customers">🌸 <span id="charm"></span></div>
+      <div class="stat" id="streak" title="Happy pickup streak — bonus tips"></div>
+    </div>
+    <div id="coopHudPill" class="coop-pill" title="Multiplayer Co-op — click to connect another phone or view partner summary">📱 Room PAWS</div>
+  </div>
+  <div id="toasts"></div>
+  <div id="hud-tr">
+    <div id="tasks" class="panel"></div>
+    <div id="roster" class="panel"></div>
+    <div id="buildpanel" class="panel" hidden></div>
+  </div>
+  <div id="toolbar">
+    <button id="buildBtn" class="wood"><span class="ico">🔨</span><span>Build</span><kbd id="kBuild">B</kbd></button>
+    <button id="dexBtn" class="wood"><span class="ico">📖</span><span>Glossary</span><kbd id="kDex">G</kbd><i id="dexBadge" hidden></i></button>
+    <button id="coopBtn" class="wood"><span class="ico">📱</span><span>Co-op</span><kbd id="kCoop">C</kbd><i id="coopBadge" hidden></i></button>
+    <button id="pauseBtn" class="wood"><span class="ico">☰</span><span>Menu</span><kbd id="kPause">Esc</kbd></button>
+  </div>
+  <div id="touchControls">
+    <div id="joystickZone" aria-label="Touch joystick"><div id="joyBase"><div id="joyKnob"></div></div></div>
+    <div id="touchActions">
+      <button id="touchActBtn" class="wood touch-btn" hidden>⚡ Do Now</button>
+      <button id="touchDropBtn" class="wood touch-btn" hidden>🐾 Let Go</button>
+      <button id="touchWaveBtn" class="wood touch-btn">👋 Wave</button>
+    </div>
+  </div>
+  <div id="hint"></div>
+  <div id="minimapbox" class="plaque"><canvas id="minimap" width="240" height="152"></canvas></div>
+  <div id="levelup"></div>
+  <div id="banner"></div>
+</div>
+<div id="modalwrap" hidden><div id="modal"></div></div>
+<div id="fade"></div>
+<div id="splash"><div class="logo">Paws &amp; Play<span>DOGGY DAYCARE</span></div><div class="paws"><i></i><i></i><i></i></div><p>Opening the doors…</p></div>
+<script src="js/config.js?v=4"></script>
+<script src="js/data.js?v=4"></script>
+<script src="js/breeds.js?v=4"></script>
+<script src="js/sound.js?v=4"></script>
+<script src="js/music.js?v=4"></script>
+<script src="js/dogart.js?v=4"></script>
+<script src="js/dogportrait.js?v=4"></script>
+<script src="js/people.js?v=4"></script>
+<script src="js/objects_a.js?v=4"></script>
+<script src="js/objects_b.js?v=4"></script>
+<script src="js/worldart.js?v=4"></script>
+<script src="js/shopart.js?v=4"></script>
+<script src="js/game.js?v=4"></script>
+<script src="js/render.js?v=4"></script>
+<script src="js/multiplayer.js?v=4"></script>
+<script src="js/ui.js?v=4"></script>
+</body>
+</html>
