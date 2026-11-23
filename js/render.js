@@ -59,23 +59,33 @@ function outlined(c, text, x, y, fill, stroke, lw) {
 
 // ---------------- view & camera ----------------
 function resizeView() {
-  var w = window.innerWidth, h = window.innerHeight, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var vv = window.visualViewport;
+  var w = Math.round(vv ? vv.width : window.innerWidth) || 390;
+  var h = Math.round(vv ? vv.height : window.innerHeight) || 844;
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
   VIEW.w = w; VIEW.h = h; VIEW.dpr = dpr;
   canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
   canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
 }
 window.addEventListener('resize', resizeView);
-// The zoom is tuned for a vertical iPhone screen so ~9.2 tiles fit horizontally and ~17-20 tiles fit vertically.
+window.addEventListener('orientationchange', function () { setTimeout(resizeView, 50); setTimeout(resizeView, 250); });
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeView);
+
+// The zoom is tuned for a vertical iPhone screen and clamped so the camera never extends beyond the painted world bounds.
 function baseZoom() {
-  var span = Math.min(VIEW.w / 9.2, VIEW.h / 16.0);
+  var span = Math.min(VIEW.w / 8.6, VIEW.h / 15.2);
   var tilePx = Math.round(clamp(span * VIEW.dpr, 30, 120) * (settings.zoom || 1));
-  return tilePx / TILE / VIEW.dpr;
+  var z = tilePx / TILE / VIEW.dpr;
+  var minZ = Math.max(VIEW.w / (W * TILE), VIEW.h / (H * TILE));
+  return Math.max(z, minZ);
 }
 function updateCamera(dt, tx, ty, zoomMul, snap) {
   var tz = baseZoom();
-  var k = snap ? 1 : 1 - Math.exp(-dt * 4.2), kz = snap ? 1 : 1 - Math.exp(-dt * 10);
+  var k = snap ? 1 : 1 - Math.exp(-dt * 4.5), kz = snap ? 1 : 1 - Math.exp(-dt * 10);
   CAM.zoom += (tz - CAM.zoom) * kz;
   if (Math.abs(tz - CAM.zoom) < 0.004) CAM.zoom = tz;
+  var minZ = Math.max(VIEW.w / (W * TILE), VIEW.h / (H * TILE));
+  if (CAM.zoom < minZ) CAM.zoom = minZ;
   CAM.zooming = CAM.zoom !== tz;
   var hw = VIEW.w / 2 / CAM.zoom, hh = VIEW.h / 2 / CAM.zoom;
   tx = clamp(tx, hw, Math.max(hw, W * TILE - hw)); ty = clamp(ty, hh, Math.max(hh, H * TILE - hh));
@@ -601,7 +611,7 @@ function render(dt) {
   if (groundDirty || !groundCanvas) rebuildGround();
   if (!walkGrid || _gridState !== S) buildWalk();
   ENV.night = nightAmt(); ENV.wind = Math.sin(t * 0.4) * 0.5 + Math.sin(t * 1.13 + 2) * 0.3;
-  c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = '#2f4a2c'; c.fillRect(0, 0, canvas.width, canvas.height);
+  c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = '#5d9d49'; c.fillRect(0, 0, canvas.width, canvas.height);
   applyCam(c);
   var v = viewRect(TILE * 3);
   drawGroundLayer(c);
@@ -668,22 +678,12 @@ function render(dt) {
   c.setTransform(VIEW.dpr, 0, 0, VIEW.dpr, 0, 0);
   if (FX.flash > 0) { c.fillStyle = 'rgba(255,60,40,' + FX.flash * 0.3 + ')'; c.fillRect(0, 0, VIEW.w, VIEW.h); }
   if (UI.mode === 'play' || UI.mode === 'build') drawEdgeIndicators(c, t);
-  if (UI.mode === 'play' && !UI.inTitle) {
+  if (UI.mode === 'play' && !UI.inTitle && UI.joy && UI.joy.active) {
     c.save();
-    if (UI.joy && UI.joy.active) {
-      c.fillStyle = 'rgba(40,26,16,0.26)'; c.strokeStyle = 'rgba(255,248,230,0.75)'; c.lineWidth = 2.8;
-      ell(c, UI.joy.ox, UI.joy.oy, 48, 48); c.fill(); c.stroke();
-      c.fillStyle = 'rgba(255,248,230,0.92)'; c.strokeStyle = '#3b2a20'; c.lineWidth = 2.2;
-      ell(c, UI.joy.cx, UI.joy.cy, 21, 21); c.fill(); c.stroke();
-    } else if (!S.player.moving && (!S.tutorialDone || !S.tutorial.checkin)) {
-      var jx = VIEW.w / 2, jy = VIEW.h - 122, jbob = Math.sin(t * 4) * 5;
-      c.fillStyle = 'rgba(40,26,16,0.20)'; c.strokeStyle = 'rgba(255,248,230,0.52)'; c.lineWidth = 2.2;
-      ell(c, jx, jy, 40, 40); c.fill(); c.stroke();
-      c.fillStyle = 'rgba(255,248,230,0.78)'; c.strokeStyle = '#3b2a20'; c.lineWidth = 1.8;
-      ell(c, jx + jbob, jy, 17, 17); c.fill(); c.stroke();
-      c.font = '13px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
-      outlined(c, 'DRAG ANYWHERE TO MOVE', jx, jy - 52, '#fff8e6', 'rgba(40,26,16,0.85)', 3);
-    }
+    c.fillStyle = 'rgba(40,26,16,0.24)'; c.strokeStyle = 'rgba(255,248,230,0.75)'; c.lineWidth = 2.6;
+    ell(c, UI.joy.ox, UI.joy.oy, 44, 44); c.fill(); c.stroke();
+    c.fillStyle = 'rgba(255,248,230,0.92)'; c.strokeStyle = '#3b2a20'; c.lineWidth = 2.0;
+    ell(c, UI.joy.cx, UI.joy.cy, 19, 19); c.fill(); c.stroke();
     c.restore();
   }
 }

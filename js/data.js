@@ -40,8 +40,8 @@ var PLOTS = [
 var KEEP_CLEAR = [[18, 23], [18, 24]];
 var YARD_ENTRY = [18, 23];
 
-// where owners queue at the customer side of the counter (tile units, centre of feet); the hand-over happens opposite the action box
-var SLOTS = [[4.9, 27.5], [6.15, 27.5], [11.2, 27.5], [5.4, 29.6], [7.1, 29.6]];
+// where owners queue at the customer side of the counter (well-spaced so portrait bubbles never overlap)
+var SLOTS = [[5.2, 27.6], [11.6, 27.6], [14.5, 27.6], [6.4, 30.3], [11.8, 30.3]];
 var PLAYER_START = [8.9, 24.25];
 
 // ---------- dogs ----------
@@ -118,17 +118,16 @@ var CATALOG = [
   { id: 'gazebo',     cat: 'decor', name: 'Gazebo',          icon: '🏛️', w: 3, h: 3, cost: 900, time: 5,   lvl: 6, charm: 18, solid: true, desc: '+18 charm. The pride of the neighbourhood.' },
 ];
 
-// In-world My Mini Mart floor unlock pads: walk onto a pad to pour cash in and build/unlock right on the spot!
+// In-world My Mini Mart floor unlock pads (shown progressively, 2 at a time, well-spaced across the yard)
 var UNLOCK_PADS = [
-  { id: 'pad_water',   kind: 'obj',   type: 'waterbowl',  x: 29, y: 18 },
-  { id: 'pad_treat',   kind: 'obj',   type: 'treatjar',   x: 26, y: 18 },
-  { id: 'pad_kennel',  kind: 'obj',   type: 'kennel',     x: 19, y: 27 },
+  { id: 'pad_water',   kind: 'obj',   type: 'waterbowl',  x: 29, y: 23 },
   { id: 'pad_play',    kind: 'obj',   type: 'playzone',   x: 23, y: 24 },
-  { id: 'pad_sand',    kind: 'obj',   type: 'sandpit',    x: 28, y: 25 },
-  { id: 'pad_nap',     kind: 'obj',   type: 'napmat',     x: 23, y: 29 },
-  { id: 'pad_feeder',  kind: 'obj',   type: 'autofeeder', x: 21, y: 18 },
-  { id: 'pad_recep',   kind: 'staff', staffId: 'receptionist', x: 6,  y: 23, w: 2, h: 2 },
-  { id: 'pad_helper',  kind: 'staff', staffId: 'helper',       x: 20, y: 21, w: 2, h: 2 },
+  { id: 'pad_treat',   kind: 'obj',   type: 'treatjar',   x: 20, y: 23 },
+  { id: 'pad_kennel',  kind: 'obj',   type: 'kennel',     x: 28, y: 28 },
+  { id: 'pad_recep',   kind: 'staff', staffId: 'receptionist', x: 5,  y: 23, w: 2, h: 2 },
+  { id: 'pad_helper',  kind: 'staff', staffId: 'helper',       x: 20, y: 20, w: 2, h: 2 },
+  { id: 'pad_sand',    kind: 'obj',   type: 'sandpit',    x: 24, y: 29 },
+  { id: 'pad_feeder',  kind: 'obj',   type: 'autofeeder', x: 26, y: 18 },
 ];
 var CAT_BY_ID = {};
 CATALOG.forEach(function (c) { CAT_BY_ID[c.id] = c; });

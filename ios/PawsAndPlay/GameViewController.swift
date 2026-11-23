@@ -45,7 +45,8 @@ final class GameViewController: UIViewController, WKNavigationDelegate, WKScript
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 47.0 / 255.0, green: 74.0 / 255.0, blue: 44.0 / 255.0, alpha: 1.0)
+        let grassColor = UIColor(red: 93.0 / 255.0, green: 157.0 / 255.0, blue: 73.0 / 255.0, alpha: 1.0)
+        view.backgroundColor = grassColor
 
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
@@ -92,16 +93,23 @@ final class GameViewController: UIViewController, WKNavigationDelegate, WKScript
         config.userContentController = contentController
 
         webView = WKWebView(frame: view.bounds, configuration: config)
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        webView.translatesAutoresizingMaskIntoConstraints = false
         webView.isOpaque = true
-        webView.backgroundColor = view.backgroundColor
-        webView.scrollView.backgroundColor = view.backgroundColor
+        webView.backgroundColor = grassColor
+        webView.scrollView.backgroundColor = grassColor
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.delaysContentTouches = false
         webView.navigationDelegate = self
         view.addSubview(webView)
+
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: view.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
 
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(flushWebViewSave), name: UIApplication.willResignActiveNotification, object: nil)
@@ -112,6 +120,12 @@ final class GameViewController: UIViewController, WKNavigationDelegate, WKScript
             let wwwDir = indexURL.deletingLastPathComponent()
             webView.loadFileURL(indexURL, allowingReadAccessTo: wwwDir)
         }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        webView?.frame = view.bounds
+        webView?.evaluateJavaScript("if (typeof resizeView === 'function') resizeView();", completionHandler: nil)
     }
 
     @objc private func flushWebViewSave() {

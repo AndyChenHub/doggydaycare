@@ -213,12 +213,12 @@ function newState() {
   };
   S = s; groundDirty = true; NPCS = [];
   addObject('foodbin', 20, 18, true);
-  addObject('toybox', 22, 18, true);
-  addObject('trash', 24, 18, true);
-  addObject('tub', 27, 18, true);
+  addObject('toybox', 24, 18, true);
+  addObject('tub', 28, 18, true);
+  addObject('trash', 19, 28, true);
   addObject('flowers', 19, 30, true);
   addObject('flowers', 30, 30, true);
-  addObject('bush', 30, 19, true);
+  addObject('bush', 30, 20, true);
   return s;
 }
 function newStats(rep) { return { earned: 0, tips: 0, served: 0, complaints: 0, perfect: 0, repStart: rep, spent: 0, complaintList: [], pets: 0, scoops: 0, baths: 0, feeds: 0, fetches: 0, goalCash: 0, wages: 0 }; }
@@ -856,7 +856,7 @@ function stationPad(o) {
   for (var ri = 0; ri < rows.length && !pad; ri++) {
     var ty = rows[ri], xs = [];
     for (var tx = o.x; tx < o.x + o.w; tx++) if (baseKind(tx, ty) === 'yard' && !solidForPlayer(tx, ty)) xs.push(tx);
-    if (xs.length) pad = { x: xs[0] * TILE - 4, y: ty * TILE - 4, w: (xs[xs.length - 1] - xs[0] + 1) * TILE + 8, h: TILE + 8, below: ri === 0 };
+    if (xs.length) pad = { x: xs[0] * TILE + 4, y: ty * TILE + 4, w: (xs[xs.length - 1] - xs[0] + 1) * TILE - 8, h: TILE - 8, below: ri === 0 };
   }
   padCache.map[key] = pad;
   return pad;
@@ -885,6 +885,7 @@ function activeUnlockPads() {
   if (!S || typeof UNLOCK_PADS === 'undefined') return [];
   var out = [];
   for (var i = 0; i < UNLOCK_PADS.length; i++) {
+    if (out.length >= 2) break; // My Mini Mart progressive reveal: show at most 2 unlock pads at once
     var up = UNLOCK_PADS[i];
     if (up.kind === 'obj') {
       var def = CAT_BY_ID[up.type];
@@ -894,7 +895,7 @@ function activeUnlockPads() {
       out.push({
         id: up.id, kind: 'obj', type: up.type, x: up.x, y: up.y, w: def.w, h: def.h,
         name: def.name, icon: def.icon, cost: def.cost,
-        rect: { x: up.x * TILE - 4, y: up.y * TILE - 4, w: def.w * TILE + 8, h: def.h * TILE + 8 },
+        rect: { x: up.x * TILE + 2, y: up.y * TILE + 2, w: def.w * TILE - 4, h: def.h * TILE - 4 },
       });
     } else if (up.kind === 'staff') {
       var sd = STAFF_BY_ID[up.staffId];
@@ -903,7 +904,7 @@ function activeUnlockPads() {
       out.push({
         id: up.id, kind: 'staff', staffId: up.staffId, x: up.x, y: up.y, w: sw, h: sh,
         name: sd.name, icon: sd.icon, cost: sd.wage,
-        rect: { x: up.x * TILE - 4, y: up.y * TILE - 4, w: sw * TILE + 8, h: sh * TILE + 8 },
+        rect: { x: up.x * TILE + 2, y: up.y * TILE + 2, w: sw * TILE - 4, h: sh * TILE - 4 },
       });
     }
   }

@@ -582,7 +582,7 @@ function updateHUD(dt) {
   setText('clock', ((hh - 1) % 12 + 1) + ':' + (mm < 10 ? '0' : '') + mm + (hh < 12 ? ' AM' : ' PM'));
   var fq = Math.round(f * 60) / 60, ang = Math.PI * (1 - fq);
   setStyle('daybar', 'width', (fq * 100).toFixed(1) + '%');
-  setStyle('sun', 'transform', 'translate(' + Math.round(17 + Math.cos(ang) * 11) + 'px,' + Math.round(18 - Math.sin(ang) * 12) + 'px)');
+  setStyle('sun', 'transform', 'translate(' + Math.round(11 + Math.cos(ang) * 7) + 'px,' + Math.round(12 - Math.sin(ang) * 7) + 'px)');
   setText('cap', activeDogCount() + '/' + capacity());
   setText('charm', charm());
   setText('streak', S.streak > 1 ? '🔥x' + S.streak : '');
