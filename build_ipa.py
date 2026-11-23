@@ -466,6 +466,7 @@ def build_ipa():
 
     # 2. Generate iOS App Icons
     icon_specs = [
+        ("Icon.png", 120),
         ("AppIcon60x60@2x.png", 120),
         ("AppIcon60x60@3x.png", 180),
         ("AppIcon76x76@2x~ipad.png", 152),
@@ -475,15 +476,26 @@ def build_ipa():
         with open(os.path.join(app_dir, icon_name), "wb") as f:
             f.write(make_paw_png(px))
 
-    # 3. Write Info.plist & PkgInfo
+    # 3. Write normalized LF Info.plist & PkgInfo
     info_plist_src = os.path.join(ROOT_DIR, "ios", "PawsAndPlay", "Info.plist")
     info_plist_dst = os.path.join(app_dir, "Info.plist")
-    shutil.copy2(info_plist_src, info_plist_dst)
-    with open(info_plist_dst, "rb") as f:
-        info_plist_bytes = f.read()
+    with open(info_plist_src, "rb") as f:
+        info_dict = plistlib.loads(f.read())
+    info_plist_bytes = plistlib.dumps(info_dict, fmt=plistlib.FMT_XML)
+    with open(info_plist_dst, "wb") as f:
+        f.write(info_plist_bytes)
 
     with open(os.path.join(app_dir, "PkgInfo"), "wb") as f:
         f.write(b"APPL????")
+
+    # Write Entitlements.plist for codesign
+    ent_path = os.path.join(build_dir, "Entitlements.plist")
+    ent_dict = {
+        "application-identifier": f"TEAMID.{BUNDLE_ID}",
+        "get-task-allow": True,
+    }
+    with open(ent_path, "wb") as f:
+        f.write(plistlib.dumps(ent_dict, fmt=plistlib.FMT_XML))
 
     # 4. Build native ARM64 binary via Xcode toolchain on macOS, or synthesize offline
     exe_path = os.path.join(app_dir, APP_NAME)
@@ -503,15 +515,20 @@ def build_ipa():
                 "-target", "arm64-apple-ios15.0",
                 "-sdk", sdk_path,
                 "-O",
+                "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
                 *swift_files,
                 "-framework", "UIKit",
                 "-framework", "WebKit",
                 "-framework", "Foundation",
                 "-o", exe_path,
             ])
+            os.chmod(exe_path, 0o755)
             if shutil.which("codesign"):
                 subprocess.check_call([
-                    "codesign", "--force", "--sign", "-", "--timestamp=none", app_dir
+                    "codesign", "--force", "--sign", "-",
+                    "--entitlements", ent_path,
+                    "--timestamp=none",
+                    app_dir,
                 ])
             built_with_xcode = True
             print("Compiled and ad-hoc signed native iOS binary with Xcode toolchain.")
@@ -554,22 +571,37 @@ def build_ipa():
         with open(exe_path, "wb") as f:
             f.write(macho_bytes)
 
-    # 6. Package Payload/ into PawsAndPlay.ipa with POSIX permissions
+    # 6. Package Payload/ into PawsAndPlay.ipa with explicit directory entries & POSIX permissions
     primary_ipa = os.path.join(ROOT_DIR, "PawsAndPlay.ipa")
-    with zipfile.ZipFile(primary_ipa, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        for dirpath, dirnames, filenames in os.walk(os.path.join(build_dir, "Payload")):
-            dirnames.sort()
-            for fn in sorted(filenames):
-                full = os.path.join(dirpath, fn)
-                arcname = os.path.relpath(full, build_dir).replace("\\", "/")
-                zi = zipfile.ZipInfo(arcname)
-                zi.date_time = (2026, 11, 23, 12, 0, 0)
-                zi.compress_type = zipfile.ZIP_DEFLATED
-                # Executable gets 0755 permissions; other files get 0644
-                mode = 0o100755 if arcname == f"Payload/{APP_NAME}.app/{APP_NAME}" else 0o100644
-                zi.external_attr = mode << 16
-                with open(full, "rb") as rf:
-                    zf.writestr(zi, rf.read(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+    if os.path.exists(primary_ipa):
+        os.remove(primary_ipa)
+
+    if sys.platform == "darwin" and shutil.which("zip"):
+        subprocess.check_call(["zip", "-r", "-q", "-y", primary_ipa, "Payload"], cwd=build_dir)
+    else:
+        with zipfile.ZipFile(primary_ipa, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            for dirpath, dirnames, filenames in os.walk(os.path.join(build_dir, "Payload")):
+                dirnames.sort()
+                rel_dir = os.path.relpath(dirpath, build_dir).replace("\\", "/").rstrip("/") + "/"
+                dir_zi = zipfile.ZipInfo(rel_dir)
+                dir_zi.date_time = (2026, 11, 23, 12, 0, 0)
+                dir_zi.compress_type = zipfile.ZIP_STORED
+                dir_zi.create_system = 3  # Unix
+                dir_zi.external_attr = (0o040755 << 16) | 0x10
+                zf.writestr(dir_zi, b"")
+
+                for fn in sorted(filenames):
+                    full = os.path.join(dirpath, fn)
+                    arcname = os.path.relpath(full, build_dir).replace("\\", "/")
+                    zi = zipfile.ZipInfo(arcname)
+                    zi.date_time = (2026, 11, 23, 12, 0, 0)
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    zi.create_system = 3  # Unix
+                    # Executable gets 0755 permissions; other files get 0644
+                    mode = 0o100755 if arcname == f"Payload/{APP_NAME}.app/{APP_NAME}" else 0o100644
+                    zi.external_attr = mode << 16
+                    with open(full, "rb") as rf:
+                        zf.writestr(zi, rf.read(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 
     shutil.rmtree(os.path.join(ROOT_DIR, "build"), ignore_errors=True)
     size_kb = os.path.getsize(primary_ipa) / 1024.0

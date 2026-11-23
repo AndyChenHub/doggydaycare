@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build iOS IPA (Xcode Swift ARM64 + Ad-Hoc Sign)
         run: python3 build_ipa.py
@@ -29,6 +31,17 @@ jobs:
           unzip -l PawsAndPlay.ipa | grep "Payload/PawsAndPlay.app/PawsAndPlay"
           unzip -l PawsAndPlay.ipa | grep "Payload/PawsAndPlay.app/Info.plist"
           unzip -l PawsAndPlay.ipa | grep "Payload/PawsAndPlay.app/www/index.html"
+
+      - name: Commit Xcode-built PawsAndPlay.ipa to repository
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet PawsAndPlay.ipa; then
+            git add PawsAndPlay.ipa
+            git commit -m "Update PawsAndPlay.ipa with Xcode macOS build [skip ci]"
+            git push origin HEAD:main
+          fi
 
       - name: Upload PawsAndPlay.ipa Artifact
         uses: actions/upload-artifact@v4
@@ -50,6 +63,6 @@ jobs:
             gh release upload "$TAG_NAME" PawsAndPlay.ipa --clobber
           else
             gh release create "$TAG_NAME" PawsAndPlay.ipa \
-              --title "Paws & Play — iOS IPA ($TAG_NAME)" \
-              --notes "Automated iOS build of Paws & Play — Doggy Daycare (PawsAndPlay.ipa)."
+              --title "Paws and Play — iOS IPA ($TAG_NAME)" \
+              --notes "Automated iOS build of Paws and Play — Doggy Daycare (PawsAndPlay.ipa)."
           fi
