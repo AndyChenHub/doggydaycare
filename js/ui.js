@@ -733,7 +733,7 @@ function makeDemo() {
   S = keep; markDirty(true);
 }
 function frame(ts) {
-  var dt = Math.min(0.05, (ts - lastT) / 1000); lastT = ts;
+  var dt = clamp((ts - lastT) / 1000, 0.001, 0.05); lastT = ts;
   try {
     if (S) {
       var active = UI.mode === 'play' || UI.mode === 'build';
