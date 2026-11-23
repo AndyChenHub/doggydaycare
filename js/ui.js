@@ -598,7 +598,8 @@ function updateHUD(dt) {
   setText('lvl', S.level);
   setStyle('xpbar', 'width', Math.round(S.xp / lvlNeed(S.level) * 50) * 2 + '%');
   var D = dayLen(), f = S.dayTime / D, mins = 8 * 60 + Math.floor(f * 600 / 10) * 10, hh = Math.floor(mins / 60), mm = mins % 60;
-  setText('dayname', 'Day ' + S.day + (S.closing ? ' · closing' : ''));
+  var ph = typeof dayPhase === 'function' ? dayPhase() : { icon: '🌅', short: 'Open' };
+  setText('dayname', 'Day ' + S.day + ' · ' + ph.icon + ' ' + ph.short);
   setText('clock', ((hh - 1) % 12 + 1) + ':' + (mm < 10 ? '0' : '') + mm + (hh < 12 ? ' AM' : ' PM'));
   var fq = Math.round(f * 60) / 60, ang = Math.PI * (1 - fq);
   setStyle('daybar', 'width', (fq * 100).toFixed(1) + '%');

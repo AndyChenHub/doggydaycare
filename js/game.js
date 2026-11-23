@@ -177,7 +177,7 @@ function defaultSettings() {
   var c = window.GAME_CONFIG || {};
   return { dayLength: c.dayLengthSeconds || 300, difficulty: c.difficulty || 'normal',
            musicVol: c.musicVolume != null ? c.musicVolume : 0.5, ambVol: c.ambienceVolume != null ? c.ambienceVolume : 0.5,
-           sfxVol: c.sfxVolume != null ? c.sfxVolume : 0.8, zoom: c.cameraZoom || 1, standSec: c.standSeconds || 0.18 };
+           sfxVol: c.sfxVolume != null ? c.sfxVolume : 0.8, zoom: c.cameraZoom || 1, standSec: c.standSeconds || 0.55 };
 }
 function sanitizeSettings(s) {
   var def = defaultSettings();
@@ -188,7 +188,7 @@ function sanitizeSettings(s) {
   s.ambVol = (typeof s.ambVol === 'number' && isFinite(s.ambVol)) ? clamp(s.ambVol, 0, 1) : def.ambVol;
   s.sfxVol = (typeof s.sfxVol === 'number' && isFinite(s.sfxVol)) ? clamp(s.sfxVol, 0, 1) : def.sfxVol;
   s.zoom = (typeof s.zoom === 'number' && isFinite(s.zoom)) ? clamp(s.zoom, 0.7, 1.4) : def.zoom;
-  s.standSec = (typeof s.standSec === 'number' && isFinite(s.standSec)) ? clamp(s.standSec, 0.08, 1.5) : def.standSec;
+  s.standSec = (typeof s.standSec === 'number' && isFinite(s.standSec) && s.standSec >= 0.35) ? clamp(s.standSec, 0.35, 1.5) : def.standSec;
   delete s.keys;
   return s;
 }
@@ -295,7 +295,9 @@ function buildWalk() {
   if (!baseGrid) baseGrid = new Array(N);
   _gridState = S; walkStamp++;
   for (var i = 0; i < N; i++) objGrid[i] = null;
-  var cap = 4, ch = 0, objs = S ? S.objects : [];
+  var dNum = S ? (S.day || 1) : 1, lNum = S ? (S.level || 1) : 1;
+  var baseCap = (dNum === 1 && lNum === 1) ? 2 : (dNum <= 2 && lNum <= 2) ? 3 : (4 + Math.min(3, Math.floor((lNum - 2) / 3)));
+  var cap = baseCap, ch = 0, objs = S ? S.objects : [];
   for (var oi = 0; oi < objs.length; oi++) {
     var o = objs[oi], def = CAT_BY_ID[o.type], olv = o.lvl || 1;
     if (o.done && def) {
@@ -376,9 +378,18 @@ var NEED_INFO = {
   pet:   { icon: '❤️', says: 'wants cuddles',   item: null,    wantText: 'wants cuddles — come with empty hands', complaint: 'felt ignored' },
   bath:  { icon: '🛁', says: 'is muddy',        item: null,    wantText: 'is muddy — leash it and take it to the Bath Tub', complaint: 'came back filthy' },
 };
-var NEED_GRACE = 14; // seconds a dog waits happily before it starts to get upset
+var NEED_GRACE = 22; // seconds a dog waits happily before it starts to get upset
 function complaintLine(d) { return d.traits.indexOf('diva') >= 0 ? 55 : 38; }
 function dayFrac() { return clamp(S.dayTime / dayLen(), 0, 1); }
+// Realistic doggy daycare daily schedule phases (8:00 AM to 6:00 PM)
+function dayPhase() {
+  if (!S || S.closing) return { id: 'closing', icon: '🌙', short: 'Closing', label: 'Closing Time' };
+  var f = dayFrac();
+  if (f < 0.35) return { id: 'morning', icon: '🌅', short: 'Drop-Off', label: 'Morning Drop-Off', banner: '🌅 Morning Drop-Off — welcome today\'s pups at the counter!' };
+  if (f < 0.58) return { id: 'midday',  icon: '☀️', short: 'Play & Lunch', label: 'Lunch & Playtime', banner: '☀️ Lunch & Playtime! The pups are working up an appetite.' };
+  if (f < 0.72) return { id: 'naptime', icon: '😴', short: 'Naptime', label: 'Afternoon Naptime', banner: '😴 Afternoon Naptime — quiet hour in the daycare yard.' };
+  return { id: 'pickup', icon: '🌇', short: 'Pickups', label: 'Afternoon Pickups', banner: '🌇 Afternoon Pickups — owners are heading back from work!' };
+}
 function nightAmt() { var f = dayFrac(); var n = f > 0.78 ? (f - 0.78) / 0.22 * 0.62 : 0; if (S.closing) n = 0.72; return n; }
 function playerIndoors() { var k = layoutKind(tileOf(S.player.x), tileOf(S.player.y)); return k === 'shopfloor' || k === 'door'; }
 function tension() {
@@ -474,10 +485,12 @@ function spawnArrival() {
   return true;
 }
 function scheduleArrival() {
-  var base = rand(18, 32);
-  var repMul = 0.7 + S.rep * 0.1;
-  var charmMul = 1 + Math.min(charm(), 120) * 0.006;
-  var early = S.day === 1 ? 1.35 : 1;
+  var ph = dayPhase().id;
+  // Morning drop-off window brings owners in steadily; midday slows down as the pack settles in
+  var base = ph === 'morning' ? rand(14, 24) : ph === 'midday' ? rand(26, 40) : rand(38, 55);
+  var repMul = 0.75 + S.rep * 0.08;
+  var charmMul = 1 + Math.min(charm(), 120) * 0.005;
+  var early = S.day === 1 ? 1.25 : S.day === 2 ? 1.1 : 1;
   S.arrivalTimer = base * early / (repMul * charmMul * (1 + upLvl('flyers') * 0.1));
 }
 function dogPrice(d) {
@@ -491,6 +504,9 @@ function nextPoopDelay(d, afterMeal) { var D = dayLen(); return afterMeal ? rand
 // rare named dogs that only turn up once a hidden requirement is met (see SPECIALS in data.js)
 function pickSpecial() {
   if (!S.specials) S.specials = {};
+  // At most 1 special guest visit per day, and never while a special guest is already here
+  if (S.lastSpecialDay === S.day) return null;
+  if (S.dogs.some(function (d) { return d.special && d.state !== 'leaving'; })) return null;
   var activeSpecials = {};
   S.dogs.forEach(function (d) { if (d.special) activeSpecials[d.special] = 1; });
   var cands = SPECIALS.filter(function (sp) {
@@ -498,16 +514,20 @@ function pickSpecial() {
     try { return !!sp.check(S); } catch (e) { return false; }
   });
   if (!cands.length) return null;
+  var chosen = null;
+  // Teddy & Alfie (moraleBoost): genuinely rare special occurrences (~6% if not met yet, ~3.5% repeat)
   var moraleFresh = cands.filter(function (sp) { return sp.moraleBoost && !S.specials[sp.id]; });
-  if (moraleFresh.length && Math.random() < 0.75) return pick(moraleFresh);
-  var moraleCands = cands.filter(function (sp) { return sp.moraleBoost; });
-  if (moraleCands.length && Math.random() < 0.35) return pick(moraleCands);
-  if (S.dogs.some(function (d) { return d.special && !d.moraleBoost; })) return null;
-  var fresh = cands.filter(function (sp) { return !S.specials[sp.id]; });
-  if (fresh.length && Math.random() < 0.6) return pick(fresh);
-  var seen = cands.filter(function (sp) { return S.specials[sp.id]; });
-  if (seen.length && Math.random() < 0.08) return pick(seen);
-  return null;
+  var moraleSeen = cands.filter(function (sp) { return sp.moraleBoost && S.specials[sp.id]; });
+  if (moraleFresh.length && Math.random() < 0.06) chosen = pick(moraleFresh);
+  else if (moraleSeen.length && Math.random() < 0.035) chosen = pick(moraleSeen);
+  else {
+    var fresh = cands.filter(function (sp) { return !sp.moraleBoost && !S.specials[sp.id]; });
+    var seen = cands.filter(function (sp) { return !sp.moraleBoost && S.specials[sp.id]; });
+    if (fresh.length && Math.random() < 0.08) chosen = pick(fresh);
+    else if (seen.length && Math.random() < 0.03) chosen = pick(seen);
+  }
+  if (chosen) S.lastSpecialDay = S.day;
+  return chosen;
 }
 function makeSpecialDog(d, sp) {
   d.name = sp.name; d.title = sp.title; d.breed = sp.breed; var b = breedOf(d);
@@ -801,7 +821,8 @@ function maxNeeds() {
 }
 function hasDone(type) { return S.objects.some(function (o) { return o.type === type && o.done; }); }
 function assignNeed(d) {
-  var w = { food: 1, play: 1, pet: 1.1, bath: 0.55 };
+  var ph = dayPhase().id;
+  var w = { food: ph === 'midday' ? 2.3 : 1, play: ph === 'midday' ? 2.1 : ph === 'morning' ? 1.4 : 0.9, pet: ph === 'naptime' ? 2.2 : 1.1, bath: 0.5 };
   if (hasTrait(d, 'glutton')) w.food += 1.5; if (hasTrait(d, 'zoomies')) w.play += 1.5; if (hasTrait(d, 'cuddly')) w.pet += 1.5;
   if (hasTrait(d, 'nervous')) w.pet += 0.8; if (hasTrait(d, 'mud')) w.bath += 1.2; if (hasTrait(d, 'water')) w.bath += 0.4;
   if (d.lastNeed && w[d.lastNeed]) w[d.lastNeed] *= 0.35; // a bit of variety
@@ -832,15 +853,18 @@ function fulfillNeed(d, how) {
   d.happy = Math.min(100, d.happy + (how === 'self' ? 16 : 28));
   var favMap = { pet: 'pets', play: 'play', food: 'food', treat: 'treat', bath: 'bath' };
   if (how !== 'self' && d.fav === favMap[n.type]) { d.happy = Math.min(100, d.happy + 10); float(d.x, d.y - 70, '★ Favourite!', '#ffd54a'); burst(d.x, d.y - 36, 'star', 6); }
-  d.need = null; d.anim = null; d.seekObj = null; d.needCool = (S.clock || 0) + 45; // a dog you just helped stays content for a while
+  d.need = null; d.anim = null; d.seekObj = null; d.needCool = (S.clock || 0) + 55; // a dog you just helped stays content for a while
   if (d.state === 'idle') d.idleT = rand(1, 2.5);
   burst(d.x, d.y - 34, 'heart', how === 'self' ? 3 : 6); d.mood = 1.2;
   gainXP(how === 'self' ? 2 : 5);
 }
 function updateDirector(dt) {
-  S.needT = (S.needT == null ? 6 : S.needT) - dt;
+  S.needT = (S.needT == null ? 10 : S.needT) - dt;
   if (S.needT <= 0) {
-    S.needT = rand(7, 14) * (settings.difficulty === 'relaxed' ? 1.4 : settings.difficulty === 'hectic' ? 0.75 : 1);
+    var nIn = S.dogs.filter(function (d) { return d.checkedIn && d.state !== 'leaving'; }).length;
+    var packPace = nIn <= 2 ? 1.45 : nIn <= 4 ? 1.15 : 1;
+    var phasePace = dayPhase().id === 'naptime' ? 1.5 : 1;
+    S.needT = rand(10, 17) * packPace * phasePace * (settings.difficulty === 'relaxed' ? 1.4 : settings.difficulty === 'hectic' ? 0.75 : 1);
     var active = S.dogs.filter(function (d) { return d.need; }).length;
     if (active < maxNeeds()) {
       var c = S.dogs.filter(careable);
@@ -888,12 +912,13 @@ function stationPad(o) {
 function inRect(x, y, r) { return r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
 var STATION_ITEM = { foodbin: 'food', toybox: 'ball', treatjar: 'treat' };
 function dwellTime(kind) {
-  if (kind === 'poop') return 0.03;
-  if (kind === 'dog') return 0.06;
-  if (kind === 'trash') return 0.06;
-  if (kind === 'mat') return 0.1;
-  if (kind === 'station') return 0.14;
-  return 0.12;
+  var b = (settings && settings.standSec) || (window.GAME_CONFIG && window.GAME_CONFIG.standSeconds) || 0.55;
+  if (kind === 'poop') return b * 0.75;
+  if (kind === 'trash') return b * 0.75;
+  if (kind === 'station') return b * 0.85;
+  if (kind === 'dog') return b * 1.0;
+  if (kind === 'mat') return b * 1.05;
+  return b;
 }
 function canPlacePadObj(type, x, y) {
   var c = CAT_BY_ID[type];
@@ -946,7 +971,7 @@ function updateUnlockPads(dt) {
     return;
   }
   if (PAD_FILL.id !== hit.id) { PAD_FILL.id = hit.id; PAD_FILL.prog = 0; PAD_FILL.coinT = 0; }
-  PAD_FILL.prog += dt / 0.55;
+  PAD_FILL.prog += dt / 1.15;
   PAD_FILL.coinT -= dt;
   if (PAD_FILL.coinT <= 0) {
     PAD_FILL.coinT = 0.11;
@@ -1155,12 +1180,18 @@ function summonOwner(o, byStaff) {
 function doCheckIn(o) {
   var d = dogById(o.dogId);
   if (!d) return;
-  o.state = 'walkOut'; o.route = exitRoute(o); o.say = pick(['Be good, ' + d.name + '!', 'Thank you!', 'See you soon!', 'Have fun, buddy!']); o.sayT = 2.2; o.emote = 'wave'; o.emoteT = 0;
+  o.state = 'walkOut'; o.route = exitRoute(o); o.say = pick(['Be good, ' + d.name + '!', 'Thank you!', 'See you this afternoon!', 'Have fun, buddy!']); o.sayT = 2.2; o.emote = 'wave'; o.emoteT = 0;
   d.checkedIn = true; d.anim = null; d.poopT = nextPoopDelay(d, false); d.ownerId = null;
   // My Mini Mart flow: newly checked-in dogs trot happily through the side door into the yard on their own!
   d.state = 'toYard'; d.route = [SHOP_WAY.gapN, SHOP_WAY.door, SHOP_WAY.yard].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }); d.autoRelease = false; d.leashedBy = null;
-  if (d.overnight) { d.pickupDay = S.day + 1; d.pickupAt = rand(0.12, 0.45) * dayLen(); }
-  else { d.pickupDay = S.day; d.pickupAt = Math.min(S.dayTime + rand(0.28, 0.5) * dayLen(), dayLen() - 8); }
+  var D = dayLen();
+  if (d.overnight) { d.pickupDay = S.day + 1; d.pickupAt = rand(0.60, 0.88) * D; }
+  else {
+    d.pickupDay = S.day;
+    var minStay = rand(0.42, 0.62) * D;
+    var afternoonPickup = rand(0.68, 0.92) * D;
+    d.pickupAt = clamp(Math.max(S.dayTime + minStay, afternoonPickup), S.dayTime + Math.min(75, D * 0.35), D - 10);
+  }
   gainXP(4); sfx('bark', d); float(d.x, d.y - 50, 'Welcome, ' + d.name + '!', '#fff');
   burst(d.x, d.y - 24, 'sparkle', 8);
   dexSeen(d); if (d.special) specialArrived(d);
@@ -1333,7 +1364,7 @@ function gainXP(n) {
     confetti(S.player.x, S.player.y - 50, 60); sfx('level');
     if (typeof MP !== 'undefined') MP.recordAction('levelup', { level: S.level });
   }
-  if (leveled) saveGame();
+  if (leveled) { markDirty(); saveGame(); }
 }
 function tut(id) {
   if (S.tutorialDone || S.tutorial[id]) return;
@@ -1522,6 +1553,19 @@ function update(dt) {
   var D = dayLen(), i, n;
   if (!S.closing) {
     S.dayTime += dt;
+    var curPhase = dayPhase();
+    if (!S._lastPhase) S._lastPhase = curPhase.id;
+    else if (S._lastPhase !== curPhase.id) {
+      S._lastPhase = curPhase.id;
+      if (curPhase.banner) toast(curPhase.banner, '');
+      if (curPhase.id === 'naptime') {
+        S.dogs.forEach(function (dg) {
+          if (dg.checkedIn && !dg.called && !dg.need && (dg.state === 'idle' || dg.state === 'wander') && zoneAt(dg.x, dg.y) !== 'pool' && Math.random() < 0.65) {
+            dg.state = 'nap'; dg.path = null; dg.actT = rand(10, 18);
+          }
+        });
+      }
+    }
     if (S.dayTime >= D) { S.dayTime = D; S.closing = true; toast('🌇 Closing time! Finish the last pickups.', ''); sfx('day_end'); }
   }
   if (!S.closing && S.dayTime < D - 55) {
@@ -1529,7 +1573,8 @@ function update(dt) {
     if (S.arrivalTimer <= 0) {
       var atCounter = 0;
       for (i = 0; i < S.owners.length; i++) if (S.owners[i].state !== 'walkOut') atCounter++; // keep the queue at the counter short
-      if (atCounter < 3 && activeDogCount() < capacity() && spawnArrival()) scheduleArrival(); else S.arrivalTimer = 3;
+      var canArrive = dayPhase().id !== 'pickup' || activeDogCount() === 0;
+      if (canArrive && atCounter < 3 && activeDogCount() < capacity() && spawnArrival()) scheduleArrival(); else S.arrivalTimer = 4;
     }
   }
   for (i = 0; i < S.dogs.length; i++) {
@@ -1695,11 +1740,11 @@ function updateOwner(o, dt) {
       if (!S.player.moving && playerOnMat()) S.player.dir = 'down';
       if (o.hoT > 0 && !S.player.moving && S.player.emote !== (o.kind === 'pickup' ? 'handover' : 'receive')) pEmote(o.kind === 'pickup' ? 'handover' : 'receive', 0.6);
     }
-    if (o.hoT >= 0.24 && d) {
+    if (o.hoT >= 0.65 && d) {
       if (o.kind === 'dropoff') { doCheckIn(o); }
       else if (staff) {
         if (d.state !== 'toOwner') { d.state = 'toOwner'; d.path = null; d.anim = null; d.route = [SHOP_WAY.gapN, SHOP_WAY.gapS].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }).concat([[o.x + 18, o.y + 14]]); }
-        if (dist(d.x, d.y, o.x + 18, o.y + 14) < 24 || o.hoT > 1.8) doReturn(o);
+        if (dist(d.x, d.y, o.x + 18, o.y + 14) < 24 || o.hoT > 2.1) doReturn(o);
       } else { doReturn(o); }
     }
   } else {
@@ -1792,9 +1837,12 @@ function updateDog(d, dt) {
     if (dd > 5) moveTo(d, tx, ty, lead || Math.max(70, dd * 6), dt); else { d.moving = false; d.curSpeed = 0; if (p.x !== d.x) d.face = p.x > d.x ? 1 : -1; }
     return;
   }
-  if (d.state === 'toYard') { // a freshly checked-in dog the receptionist sends through to the yard on its own
+  if (d.state === 'toYard') { // a freshly checked-in dog trots through to the yard on its own and greets the pack
     d.anim = null;
-    if (followRoute(d, 130, dt)) { d.route = null; d.state = 'idle'; d.idleT = d.need ? 1e9 : 0.6; d.autoRelease = false; setAnim(d, 'jump', 0.75); }
+    if (followRoute(d, 130, dt)) {
+      d.route = null; d.state = 'idle'; d.idleT = d.need ? 1e9 : 0.7; d.autoRelease = false; setAnim(d, 'jump', 0.75);
+      greetYardPal(d);
+    }
     return;
   }
   if (d.state === 'toCounter') { // fetched to the desk for a pickup the receptionist is handling
@@ -1893,6 +1941,22 @@ function updateDog(d, dt) {
     if (moveTo(d, (nx[0] + 0.5) * TILE + d.ox, (nx[1] + 0.5) * TILE + d.oy, sp, dt)) d.path.shift();
   }
 }
+function greetYardPal(d) {
+  if (!S || !S.dogs) return;
+  var pals = S.dogs.filter(function (q) {
+    return q !== d && q.checkedIn && !q.need && !q.called && (q.state === 'idle' || q.state === 'wander') && dogWalkable(tileOf(q.x), tileOf(q.y));
+  });
+  if (!pals.length) return;
+  pals.sort(function (a, b) { return dist(d.x, d.y, a.x, a.y) - dist(d.x, d.y, b.x, b.y); });
+  var m = pals[0];
+  d.face = m.x >= d.x ? 1 : -1;
+  m.face = d.x >= m.x ? 1 : -1;
+  burst(d.x, d.y - 28, 'heart', 3);
+  burst(m.x, m.y - 28, 'heart', 3);
+  float(m.x, m.y - 48, '🐾 Hi ' + d.name + '!', '#fff8e1', 1.1);
+  d.happy = Math.min(100, d.happy + 4);
+  m.happy = Math.min(100, m.happy + 4);
+}
 function zoneAt(px, py) {
   var o = objAt(tileOf(px), tileOf(py));
   return o && o.done && CAT_BY_ID[o.type].floor ? o.type : null;
@@ -1902,12 +1966,14 @@ function chooseWander(d) {
   if (!dogWalkable(sx, sy)) { var t = nearestWalkable(d.x, d.y); d.x = (t[0] + .5) * TILE; d.y = (t[1] + .5) * TILE; sx = t[0]; sy = t[1]; }
   d.anim = null;
   if (d.need && !d.need.self) { d.state = 'idle'; d.idleT = 1e9; return; }
-  var napP = hasTrait(d, 'sleepy') ? 0.35 : 0.08, here = zoneAt(d.x, d.y);
-  if (here !== 'pool' && !d.need && Math.random() < napP) { d.state = 'nap'; d.actT = rand(5, 10); return; }
+  var ph = dayPhase().id, here = zoneAt(d.x, d.y);
+  var napP = ph === 'naptime' ? (here === 'napmat' ? 0.75 : 0.48) : (hasTrait(d, 'sleepy') ? 0.35 : 0.08);
+  if (here !== 'pool' && !d.need && Math.random() < napP) { d.state = 'nap'; d.actT = ph === 'naptime' ? rand(9, 16) : rand(5, 10); return; }
   if (!d.need && !d.called) {
     var bowls = S.objects.filter(function (o) { return o.type === 'waterbowl' && o.done; });
     if (bowls.length && Math.random() < 0.18) { goToObject(d, pick(bowls)); if (d.state === 'wander') return; }
-    var mbW = moraleBoostCount(), rompChance = Math.min(0.6, (hasTrait(d, 'social') ? 0.22 : 0.12) + mbW * 0.2 + (d.moraleBoost ? 0.18 : 0));
+    var mbW = moraleBoostCount(), playBoost = ph === 'midday' ? 0.16 : ph === 'naptime' ? -0.08 : 0.04;
+    var rompChance = clamp((hasTrait(d, 'social') ? 0.22 : 0.12) + playBoost + mbW * 0.2 + (d.moraleBoost ? 0.18 : 0), 0.04, 0.65);
     if (Math.random() < rompChance) {
       var mates = S.dogs.filter(function (q) { return q !== d && q.checkedIn && !q.need && !q.called && (q.state === 'idle' || q.state === 'wander') && dist(q.x, q.y, d.x, d.y) < (mbW ? 360 : 260) && dogWalkable(tileOf(q.x), tileOf(q.y)); });
       if (mates.length) {
@@ -1928,11 +1994,11 @@ function chooseWander(d) {
       var inside = 0; S.dogs.forEach(function (q) { if (q !== d && q.x >= o.x * TILE && q.x < (o.x + o.w) * TILE && q.y >= o.y * TILE && q.y < (o.y + o.h) * TILE) inside++; });
       if (inside >= Math.max(1, Math.floor(o.w * o.h / 2.5))) return; // full: no piling up
       var w = 0;
-      if (o.type === 'playzone') w = 1.2;
+      if (o.type === 'playzone') w = ph === 'midday' ? 2.2 : 1.2;
       if (o.type === 'sandpit') w = hasTrait(d, 'mud') ? 2 : 0.8;
       if (o.type === 'agility') w = hasTrait(d, 'zoomies') ? 3 : 1.2;
       if (o.type === 'pool') w = hasTrait(d, 'water') ? 3 : 0.4;
-      if (o.type === 'napmat' && hasTrait(d, 'sleepy')) w = 2;
+      if (o.type === 'napmat' && (hasTrait(d, 'sleepy') || ph === 'naptime')) w = ph === 'naptime' ? 3.5 : 2;
       if (w > 0) wants.push({ o: o, w: w });
     });
     if (wants.length && Math.random() < 0.45) {
@@ -1973,7 +2039,7 @@ function endDay() {
   if (leftover >= 3) { S.rep = Math.max(0, S.rep - 0.1 * Math.min(leftover, 6)); }
   UI.summary = JSON.parse(JSON.stringify(S.stats)); UI.summary.day = S.day; UI.summary.repEnd = S.rep;
   UI.summary.goals = S.goals.map(function (g) { return { text: goalText(g), done: g.done, reward: g.reward }; });
-  S.day++; S.dayTime = 0; S.closing = false; S.stats = newStats(S.rep); S.arrivalTimer = 5; S.needT = 8;
+  S.day++; S.dayTime = 0; S.closing = false; S._lastPhase = 'morning'; S.stats = newStats(S.rep); S.arrivalTimer = 5; S.needT = 10; markDirty();
   S.dogs.forEach(function (d) { d.called = false; });
   if (S.tutorialDone) rollGoals();
   saveGame();

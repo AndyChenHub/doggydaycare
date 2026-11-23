@@ -7,7 +7,7 @@ window.GAME_CONFIG = {
   sfxVolume: 0.8,          // 0 to 1
   startingCash: 150,       // slow-burn starter capital
   playerSpeed: 265,        // pixels per second (snappy thumb joystick movement)
-  standSeconds: 0.18,      // My Mini Mart proximity action speed
+  standSeconds: 0.55,      // realistic, deliberate proximity pickup & interaction dwell time
   stackCapacity: 2,        // base carry stack size (upgradeable endlessly via Carry Harness perk)
   cameraZoom: 1,           // portrait iPhone camera zoom multiplier
 };
