@@ -534,7 +534,7 @@ def build_ipa():
             print(f"Xcode compilation fallback ({exc}); using built-in ARM64 Mach-O builder.")
 
     if not built_with_xcode:
-        # Generate _CodeSignature/CodeResources manifest (SHA-1 & SHA-256 of every bundle resource)
+        # Generate exact Apple Xcode _CodeSignature/CodeResources manifest (SHA-1 & SHA-256 of every bundle resource)
         files1 = {}
         files2 = {}
         for dirpath, _, filenames in os.walk(app_dir):
@@ -547,25 +547,59 @@ def build_ipa():
                     data = rf.read()
                 s1 = hashlib.sha1(data).digest()
                 s256 = hashlib.sha256(data).digest()
-                if rel != "Info.plist":
-                    files1[rel] = s1
+                files1[rel] = s1
+                if rel not in ("Info.plist", "PkgInfo"):
                     files2[rel] = {"hash": s1, "hash2": s256}
 
         code_resources_dict = {
             "files": files1,
             "files2": files2,
-            "rules": {"^.*": True, "^.*\\.lproj/": {"optional": True, "weight": 1000}},
-            "rules2": {
+            "rules": {
                 "^.*": True,
-                "^Info\\.plist$": {"omit": True, "weight": 20},
-                "^PkgInfo$": {"omit": True, "weight": 20},
+                "^.*\\.lproj/": {"optional": True, "weight": 1000.0},
+                "^.*\\.lproj/locversion.plist$": {"omit": True, "weight": 1100.0},
+                "^Base\\.lproj/": {"weight": 1010.0},
+                "^version.plist$": True,
+            },
+            "rules2": {
+                ".*\\.dSYM($|/)": {"weight": 11.0},
+                "^(.*/)?\\.DS_Store$": {"omit": True, "weight": 2000.0},
+                "^.*": True,
+                "^.*\\.lproj/": {"optional": True, "weight": 1000.0},
+                "^.*\\.lproj/locversion.plist$": {"omit": True, "weight": 1100.0},
+                "^Base\\.lproj/": {"weight": 1010.0},
+                "^Info\\.plist$": {"omit": True, "weight": 20.0},
+                "^PkgInfo$": {"omit": True, "weight": 20.0},
+                "^embedded\\.provisionprofile$": {"weight": 20.0},
+                "^version\\.plist$": {"weight": 20.0},
             },
         }
         code_resources_bytes = plistlib.dumps(code_resources_dict, fmt=plistlib.FMT_XML)
         with open(os.path.join(sig_dir, "CodeResources"), "wb") as f:
             f.write(code_resources_bytes)
 
-        macho_bytes = build_arm64_macho(APP_NAME, BUNDLE_ID, info_plist_bytes, code_resources_bytes)
+        precompiled_arm64 = os.path.join(ROOT_DIR, "ios", "PawsAndPlay", "PawsAndPlay.arm64")
+        if os.path.exists(precompiled_arm64):
+            with open(precompiled_arm64, "rb") as f:
+                bin_buf = bytearray(f.read())
+            sb_off = bin_buf.find(b"\xfa\xde\x0c\xc0")
+            if sb_off >= 0:
+                _, _, count = struct.unpack_from(">III", bin_buf, sb_off)
+                for i in range(count):
+                    stype, soff = struct.unpack_from(">II", bin_buf, sb_off + 12 + i * 8)
+                    if stype == 0:  # CSSLOT_CODEDIRECTORY
+                        cd_off = sb_off + soff
+                        _, _, _, _, hash_off, _, n_spec, _, _, hash_sz, hash_type, _, _ = struct.unpack_from(
+                            ">IIIIIIIIIBBBB", bin_buf, cd_off
+                        )
+                        if hash_sz == 32 and hash_type == 2 and n_spec >= 3:
+                            s1_pos = cd_off + hash_off - 1 * 32
+                            s3_pos = cd_off + hash_off - 3 * 32
+                            bin_buf[s1_pos : s1_pos + 32] = hashlib.sha256(info_plist_bytes).digest()
+                            bin_buf[s3_pos : s3_pos + 32] = hashlib.sha256(code_resources_bytes).digest()
+            macho_bytes = bytes(bin_buf)
+        else:
+            macho_bytes = build_arm64_macho(APP_NAME, BUNDLE_ID, info_plist_bytes, code_resources_bytes)
         with open(exe_path, "wb") as f:
             f.write(macho_bytes)
 

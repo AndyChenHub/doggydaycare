@@ -14,7 +14,7 @@ permissions:
 jobs:
   build-ipa:
     name: Compile & Package PawsAndPlay.ipa
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
