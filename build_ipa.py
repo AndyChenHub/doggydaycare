@@ -464,13 +464,11 @@ def build_ipa():
         with open(os.path.join(www_dir, "js", fn), "w", encoding="utf-8") as f:
             f.write(opt_js)
 
-    # 2. Generate iOS App Icons
+    # 2. Generate iPhone App Icons
     icon_specs = [
         ("Icon.png", 120),
         ("AppIcon60x60@2x.png", 120),
         ("AppIcon60x60@3x.png", 180),
-        ("AppIcon76x76@2x~ipad.png", 152),
-        ("AppIcon83.5x83.5@2x~ipad.png", 167),
     ]
     for icon_name, px in icon_specs:
         with open(os.path.join(app_dir, icon_name), "wb") as f:

@@ -65,8 +65,12 @@ function resizeView() {
   canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
 }
 window.addEventListener('resize', resizeView);
-// The zoom is chosen so that one tile is a whole number of device pixels: art modules bake their sprites at that exact scale.
-function baseZoom() { var tilePx = Math.round(clamp(VIEW.h * VIEW.dpr / 13.4, 40, 120) * (settings.zoom || 1)); return tilePx / TILE / VIEW.dpr; }
+// The zoom is tuned for a vertical iPhone screen so ~9.2 tiles fit horizontally and ~17-20 tiles fit vertically.
+function baseZoom() {
+  var span = Math.min(VIEW.w / 9.2, VIEW.h / 16.0);
+  var tilePx = Math.round(clamp(span * VIEW.dpr, 30, 120) * (settings.zoom || 1));
+  return tilePx / TILE / VIEW.dpr;
+}
 function updateCamera(dt, tx, ty, zoomMul, snap) {
   var tz = baseZoom();
   var k = snap ? 1 : 1 - Math.exp(-dt * 4.2), kz = snap ? 1 : 1 - Math.exp(-dt * 10);
@@ -283,11 +287,18 @@ function drawNpc(c, n, t) {
   if (n.sayT > 0 && n.say) bubble(c, n.x, n.y - 82, n.say, { size: 11 });
 }
 function drawCarry(c, kind, x, y, t, car) {
-  if (typeof drawCarryItem === 'function') { try { drawCarryItem(c, kind, x, y, t); } catch (e) { emoji(c, '💩', x, y, 18); } }
-  else emoji(c, kind === 'food' ? '🥣' : kind === 'ball' ? '🎾' : kind === 'treat' ? '🍪' : '💩', x, y, 18);
-  if (kind === 'poop' && car && poopCap() > 1) { // the scooper's count
-    c.fillStyle = '#4a3426'; c.beginPath(); c.arc(x + 11, y - 10, 8, 0, 6.3); c.fill();
-    c.font = '11px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = (car.n || 1) >= poopCap() ? '#ffab91' : '#fff'; c.fillText(String(car.n || 1), x + 11, y - 9.5);
+  var count = clamp((car && car.n) || 1, 1, 5);
+  for (var si = 0; si < count; si++) {
+    var iy = y - si * 7;
+    if (typeof drawCarryItem === 'function') { try { drawCarryItem(c, kind, x, iy, t); } catch (e) { emoji(c, '💩', x, iy, 18); } }
+    else emoji(c, kind === 'food' ? '🥣' : kind === 'ball' ? '🎾' : kind === 'treat' ? '🍪' : '💩', x, iy, 18);
+  }
+  if (count > 1) {
+    var by = y - (count - 1) * 7 - 10;
+    c.fillStyle = '#3b2a20'; c.beginPath(); c.arc(x + 12, by, 8.5, 0, 6.3); c.fill();
+    c.strokeStyle = '#fff8e6'; c.lineWidth = 1.5; c.stroke();
+    c.font = '11px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = '#ffe082'; c.fillText(String(count), x + 12, by + 0.5);
   }
 }
 function drawLeash(c) {
@@ -451,24 +462,99 @@ function drawPad(c, r, t, lit, active) {
   c.strokeStyle = active ? '#fff5c0' : lit ? 'rgba(255,236,150,' + (0.7 + pulse * 0.3) + ')' : 'rgba(255,250,230,0.45)'; c.lineWidth = lit || active ? 2.6 : 1.6;
   c.setLineDash(lit || active ? [] : [6, 5]); rr(c, r.x, r.y, r.w, r.h, 9); c.stroke(); c.setLineDash([]);
 }
+function drawPlayerGuide(c, t) {
+  var p = S.player, car = p.carry, tx = null, ty = null, col = '#ffe082';
+  if (car && car.type === 'dog') {
+    var cd = dogById(car.id);
+    var ow = S.owners.filter(function (o) { return o.dogId === car.id && (o.state === 'waitPickup' || o.state === 'toHandover' || o.state === 'handover'); })[0];
+    if (ow) { tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2; col = '#ffd54a'; }
+    else if (cd && cd.need && cd.need.type === 'bath') {
+      var tub = S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
+      if (tub) { var tp = stationPad(tub) || { x: tub.x * TILE, y: tub.y * TILE, w: tub.w * TILE, h: tub.h * TILE }; tx = tp.x + tp.w / 2; ty = tp.y + tp.h / 2; col = '#80d8ff'; }
+    }
+  } else if (car && car.type === 'poop') {
+    var bin = S.objects.filter(function (o) { return o.done && o.type === 'trash'; })[0];
+    if (bin) { var bp = stationPad(bin) || { x: bin.x * TILE, y: bin.y * TILE, w: bin.w * TILE, h: bin.h * TILE }; tx = bp.x + bp.w / 2; ty = bp.y + bp.h / 2; col = '#cfd8dc'; }
+  } else if (car && (car.type === 'food' || car.type === 'treat' || car.type === 'ball')) {
+    var wantDog = S.dogs.filter(function (d) {
+      if (!d.checkedIn || !d.need || d.need.self) return false;
+      var nt = d.need.type;
+      return (car.type === 'food' && (nt === 'food' || nt === 'treat')) || (car.type === 'treat' && (nt === 'treat' || nt === 'food')) || (car.type === 'ball' && nt === 'play');
+    }).sort(function (a, b) { return dist(p.x, p.y, a.x, a.y) - dist(p.x, p.y, b.x, b.y); })[0];
+    if (wantDog) { tx = wantDog.x; ty = wantDog.y; col = '#8bf06e'; }
+  } else {
+    var wc = S.owners.filter(function (o) { return o.state === 'waitCheckin'; })[0];
+    var wp = S.owners.filter(function (o) { return o.state === 'waitPickup'; })[0];
+    if (wc) { tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2; col = '#ffd54a'; }
+    else if (wp) { var pd = dogById(wp.dogId); if (pd) { tx = pd.x; ty = pd.y; col = '#ffd54a'; } }
+    else {
+      var nd = S.dogs.filter(function (d) { return d.checkedIn && d.need && !d.need.self && (d.state === 'idle' || d.state === 'wander' || d.state === 'nap'); })
+        .sort(function (a, b) { return b.need.t - a.need.t; })[0];
+      if (nd) {
+        var reqItem = NEED_INFO[nd.need.type] && NEED_INFO[nd.need.type].item;
+        if (reqItem) {
+          var st = S.objects.filter(function (o) { return o.done && STATION_ITEM[o.type] === reqItem; })[0];
+          if (st) { var sp = stationPad(st); if (sp) { tx = sp.x + sp.w / 2; ty = sp.y + sp.h / 2; col = '#ffe082'; } }
+        } else { tx = nd.x; ty = nd.y; col = '#ff8a80'; }
+      }
+    }
+  }
+  if (tx == null || ty == null) return;
+  var d = dist(p.x, p.y, tx, ty);
+  if (d < 68) return;
+  var ang = Math.atan2(ty - (p.y - 6), tx - p.x), r = 34 + Math.sin(t * 7) * 3;
+  var ax = p.x + Math.cos(ang) * r, ay = p.y - 6 + Math.sin(ang) * r * 0.72;
+  c.save(); c.translate(ax, ay); c.rotate(ang);
+  c.fillStyle = col; c.strokeStyle = OUTLINE; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(10, 0); c.lineTo(-5, -6.5); c.lineTo(-2.5, 0); c.lineTo(-5, 6.5); c.closePath();
+  c.fill(); c.stroke();
+  c.restore();
+}
 function drawZones(c, t, v) {
   var z = UI.zone, car = S.player.carry;
-  // the action box behind the counter: stand here and the customer at the counter is yours
-  var mr = ACTION_BOX, waiting = S.owners.some(function (o) { return o.state === 'waitCheckin'; }) && !car;
+  // 1. SERVE pad behind the counter
+  var mr = ACTION_BOX, waiting = S.owners.some(function (o) { return o.state === 'waitCheckin'; });
   var wantedHere = car && car.type === 'dog' && S.owners.some(function (o) { return o.dogId === car.id && o.state === 'waitPickup'; });
   var lit = waiting || wantedHere, on = z && z.key === 'mat';
   drawPad(c, { x: mr.x + 3, y: mr.y + 3, w: mr.w - 6, h: mr.h - 6 }, t, lit, on);
-  c.globalAlpha = lit || on ? 1 : 0.6; emoji(c, '🔔', mr.x + mr.w - 16, mr.y + 16, 14); c.globalAlpha = 1;
-  c.font = '13px ' + HEAD_FONT; c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = lit || on ? '#fff5c0' : 'rgba(255,250,230,0.75)'; c.fillText('SERVE', mr.x + 9, mr.y + 14);
-  // station mats
+  c.globalAlpha = lit || on ? 1 : 0.65; emoji(c, '🔔', mr.x + mr.w - 18, mr.y + 16, 15); c.globalAlpha = 1;
+  c.font = '14px ' + HEAD_FONT; c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = lit || on ? '#fff5c0' : 'rgba(255,250,230,0.8)'; c.fillText('SERVE', mr.x + 10, mr.y + 15);
+  // 2. Station mats
   S.objects.forEach(function (o) {
     if (!o.done || !PAD_ICON[o.type]) return;
     var pad = stationPad(o); if (!pad || !inView(v, pad.x, pad.y, pad.w, pad.h)) return;
     var useful = matUseful(o), act = z && z.key === 'obj' + o.id;
     drawPad(c, pad, t, useful, act);
-    c.globalAlpha = useful || act ? 1 : 0.55; emoji(c, PAD_ICON[o.type], pad.x + pad.w / 2, pad.y + pad.h / 2 + 1, 14); c.globalAlpha = 1;
+    c.globalAlpha = useful || act ? 1 : 0.55; emoji(c, PAD_ICON[o.type], pad.x + pad.w / 2, pad.y + pad.h / 2 + 1, 15); c.globalAlpha = 1;
   });
-  // rings round the dogs that need you
+  // 3. In-world My Mini Mart floor unlock pads ($Cost pads)
+  if (typeof activeUnlockPads === 'function') {
+    var upads = activeUnlockPads();
+    for (var ui = 0; ui < upads.length; ui++) {
+      var up = upads[ui], rx = up.x * TILE + 3, ry = up.y * TILE + 3, rw = up.w * TILE - 6, rh = up.h * TILE - 6;
+      if (!inView(v, rx, ry, rw, rh)) continue;
+      var canAfford = S.cash >= up.cost, filling = typeof PAD_FILL !== 'undefined' && PAD_FILL.id === up.id && PAD_FILL.prog > 0;
+      var pulse = canAfford ? 0.5 + Math.sin(t * 5) * 0.25 : 0;
+      c.fillStyle = canAfford ? 'rgba(85, 195, 75, ' + (0.24 + pulse * 0.14) + ')' : 'rgba(40, 26, 16, 0.24)';
+      rr(c, rx, ry, rw, rh, 10); c.fill();
+      if (filling) {
+        c.save(); rr(c, rx, ry, rw, rh, 10); c.clip();
+        c.fillStyle = 'rgba(127, 235, 100, 0.65)';
+        var fh = rh * clamp(PAD_FILL.prog, 0, 1);
+        c.fillRect(rx, ry + rh - fh, rw, fh);
+        c.restore();
+      }
+      c.strokeStyle = filling ? '#ffe66d' : canAfford ? '#9ef08a' : 'rgba(255,250,230,0.4)';
+      c.lineWidth = canAfford ? 2.6 : 1.6;
+      c.setLineDash(canAfford ? [] : [6, 5]);
+      rr(c, rx, ry, rw, rh, 10); c.stroke(); c.setLineDash([]);
+      var cx = rx + rw / 2, cy = ry + rh / 2;
+      emoji(c, up.icon, cx, cy - 8, 16);
+      c.font = '13px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+      outlined(c, fmtMoney(up.cost), cx, cy + 9, canAfford ? '#b9f6ca' : '#ffd0c4', 'rgba(30,18,10,0.9)', 2.5);
+    }
+  }
+  // 4. Rings round the dogs that need you
   S.dogs.forEach(function (d) {
     if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'eat' || d.state === 'play')) return;
     var wanted = d.called && S.owners.some(function (o) { return o.dogId === d.id && o.state === 'waitPickup'; });
@@ -479,6 +565,8 @@ function drawZones(c, t, v) {
     c.strokeStyle = wanted ? 'rgba(255,214,0,' + (0.6 + pu * 0.4) + ')' : urgent ? 'rgba(255,120,100,' + (0.6 + pu * 0.4) + ')' : 'rgba(255,240,190,' + (0.55 + pu * 0.35) + ')';
     c.lineWidth = act ? 3.2 : 2.4; c.setLineDash(act ? [] : [7, 5]); c.lineDashOffset = -t * 16; ell(c, d.x, d.y, 40, 16); c.stroke(); c.setLineDash([]);
   });
+  // 5. My Mini Mart directional pointer around player's feet
+  if (UI.mode === 'play') drawPlayerGuide(c, t);
 }
 // the ring that fills up while you stand in a box
 function drawDwellProgress(c, t) {
@@ -580,12 +668,22 @@ function render(dt) {
   c.setTransform(VIEW.dpr, 0, 0, VIEW.dpr, 0, 0);
   if (FX.flash > 0) { c.fillStyle = 'rgba(255,60,40,' + FX.flash * 0.3 + ')'; c.fillRect(0, 0, VIEW.w, VIEW.h); }
   if (UI.mode === 'play' || UI.mode === 'build') drawEdgeIndicators(c, t);
-  if (UI.mode === 'play' && UI.joy && UI.joy.active && !UI.joy.fixed) {
+  if (UI.mode === 'play' && !UI.inTitle) {
     c.save();
-    c.fillStyle = 'rgba(59,42,32,0.22)'; c.strokeStyle = 'rgba(251,241,216,0.55)'; c.lineWidth = 2.5;
-    ell(c, UI.joy.ox, UI.joy.oy, 52, 52); c.fill(); c.stroke();
-    c.fillStyle = 'rgba(251,241,216,0.78)'; c.strokeStyle = '#3b2a20'; c.lineWidth = 2;
-    ell(c, UI.joy.cx, UI.joy.cy, 22, 22); c.fill(); c.stroke();
+    if (UI.joy && UI.joy.active) {
+      c.fillStyle = 'rgba(40,26,16,0.26)'; c.strokeStyle = 'rgba(255,248,230,0.75)'; c.lineWidth = 2.8;
+      ell(c, UI.joy.ox, UI.joy.oy, 48, 48); c.fill(); c.stroke();
+      c.fillStyle = 'rgba(255,248,230,0.92)'; c.strokeStyle = '#3b2a20'; c.lineWidth = 2.2;
+      ell(c, UI.joy.cx, UI.joy.cy, 21, 21); c.fill(); c.stroke();
+    } else if (!S.player.moving && (!S.tutorialDone || !S.tutorial.checkin)) {
+      var jx = VIEW.w / 2, jy = VIEW.h - 122, jbob = Math.sin(t * 4) * 5;
+      c.fillStyle = 'rgba(40,26,16,0.20)'; c.strokeStyle = 'rgba(255,248,230,0.52)'; c.lineWidth = 2.2;
+      ell(c, jx, jy, 40, 40); c.fill(); c.stroke();
+      c.fillStyle = 'rgba(255,248,230,0.78)'; c.strokeStyle = '#3b2a20'; c.lineWidth = 1.8;
+      ell(c, jx + jbob, jy, 17, 17); c.fill(); c.stroke();
+      c.font = '13px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+      outlined(c, 'DRAG ANYWHERE TO MOVE', jx, jy - 52, '#fff8e6', 'rgba(40,26,16,0.85)', 3);
+    }
     c.restore();
   }
 }
@@ -640,18 +738,17 @@ function drawLighting(c, t, v) {
   }
 }
 
-// ---------------- off-screen indicators ----------------
+// ---------------- off-screen indicators (full-width vertical iPhone viewport) ----------------
 function drawEdgeIndicators(c, t) {
   var items = [];
   S.owners.forEach(function (o) { if (o.state === 'waitCheckin') items.push({ x: o.x, y: o.y - 40, icon: '🔔', col: '#fff1c9', urgent: o.patience / o.patienceMax < 0.3 }); else if (o.state === 'waitPickup' && !(S.player.carry && S.player.carry.id === o.dogId)) { var d = dogById(o.dogId); if (d) items.push({ x: d.x, y: d.y - 20, icon: '🏠', col: '#ffe082', urgent: o.patience / o.patienceMax < 0.3 }); } else if (o.state === 'waitPickup') items.push({ x: o.x, y: o.y - 40, icon: '💰', col: '#c8f7b0', urgent: false }); });
-  S.dogs.forEach(function (d) { if (!d.checkedIn || !d.need || d.need.self || d.state === 'leaving' || d.state === 'leashed' || d.state === 'kennel' || d.need.t < 5) return; items.push({ x: d.x, y: d.y - 20, icon: NEED_INFO[d.need.type].icon, col: d.need.t > NEED_GRACE ? '#ffd9d4' : '#fffaf0', urgent: d.need.t > NEED_GRACE, small: true }); });
-  var pad = 46, top = 70;
+  S.dogs.forEach(function (d) { if (!d.checkedIn || !d.need || d.need.self || d.state === 'leaving' || d.state === 'leashed' || d.state === 'kennel' || d.need.t < 2) return; items.push({ x: d.x, y: d.y - 20, icon: NEED_INFO[d.need.type].icon, col: d.need.t > NEED_GRACE ? '#ffd9d4' : '#fffaf0', urgent: d.need.t > NEED_GRACE, small: true }); });
+  var padX = 32, topY = 114, botY = VIEW.h - 88;
   items.forEach(function (it) {
     var s = worldToScreen(it.x, it.y);
-    var panelW = VIEW.w <= 1280 ? 270 : 326; // things under the right-hand panels count as off-screen
-    if (s.x > pad && s.x < VIEW.w - pad - panelW && s.y > top && s.y < VIEW.h - pad - 30) return;
+    if (s.x > padX && s.x < VIEW.w - padX && s.y > topY && s.y < botY) return;
     var cx = VIEW.w / 2, cy = VIEW.h / 2, ang = Math.atan2(s.y - cy, s.x - cx);
-    var ex = clamp(s.x, pad, VIEW.w - pad - (VIEW.w <= 1280 ? 276 : 332)), ey = clamp(s.y, top, VIEW.h - pad - 40);
+    var ex = clamp(s.x, padX, VIEW.w - padX), ey = clamp(s.y, topY, botY);
     var r = it.small ? 15 : 19, pulse = 1 + (it.urgent ? Math.sin(t * 9) * 0.1 : Math.sin(t * 4) * 0.04);
     c.save(); c.translate(ex, ey); c.scale(pulse, pulse);
     c.fillStyle = it.col; c.strokeStyle = it.urgent ? '#d9574a' : OUTLINE; c.lineWidth = 2.2;
@@ -708,7 +805,7 @@ function drawBuildGhost(c, t) {
 }
 function siteHint(c, o) {
   c.strokeStyle = '#ffe082'; c.lineWidth = 3; rr(c, o.x * TILE + 1, o.y * TILE + 1, o.w * TILE - 2, o.h * TILE - 2, 8); c.stroke();
-  bubble(c, (o.x + o.w / 2) * TILE, o.y * TILE - 30, 'Click: finish now for ' + fmtMoney(rushCost(o)), { size: 12, bg: '#4a3426', fg: '#fff', stroke: '#2a1a10' });
+  bubble(c, (o.x + o.w / 2) * TILE, o.y * TILE - 30, 'Tap: finish now for ' + fmtMoney(rushCost(o)), { size: 12, bg: '#4a3426', fg: '#fff', stroke: '#2a1a10' });
 }
 
 // ---------------- particles ----------------
@@ -897,6 +994,7 @@ function drawAmbientAir(c, t, v) {
 // ---------------- minimap ----------------
 var miniBase = null;
 function drawMinimap(mc) {
+  if (!mc) return;
   var c = mc.getContext('2d'), sw = mc.width, sh = mc.height, k = sw / (W * TILE);
   if (!miniBase || UI.miniDirty) {
     miniBase = miniBase || document.createElement('canvas'); miniBase.width = sw; miniBase.height = sh;

@@ -31,10 +31,10 @@ MAP.shop.furniture.forEach(function (f) { FURN[f[0] + ',' + f[1]] = f[2]; });
 // yard land. 'base' is owned from the start.
 var PLOTS = [
   { id: 'base',      name: 'Starter Yard',   x: 18, y: 18, w: 14, h: 14, cost: 0,    lvl: 1, time: 0 },
-  { id: 'north',     name: 'North Lawn',     x: 18, y: 6,  w: 14, h: 12, cost: 450,  lvl: 2, time: 45 },
-  { id: 'east',      name: 'East Meadow',    x: 32, y: 18, w: 13, h: 14, cost: 800,  lvl: 3, time: 60 },
-  { id: 'northeast', name: 'Orchard Corner', x: 32, y: 6,  w: 13, h: 12, cost: 1200, lvl: 4, time: 90 },
-  { id: 'far',       name: 'Lakeside Field', x: 45, y: 6,  w: 12, h: 26, cost: 2200, lvl: 6, time: 150 },
+  { id: 'north',     name: 'North Lawn',     x: 18, y: 6,  w: 14, h: 12, cost: 450,  lvl: 2, time: 4 },
+  { id: 'east',      name: 'East Meadow',    x: 32, y: 18, w: 13, h: 14, cost: 800,  lvl: 3, time: 5 },
+  { id: 'northeast', name: 'Orchard Corner', x: 32, y: 6,  w: 13, h: 12, cost: 1200, lvl: 4, time: 6 },
+  { id: 'far',       name: 'Lakeside Field', x: 45, y: 6,  w: 12, h: 26, cost: 2200, lvl: 5, time: 8 },
 ];
 // tiles that must stay free so the yard door is never blocked
 var KEEP_CLEAR = [[18, 23], [18, 24]];
@@ -86,36 +86,49 @@ var OWNER_NAMES = ['Alex','Sam','Priya','Jordan','Maria','Chen','Taylor','Omar',
   'Liam','Zoe','Marcus','Ines','Kai','Nora','Raj','Elena','Theo','Maya','Hugo','Lena','Felix','Sofia','Ivy','Leo','Ruth'];
 
 // ---------- buildables ----------
-// time = real-life seconds to build. floor = dogs & player can walk over it.
+// time = real-life seconds to build (snappy iPhone pacing). floor = dogs & player can walk over it.
 var CATALOG = [
-  { id: 'kennel',     cat: 'care',  name: 'Kennel',          icon: '🏠', w: 2, h: 2, cost: 150, time: 30,  lvl: 1, cap: 1, solid: true,
+  { id: 'kennel',     cat: 'care',  name: 'Kennel',          icon: '🏠', w: 2, h: 2, cost: 150, time: 3,   lvl: 1, cap: 1, solid: true,
     desc: 'Lets owners book overnight stays (big pay). Dogs can nap here. +1 dog capacity.' },
-  { id: 'foodbin',    cat: 'care',  name: 'Food Bin',        icon: '🍖', w: 1, h: 1, cost: 80,  time: 10,  lvl: 1, solid: true, desc: 'Grab a bowl of kibble.' },
-  { id: 'toybox',     cat: 'care',  name: 'Toy Box',         icon: '🎾', w: 1, h: 1, cost: 80,  time: 10,  lvl: 1, solid: true, desc: 'Grab a ball to play fetch.' },
-  { id: 'trash',      cat: 'care',  name: 'Poop Bin',        icon: '🗑️', w: 1, h: 1, cost: 50,  time: 8,   lvl: 1, solid: true, desc: 'Throw scooped poop away here.' },
-  { id: 'tub',        cat: 'care',  name: 'Bath Tub',        icon: '🛁', w: 2, h: 1, cost: 250, time: 40,  lvl: 2, solid: true, desc: 'Bring a leashed dog here to wash it.' },
-  { id: 'treatjar',   cat: 'care',  name: 'Treat Jar',       icon: '🍪', w: 1, h: 1, cost: 150, time: 20,  lvl: 2, solid: true, desc: 'Treats: a bit of food and a lot of love.' },
-  { id: 'waterbowl',  cat: 'care',  name: 'Water Station',   icon: '💧', w: 1, h: 1, cost: 120, time: 15,  lvl: 2, solid: true, desc: 'Dogs wander over for a drink now and then — a little happiness boost.' },
-  { id: 'autofeeder', cat: 'care',  name: 'Auto-Feeder',     icon: '🤖', w: 1, h: 1, cost: 600, time: 90,  lvl: 5, solid: true, desc: 'Hungry dogs walk over and feed themselves.' },
-  { id: 'playzone',   cat: 'fun',   name: 'Play Zone',       icon: '🛝', w: 3, h: 3, cost: 220, time: 45,  lvl: 2, cap: 2, floor: true, desc: 'Dogs inside have fun on their own. +2 capacity.' },
-  { id: 'sandpit',    cat: 'fun',   name: 'Sand Pit',        icon: '🏖️', w: 2, h: 2, cost: 180, time: 30,  lvl: 2, cap: 1, floor: true, desc: 'Great fun to dig in — but dogs get dirty. +1 capacity.' },
-  { id: 'pool',       cat: 'fun',   name: 'Splash Pool',     icon: '🏊', w: 3, h: 2, cost: 450, time: 75,  lvl: 3, cap: 2, floor: true, desc: 'Fun and a little cleaning. Water Babies go wild. +2 capacity.' },
-  { id: 'napmat',     cat: 'fun',   name: 'Nap Mat',         icon: '🛏️', w: 2, h: 1, cost: 120, time: 20,  lvl: 3, cap: 1, floor: true, desc: 'Dogs resting here lose needs slower. +1 capacity.' },
-  { id: 'agility',    cat: 'fun',   name: 'Agility Course',  icon: '🚧', w: 4, h: 2, cost: 650, time: 120, lvl: 4, cap: 3, floor: true, desc: 'Lots of fun, zoomies dogs love it. +3 capacity.' },
-  { id: 'path',       cat: 'decor', name: 'Stone Path',      icon: '🪨', w: 1, h: 1, cost: 8,   time: 2,   lvl: 1, charm: 0.25, floor: true, desc: 'A tidy stepping-stone path.' },
-  { id: 'flowers',    cat: 'decor', name: 'Flower Bed',      icon: '🌷', w: 1, h: 1, cost: 20,  time: 5,   lvl: 1, charm: 1, floor: true, desc: '+1 charm.' },
-  { id: 'hydrant',    cat: 'decor', name: 'Fire Hydrant',    icon: '🧯', w: 1, h: 1, cost: 30,  time: 6,   lvl: 1, charm: 1, solid: true, desc: '+1 charm. A classic.' },
-  { id: 'bush',       cat: 'decor', name: 'Berry Bush',      icon: '🌿', w: 1, h: 1, cost: 35,  time: 8,   lvl: 1, charm: 2, solid: true, desc: '+2 charm.' },
-  { id: 'bench',      cat: 'decor', name: 'Garden Bench',    icon: '🪑', w: 2, h: 1, cost: 60,  time: 12,  lvl: 1, charm: 2, solid: true, desc: '+2 charm.' },
-  { id: 'lamp',       cat: 'decor', name: 'Lamp Post',       icon: '💡', w: 1, h: 1, cost: 50,  time: 10,  lvl: 2, charm: 2, solid: true, desc: '+2 charm. Glows in the evening.' },
-  { id: 'tree',       cat: 'decor', name: 'Apple Tree',      icon: '🌳', w: 1, h: 1, cost: 70,  time: 15,  lvl: 2, charm: 3, solid: true, desc: '+3 charm.' },
-  { id: 'birdbath',   cat: 'decor', name: 'Bird Bath',       icon: '🐦', w: 1, h: 1, cost: 90,  time: 15,  lvl: 2, charm: 3, solid: true, desc: '+3 charm.' },
-  { id: 'topiary',    cat: 'decor', name: 'Dog Topiary',     icon: '🐩', w: 1, h: 1, cost: 140, time: 25,  lvl: 3, charm: 4, solid: true, desc: '+4 charm. A hedge shaped like a very good dog.' },
-  { id: 'picnic',     cat: 'decor', name: 'Picnic Table',    icon: '🧺', w: 2, h: 2, cost: 160, time: 30,  lvl: 3, charm: 4, solid: true, desc: '+4 charm.' },
-  { id: 'statue',     cat: 'decor', name: 'Golden Bone',     icon: '🦴', w: 1, h: 1, cost: 220, time: 40,  lvl: 3, charm: 6, solid: true, desc: '+6 charm.' },
-  { id: 'pond',       cat: 'decor', name: 'Lily Pond',       icon: '🪷', w: 3, h: 2, cost: 420, time: 80,  lvl: 4, charm: 9, solid: true, desc: '+9 charm.' },
-  { id: 'fountain',   cat: 'decor', name: 'Fountain',        icon: '⛲', w: 2, h: 2, cost: 380, time: 90,  lvl: 4, charm: 10, solid: true, desc: '+10 charm.' },
-  { id: 'gazebo',     cat: 'decor', name: 'Gazebo',          icon: '🏛️', w: 3, h: 3, cost: 900, time: 150, lvl: 6, charm: 18, solid: true, desc: '+18 charm. The pride of the neighbourhood.' },
+  { id: 'foodbin',    cat: 'care',  name: 'Food Bin',        icon: '🍖', w: 1, h: 1, cost: 80,  time: 2,   lvl: 1, solid: true, desc: 'Walk up to stack bowls of kibble.' },
+  { id: 'toybox',     cat: 'care',  name: 'Toy Box',         icon: '🎾', w: 1, h: 1, cost: 80,  time: 2,   lvl: 1, solid: true, desc: 'Walk up to stack balls for fetch.' },
+  { id: 'trash',      cat: 'care',  name: 'Poop Bin',        icon: '🗑️', w: 1, h: 1, cost: 50,  time: 2,   lvl: 1, solid: true, desc: 'Walk past to toss scooped poop away.' },
+  { id: 'tub',        cat: 'care',  name: 'Bath Tub',        icon: '🛁', w: 2, h: 1, cost: 250, time: 3,   lvl: 1, solid: true, desc: 'Walk a muddy leashed dog here for a bath.' },
+  { id: 'treatjar',   cat: 'care',  name: 'Treat Jar',       icon: '🍪', w: 1, h: 1, cost: 150, time: 2,   lvl: 1, solid: true, desc: 'Walk up to stack yummy dog treats.' },
+  { id: 'waterbowl',  cat: 'care',  name: 'Water Station',   icon: '💧', w: 1, h: 1, cost: 120, time: 2,   lvl: 1, solid: true, desc: 'Dogs wander over for a drink and +happiness.' },
+  { id: 'autofeeder', cat: 'care',  name: 'Auto-Feeder',     icon: '🤖', w: 1, h: 1, cost: 600, time: 5,   lvl: 4, solid: true, desc: 'Hungry dogs walk over and feed themselves.' },
+  { id: 'playzone',   cat: 'fun',   name: 'Play Zone',       icon: '🛝', w: 3, h: 3, cost: 220, time: 3,   lvl: 1, cap: 2, floor: true, desc: 'Dogs inside have fun on their own. +2 capacity.' },
+  { id: 'sandpit',    cat: 'fun',   name: 'Sand Pit',        icon: '🏖️', w: 2, h: 2, cost: 180, time: 3,   lvl: 2, cap: 1, floor: true, desc: 'Great fun to dig in — but dogs get dirty. +1 capacity.' },
+  { id: 'pool',       cat: 'fun',   name: 'Splash Pool',     icon: '🏊', w: 3, h: 2, cost: 450, time: 4,   lvl: 3, cap: 2, floor: true, desc: 'Fun and a little cleaning. Water Babies go wild. +2 capacity.' },
+  { id: 'napmat',     cat: 'fun',   name: 'Nap Mat',         icon: '🛏️', w: 2, h: 1, cost: 120, time: 2,   lvl: 2, cap: 1, floor: true, desc: 'Dogs resting here lose needs slower. +1 capacity.' },
+  { id: 'agility',    cat: 'fun',   name: 'Agility Course',  icon: '🚧', w: 4, h: 2, cost: 650, time: 5,   lvl: 4, cap: 3, floor: true, desc: 'Lots of fun, zoomies dogs love it. +3 capacity.' },
+  { id: 'path',       cat: 'decor', name: 'Stone Path',      icon: '🪨', w: 1, h: 1, cost: 8,   time: 1,   lvl: 1, charm: 0.25, floor: true, desc: 'A tidy stepping-stone path.' },
+  { id: 'flowers',    cat: 'decor', name: 'Flower Bed',      icon: '🌷', w: 1, h: 1, cost: 20,  time: 1,   lvl: 1, charm: 1, floor: true, desc: '+1 charm.' },
+  { id: 'hydrant',    cat: 'decor', name: 'Fire Hydrant',    icon: '🧯', w: 1, h: 1, cost: 30,  time: 2,   lvl: 1, charm: 1, solid: true, desc: '+1 charm. A classic.' },
+  { id: 'bush',       cat: 'decor', name: 'Berry Bush',      icon: '🌿', w: 1, h: 1, cost: 35,  time: 2,   lvl: 1, charm: 2, solid: true, desc: '+2 charm.' },
+  { id: 'bench',      cat: 'decor', name: 'Garden Bench',    icon: '🪑', w: 2, h: 1, cost: 60,  time: 2,   lvl: 1, charm: 2, solid: true, desc: '+2 charm.' },
+  { id: 'lamp',       cat: 'decor', name: 'Lamp Post',       icon: '💡', w: 1, h: 1, cost: 50,  time: 2,   lvl: 2, charm: 2, solid: true, desc: '+2 charm. Glows in the evening.' },
+  { id: 'tree',       cat: 'decor', name: 'Apple Tree',      icon: '🌳', w: 1, h: 1, cost: 70,  time: 2,   lvl: 2, charm: 3, solid: true, desc: '+3 charm.' },
+  { id: 'birdbath',   cat: 'decor', name: 'Bird Bath',       icon: '🐦', w: 1, h: 1, cost: 90,  time: 2,   lvl: 2, charm: 3, solid: true, desc: '+3 charm.' },
+  { id: 'topiary',    cat: 'decor', name: 'Dog Topiary',     icon: '🐩', w: 1, h: 1, cost: 140, time: 3,   lvl: 3, charm: 4, solid: true, desc: '+4 charm. A hedge shaped like a very good dog.' },
+  { id: 'picnic',     cat: 'decor', name: 'Picnic Table',    icon: '🧺', w: 2, h: 2, cost: 160, time: 3,   lvl: 3, charm: 4, solid: true, desc: '+4 charm.' },
+  { id: 'statue',     cat: 'decor', name: 'Golden Bone',     icon: '🦴', w: 1, h: 1, cost: 220, time: 3,   lvl: 3, charm: 6, solid: true, desc: '+6 charm.' },
+  { id: 'pond',       cat: 'decor', name: 'Lily Pond',       icon: '🪷', w: 3, h: 2, cost: 420, time: 4,   lvl: 4, charm: 9, solid: true, desc: '+9 charm.' },
+  { id: 'fountain',   cat: 'decor', name: 'Fountain',        icon: '⛲', w: 2, h: 2, cost: 380, time: 4,   lvl: 4, charm: 10, solid: true, desc: '+10 charm.' },
+  { id: 'gazebo',     cat: 'decor', name: 'Gazebo',          icon: '🏛️', w: 3, h: 3, cost: 900, time: 5,   lvl: 6, charm: 18, solid: true, desc: '+18 charm. The pride of the neighbourhood.' },
+];
+
+// In-world My Mini Mart floor unlock pads: walk onto a pad to pour cash in and build/unlock right on the spot!
+var UNLOCK_PADS = [
+  { id: 'pad_water',   kind: 'obj',   type: 'waterbowl',  x: 29, y: 18 },
+  { id: 'pad_treat',   kind: 'obj',   type: 'treatjar',   x: 26, y: 18 },
+  { id: 'pad_kennel',  kind: 'obj',   type: 'kennel',     x: 19, y: 27 },
+  { id: 'pad_play',    kind: 'obj',   type: 'playzone',   x: 23, y: 24 },
+  { id: 'pad_sand',    kind: 'obj',   type: 'sandpit',    x: 28, y: 25 },
+  { id: 'pad_nap',     kind: 'obj',   type: 'napmat',     x: 23, y: 29 },
+  { id: 'pad_feeder',  kind: 'obj',   type: 'autofeeder', x: 21, y: 18 },
+  { id: 'pad_recep',   kind: 'staff', staffId: 'receptionist', x: 6,  y: 23, w: 2, h: 2 },
+  { id: 'pad_helper',  kind: 'staff', staffId: 'helper',       x: 20, y: 21, w: 2, h: 2 },
 ];
 var CAT_BY_ID = {};
 CATALOG.forEach(function (c) { CAT_BY_ID[c.id] = c; });
@@ -133,8 +146,8 @@ var UPGRADES = [
 ];
 // ---------- staff you can hire (paid per day, at closing time) ----------
 var STAFF = [
-  { id: 'receptionist', name: 'Receptionist', icon: '🧑‍💼', wage: 90,  lvl: 3, desc: 'Stands behind the counter and handles check-ins and pickups when you are not there.' },
-  { id: 'helper',       name: 'Yard Helper',  icon: '🧑‍🌾', wage: 130, lvl: 4, desc: 'Walks round the yard cuddling, feeding and playing with dogs that ask, and scooping poop. Baths are still your job.' },
+  { id: 'receptionist', name: 'Receptionist', icon: '🧑‍💼', wage: 90,  lvl: 2, desc: 'Stands behind the counter and handles check-ins and pickups automatically.' },
+  { id: 'helper',       name: 'Yard Helper',  icon: '🧑‍🌾', wage: 130, lvl: 2, desc: 'Walks round the yard cuddling, feeding and playing with dogs, and scooping poop.' },
 ];
 var STAFF_BY_ID = {};
 STAFF.forEach(function (s) { STAFF_BY_ID[s.id] = s; });
@@ -175,18 +188,14 @@ var DIFFICULTY = {
   hectic:  { decay: 1.35, patience: 0.75, label: 'Hectic' },
 };
 
-var ACTION_LABELS = { up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right',
-  interact: 'Do it now (skip the wait)', grab: 'Let go / drop', build: 'Build mode', dex: 'Dog glossary', pause: 'Pause' };
-
 var TUTORIAL = [
-  { id: 'checkin', text: 'Stand in the box behind the counter — the owner brings their dog to you' },
-  { id: 'release', text: 'Walk the dog through the side door into the yard' },
-  { id: 'pet',     text: 'A dog wants cuddles: stand next to it for a moment' },
-  { id: 'feed',    text: 'A dog is hungry: stand on the Food Bin mat, then next to the dog' },
-  { id: 'scoop',   text: 'Stand on a poop to scoop it, then on the Poop Bin mat' },
-  { id: 'wash',    text: 'A dog is muddy: stand by it to leash it, then on the Bath Tub mat' },
-  { id: 'return',  text: 'An owner is back: fetch their dog and stand in the box behind the counter' },
-  { id: 'build',   text: 'Open build mode and build something' },
+  { id: 'checkin', text: 'Drag to walk onto the SERVE pad behind the counter to welcome your first pup' },
+  { id: 'pet',     text: 'Walk near a dog asking for ❤️ cuddles' },
+  { id: 'feed',    text: 'Walk to the Food Bin to stack bowls, then walk past a hungry dog' },
+  { id: 'scoop',   text: 'Walk over poop to scoop it up, then pass the Poop Bin' },
+  { id: 'wash',    text: 'Walk to a muddy dog to leash it, then step onto the Bath Tub pad' },
+  { id: 'return',  text: 'When an owner returns (🏠), walk to their dog and bring it to the SERVE pad' },
+  { id: 'build',   text: 'Step onto a green $ Pad in the yard or tap Shop to build' },
 ];
 
 function lvlNeed(l) { return Math.round(80 * Math.pow(l, 1.5)); }

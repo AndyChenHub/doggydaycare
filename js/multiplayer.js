@@ -184,6 +184,11 @@ var MP = (function () {
   var serverAvailable = (location.protocol === 'http:' || location.protocol === 'https:');
 
   function fetchServerInfo(onSuccess) {
+    if (!serverAvailable) {
+      transport = 'local';
+      updateCoopBadge();
+      return;
+    }
     try {
       fetch(apiBase() + '/api/info')
         .then(function (r) { return r.json(); })
@@ -1273,10 +1278,10 @@ var MP = (function () {
     if (hudPill) {
       if (onlinePeers.length > 0) {
         hudPill.hidden = false;
-        hudPill.innerHTML = '🟢 <b>' + esc(onlinePeers.map(function (p) { return p.name; }).join(', ')) + '</b> online · <small>Room ' + esc(roomCode) + '</small>';
+        hudPill.innerHTML = '🟢 <b>' + esc(onlinePeers.map(function (p) { return p.name; }).join(', ')) + '</b>';
       } else {
         hudPill.hidden = false;
-        hudPill.innerHTML = '📱 <b>Room ' + esc(roomCode) + '</b> · <small>Tap to connect phone</small>';
+        hudPill.innerHTML = '📱 <b>' + esc(roomCode) + '</b>';
       }
     }
   }
@@ -1309,7 +1314,7 @@ var MP = (function () {
               (inGame ? '<button class="wood small-btn" data-focus-peer="' + esc(p.id) + '">👁️ Find</button>' : '') +
             '</div>';
           }).join('')
-        : '<div class="mp-p-row waiting"><span class="mp-wait-ico">📱</span><div><b>Waiting for other phone…</b><small>Scan the QR code or open the link below on another phone or browser tab</small></div></div>') +
+        : '<div class="mp-p-row waiting"><span class="mp-wait-ico">📱</span><div><b>Waiting for partner iPhone…</b><small>Scan the QR code or enter the same Room Code on another iPhone</small></div></div>') +
       '</div>';
 
     var charPick = looks.length
@@ -1319,7 +1324,7 @@ var MP = (function () {
       : '';
 
     card.innerHTML =
-      '<div class="dex-head"><h2>📱 Multiplayer Co-op</h2><span class="prog">Room: <b>' + esc(roomCode) + '</b></span><button data-act="back" class="primary">Close</button></div>' +
+      '<div class="dex-head"><h2>📱 iPhone Co-op</h2><span class="prog">Room: <b>' + esc(roomCode) + '</b></span><button data-act="back" class="primary">Close</button></div>' +
       '<div class="mp-grid">' +
         '<div class="mp-col">' +
           '<h3>1. Your Keeper Profile</h3>' +
@@ -1327,7 +1332,7 @@ var MP = (function () {
           charPick +
           '<div class="mp-field" style="margin-top:8px"><label>Shared Room Code</label>' +
             '<div style="display:flex;gap:6px"><input type="text" id="mpRoomInput" maxlength="8" value="' + esc(roomCode) + '" style="text-transform:uppercase;width:110px;text-align:center;font-weight:800">' +
-            '<button class="wood small-btn" id="mpJoinRoomBtn">Join / Switch Room</button></div>' +
+            '<button class="wood small-btn" id="mpJoinRoomBtn">Join Room</button></div>' +
           '</div>' +
           '<h3 style="margin-top:12px">2. Players in Daycare</h3>' +
           peersHtml +
@@ -1336,13 +1341,12 @@ var MP = (function () {
           '</div>' +
         '</div>' +
         '<div class="mp-col mp-qr-col">' +
-          '<h3>Connect Another Phone</h3>' +
-          '<p class="small" style="margin:2px 0 8px">Point your other phone\'s camera at this QR code (on the same Wi-Fi) or open the link:</p>' +
-          '<div class="mp-qr-box"><canvas id="mpQrCanvas" width="176" height="176"></canvas></div>' +
+          '<h3>Connect Another iPhone</h3>' +
+          '<p class="small" style="margin:2px 0 8px">Scan this QR code with another iPhone camera or enter Room Code <b>' + esc(roomCode) + '</b>:</p>' +
+          '<div class="mp-qr-box"><canvas id="mpQrCanvas" width="160" height="160"></canvas></div>' +
           '<div class="mp-url-box"><code id="mpUrlText">' + esc(joinUrl) + '</code></div>' +
           '<div class="row" style="margin-top:8px">' +
             '<button class="wood small-btn" id="mpCopyUrlBtn">📋 Copy Link</button>' +
-            '<button class="wood small-btn" id="mpOpenTabBtn">🗔 Open 2nd Player Tab</button>' +
           '</div>' +
         '</div>' +
       '</div>';

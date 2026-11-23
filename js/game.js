@@ -163,13 +163,9 @@ function peekSavedLook() {
 
 function defaultSettings() {
   var c = window.GAME_CONFIG || {};
-  var defKeys = c.keys || {
-    up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
-    interact: ['KeyE', 'Space'], grab: ['KeyQ', ''], build: ['KeyB', ''], dex: ['KeyG', ''], pause: ['Escape', 'KeyP'],
-  };
-  return { keys: JSON.parse(JSON.stringify(defKeys)), dayLength: c.dayLengthSeconds || 300, difficulty: c.difficulty || 'normal',
+  return { dayLength: c.dayLengthSeconds || 300, difficulty: c.difficulty || 'normal',
            musicVol: c.musicVolume != null ? c.musicVolume : 0.5, ambVol: c.ambienceVolume != null ? c.ambienceVolume : 0.5,
-           sfxVol: c.sfxVolume != null ? c.sfxVolume : 0.8, zoom: c.cameraZoom || 1, standSec: c.standSeconds || 1 };
+           sfxVol: c.sfxVolume != null ? c.sfxVolume : 0.8, zoom: c.cameraZoom || 1, standSec: c.standSeconds || 0.18 };
 }
 function sanitizeSettings(s) {
   var def = defaultSettings();
@@ -180,15 +176,8 @@ function sanitizeSettings(s) {
   s.ambVol = (typeof s.ambVol === 'number' && isFinite(s.ambVol)) ? clamp(s.ambVol, 0, 1) : def.ambVol;
   s.sfxVol = (typeof s.sfxVol === 'number' && isFinite(s.sfxVol)) ? clamp(s.sfxVol, 0, 1) : def.sfxVol;
   s.zoom = (typeof s.zoom === 'number' && isFinite(s.zoom)) ? clamp(s.zoom, 0.7, 1.4) : def.zoom;
-  s.standSec = (typeof s.standSec === 'number' && isFinite(s.standSec)) ? clamp(s.standSec, 0.3, 2) : def.standSec;
-  if (!s.keys || typeof s.keys !== 'object') s.keys = def.keys;
-  for (var a in def.keys) {
-    if (!Array.isArray(s.keys[a])) s.keys[a] = def.keys[a].slice();
-    else {
-      s.keys[a] = [typeof s.keys[a][0] === 'string' ? s.keys[a][0] : '', typeof s.keys[a][1] === 'string' ? s.keys[a][1] : ''];
-      if (!s.keys[a][0] && !s.keys[a][1]) s.keys[a] = def.keys[a].slice();
-    }
-  }
+  s.standSec = (typeof s.standSec === 'number' && isFinite(s.standSec)) ? clamp(s.standSec, 0.08, 1.5) : def.standSec;
+  delete s.keys;
   return s;
 }
 var settings = defaultSettings();
@@ -417,7 +406,7 @@ function ownerById(id) { for (var i = 0; i < S.owners.length; i++) if (S.owners[
 function objById(id) { for (var i = 0; i < S.objects.length; i++) if (S.objects[i].id === id) return S.objects[i]; return null; }
 var QUEUE = SLOTS.slice(0, 5);           // where owners wait along the counter
 var HANDOVER_SPOT = [8.9, 27.45];         // where an owner stands (customer side) to hand a dog over / take it back
-var ACTION_BOX = { x: 8 * TILE, y: 23.55 * TILE, w: 2 * TILE, h: 1.3 * TILE }; // behind the counter, opposite the hand-over spot
+var ACTION_BOX = { x: 7.4 * TILE, y: 23.3 * TILE, w: 3.4 * TILE, h: 1.9 * TILE }; // behind the counter, opposite the hand-over spot
 var RECEPTION_SPOT = [6.6, 24.3];        // where a hired receptionist stands
 var SHOP_WAY = { gapN: [13.1, 24.6], gapS: [13.1, 27.4], door: [16.5, 23.6], yard: [18.7, 23.6], desk: [9.9, 24.4] }; // waypoints for dogs walking through the shop
 function freeSlot() {
@@ -844,11 +833,17 @@ function dropPoop(d) {
   d.stepped.push(S.poops[S.poops.length - 1].id);
 }
 
-// ================= stand-in-a-box interactions =================
-// Every interaction is a zone on the ground: a mat in front of a station, the check-in mat in front of the counter,
-// a ring around a dog that needs you, a poop. Stand in it for a moment and the action happens (E does it at once).
+// ================= My Mini Mart proximity & carry-stack interactions =================
 var DWELL = { key: null, t: 0, lock: null };
-function carryLabel(c) { return c.type === 'food' ? 'food bowl' : c.type === 'ball' ? 'ball' : c.type === 'treat' ? 'treat' : c.type === 'poop' ? (poopCap() > 1 ? 'scooper (' + (c.n || 1) + '/' + poopCap() + ')' : 'poop bag') : 'dog'; }
+var PAD_FILL = { id: null, prog: 0, coinT: 0 };
+function stackCap() { return ((window.GAME_CONFIG && window.GAME_CONFIG.stackCapacity) || 3) + (hasUp('scooper') ? 2 : 0); }
+function poopCap() { return hasUp('scooper') ? 5 : 3; }
+function carryLabel(c) {
+  if (!c) return '';
+  var n = c.n || 1;
+  var base = c.type === 'food' ? 'food bowl' : c.type === 'ball' ? 'ball' : c.type === 'treat' ? 'treat' : c.type === 'poop' ? 'poop bag' : 'dog';
+  return n > 1 ? (n + '× ' + base + 's') : base;
+}
 function pEmote(name, dur) { var p = S.player; p.emote = name; p.emoteT = 0; p.emoteDur = dur || 0.5; }
 var DIRV = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 var padCache = { stamp: -1, map: {} };
@@ -861,18 +856,109 @@ function stationPad(o) {
   for (var ri = 0; ri < rows.length && !pad; ri++) {
     var ty = rows[ri], xs = [];
     for (var tx = o.x; tx < o.x + o.w; tx++) if (baseKind(tx, ty) === 'yard' && !solidForPlayer(tx, ty)) xs.push(tx);
-    if (xs.length) pad = { x: xs[0] * TILE + 3, y: ty * TILE + 3, w: (xs[xs.length - 1] - xs[0] + 1) * TILE - 6, h: TILE - 6, below: ri === 0 };
+    if (xs.length) pad = { x: xs[0] * TILE - 4, y: ty * TILE - 4, w: (xs[xs.length - 1] - xs[0] + 1) * TILE + 8, h: TILE + 8, below: ri === 0 };
   }
   padCache.map[key] = pad;
   return pad;
 }
 function inRect(x, y, r) { return r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
 var STATION_ITEM = { foodbin: 'food', toybox: 'ball', treatjar: 'treat' };
-function dwellTime(kind) { var b = settings.standSec || window.GAME_CONFIG.standSeconds || 1; return b * (kind === 'station' ? 0.7 : kind === 'poop' ? 0.6 : kind === 'mat' ? 0.8 : 1); }
+function dwellTime(kind) {
+  if (kind === 'poop') return 0.03;
+  if (kind === 'dog') return 0.06;
+  if (kind === 'trash') return 0.06;
+  if (kind === 'mat') return 0.1;
+  if (kind === 'station') return 0.14;
+  return 0.12;
+}
+function canPlacePadObj(type, x, y) {
+  var c = CAT_BY_ID[type];
+  if (!c) return false;
+  for (var ty = y; ty < y + c.h; ty++) for (var tx = x; tx < x + c.w; tx++) {
+    if (baseKind(tx, ty) !== 'yard') return false;
+    if (objAt(tx, ty)) return false;
+    for (var i = 0; i < KEEP_CLEAR.length; i++) if (KEEP_CLEAR[i][0] === tx && KEEP_CLEAR[i][1] === ty) return false;
+  }
+  return keepsConnected(x, y, c.w, c.h);
+}
+function activeUnlockPads() {
+  if (!S || typeof UNLOCK_PADS === 'undefined') return [];
+  var out = [];
+  for (var i = 0; i < UNLOCK_PADS.length; i++) {
+    var up = UNLOCK_PADS[i];
+    if (up.kind === 'obj') {
+      var def = CAT_BY_ID[up.type];
+      if (!def || S.level < def.lvl) continue;
+      if (S.objects.some(function (o) { return o.type === up.type; })) continue;
+      if (!canPlacePadObj(up.type, up.x, up.y)) continue;
+      out.push({
+        id: up.id, kind: 'obj', type: up.type, x: up.x, y: up.y, w: def.w, h: def.h,
+        name: def.name, icon: def.icon, cost: def.cost,
+        rect: { x: up.x * TILE - 4, y: up.y * TILE - 4, w: def.w * TILE + 8, h: def.h * TILE + 8 },
+      });
+    } else if (up.kind === 'staff') {
+      var sd = STAFF_BY_ID[up.staffId];
+      if (!sd || S.level < sd.lvl || staffHired(up.staffId)) continue;
+      var sw = up.w || 2, sh = up.h || 2;
+      out.push({
+        id: up.id, kind: 'staff', staffId: up.staffId, x: up.x, y: up.y, w: sw, h: sh,
+        name: sd.name, icon: sd.icon, cost: sd.wage,
+        rect: { x: up.x * TILE - 4, y: up.y * TILE - 4, w: sw * TILE + 8, h: sh * TILE + 8 },
+      });
+    }
+  }
+  return out;
+}
+function updateUnlockPads(dt) {
+  if (!S || UI.mode !== 'play') { PAD_FILL.id = null; PAD_FILL.prog = 0; return; }
+  var pads = activeUnlockPads(), p = S.player, hit = null;
+  for (var i = 0; i < pads.length; i++) {
+    if (inRect(p.x, p.y, pads[i].rect)) { hit = pads[i]; break; }
+  }
+  if (!hit) { PAD_FILL.id = null; PAD_FILL.prog = 0; return; }
+  if (S.cash < hit.cost) {
+    PAD_FILL.id = hit.id; PAD_FILL.prog = 0;
+    return;
+  }
+  if (PAD_FILL.id !== hit.id) { PAD_FILL.id = hit.id; PAD_FILL.prog = 0; PAD_FILL.coinT = 0; }
+  PAD_FILL.prog += dt / 0.55;
+  PAD_FILL.coinT -= dt;
+  if (PAD_FILL.coinT <= 0) {
+    PAD_FILL.coinT = 0.11;
+    var cx = (hit.x + hit.w / 2) * TILE, cy = (hit.y + hit.h / 2) * TILE;
+    FX.parts.push({ x: p.x, y: p.y - 34, vx: (cx - p.x) * 3.2, vy: (cy - (p.y - 34)) * 3.2 - 40, life: 0.25, max: 0.25, kind: 'coin', size: 10, grav: 120, rot: Math.random() * 6 });
+    sfx('tick');
+  }
+  if (PAD_FILL.prog >= 1) {
+    PAD_FILL.id = null; PAD_FILL.prog = 0;
+    if (hit.kind === 'obj') {
+      var c = CAT_BY_ID[hit.type];
+      S.cash -= c.cost; S.stats.spent += c.cost;
+      var o = addObject(hit.type, hit.x, hit.y, true);
+      var ox = (o.x + o.w / 2) * TILE, oy = (o.y + o.h / 2) * TILE;
+      // Push player/dogs gently outside solid footprint if needed
+      if (!c.floor && !canStand(p.x, p.y)) { p.y = (o.y + o.h + 0.45) * TILE; }
+      S.dogs.forEach(function (d) {
+        if (d.state === 'leashed' || d.state === 'bath' || d.state === 'kennel' || d.state === 'leaving' || d.state === 'arriving') return;
+        var tx = tileOf(d.x), ty = tileOf(d.y);
+        if (tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h) { var t2 = nearestWalkable(d.x, d.y); d.x = (t2[0] + .5) * TILE; d.y = (t2[1] + .5) * TILE; }
+      });
+      confetti(ox, oy, 28); float(ox, o.y * TILE - 10, c.name + ' unlocked!', '#b9f6ca', 1.3);
+      sfx('built'); gainXP(Math.round(c.cost / 18) + 3); tut('build');
+      if (typeof MP !== 'undefined') MP.recordAction('build', { item: hit.type, name: c.name, icon: c.icon, cost: c.cost, x: hit.x, y: hit.y });
+      saveGame();
+    } else if (hit.kind === 'staff') {
+      toggleStaff(hit.staffId);
+      var sx = (hit.x + hit.w / 2) * TILE, sy = (hit.y + hit.h / 2) * TILE;
+      confetti(sx, sy, 28); tut('build');
+    }
+  }
+}
+
 // the zone the player is standing in, with what would happen there
 function currentZone() {
   var p = S.player, car = p.carry, best = null;
-  function offer(z) { // a box that can act now wins over one that cannot, then the higher priority
+  function offer(z) {
     if (!best || (best.disabled && !z.disabled) || (!!best.disabled === !!z.disabled && (z.prio || 0) > (best.prio || 0))) best = z;
   }
   // check-in mat
@@ -880,22 +966,30 @@ function currentZone() {
     var busyO = S.owners.filter(function (o) { return o.state === 'toHandover' || o.state === 'handover'; })[0];
     var z = { key: 'mat', kind: 'mat', rect: ACTION_BOX, prio: 3 };
     if (busyO) {
-      z.disabled = true; z.quiet = true; z.label = 'Here they come…';
-      if (busyO.kind === 'dropoff' && car) { z.label = 'Hands full — put the ' + carryLabel(car) + ' away to take ' + dogById(busyO.dogId).name; z.quiet = false; }
-      if (busyO.kind === 'pickup' && !(car && car.id === busyO.dogId)) { z.label = 'Bring ' + dogById(busyO.dogId).name + ' here on the leash'; z.quiet = false; }
-    }
-    else if (car && car.type === 'dog') {
+      z.disabled = true; z.quiet = true; z.label = 'Serving customer…';
+    } else if (car && car.type === 'dog') {
       var cd = dogById(car.id), ow = S.owners.filter(function (o) { return o.dogId === car.id && o.state === 'waitPickup'; })[0];
       if (!cd) { S.player.carry = null; z.disabled = true; z.quiet = true; z.label = ''; }
-      else if (ow) { z.label = 'Hand ' + cd.name + ' back to ' + ow.name; z.run = function () { summonOwner(ow); }; z.lockKey = 'mat:' + ow.id; }
-      else { z.label = cd.autoRelease ? 'Take ' + cd.name + ' out to the yard' : 'Nobody has come for ' + cd.name + ' yet'; z.disabled = true; }
-    } else if (car) { z.label = 'Hands full — put the ' + carryLabel(car) + ' away first'; z.disabled = true; }
-    else {
-      var waiting = S.owners.filter(function (o) { return o.state === 'waitCheckin'; }).sort(function (a, b) { return a.patience / a.patienceMax - b.patience / b.patienceMax; });
-      if (waiting.length) { var wo = waiting[0], wd = dogById(wo.dogId); z.label = 'Welcome ' + wo.name + ' and ' + wd.name + (wd.overnight ? ' (overnight)' : ''); z.run = function () { summonOwner(wo); }; z.lockKey = 'mat:' + wo.id; }
+      else if (ow) { z.label = 'Return ' + cd.name + ' to ' + ow.name; z.run = function () { summonOwner(ow); }; z.lockKey = 'mat:' + ow.id; }
       else {
+        var waitingIn = S.owners.filter(function (o) { return o.state === 'waitCheckin'; }).sort(function (a, b) { return a.patience / a.patienceMax - b.patience / b.patienceMax; });
+        if (waitingIn.length) {
+          var woIn = waitingIn[0], wdIn = dogById(woIn.dogId);
+          z.label = 'Welcome ' + woIn.name + ' & ' + wdIn.name; z.run = function () { summonOwner(woIn); }; z.lockKey = 'mat:' + woIn.id;
+        } else {
+          z.label = 'Walk ' + cd.name + ' into the yard'; z.disabled = true;
+        }
+      }
+    } else {
+      var waiting = S.owners.filter(function (o) { return o.state === 'waitCheckin'; }).sort(function (a, b) { return a.patience / a.patienceMax - b.patience / b.patienceMax; });
+      if (waiting.length) {
+        var wo = waiting[0], wd = dogById(wo.dogId);
+        z.label = 'Welcome ' + wo.name + ' & ' + wd.name + (wd.overnight ? ' (overnight)' : '');
+        z.run = function () { summonOwner(wo); }; z.lockKey = 'mat:' + wo.id;
+      } else {
         var fetching = S.dogs.filter(function (d) { return d.state === 'toCounter' || d.state === 'atDesk'; })[0];
-        z.label = fetching ? 'The receptionist is bringing ' + fetching.name + ' over' : S.owners.some(function (o) { return o.state === 'waitPickup'; }) ? 'Fetch the dog an owner is waiting for, then come back here' : 'Serve box — customers come to you here'; z.disabled = true; z.quiet = true;
+        z.label = fetching ? 'Receptionist is bringing ' + fetching.name : S.owners.some(function (o) { return o.state === 'waitPickup'; }) ? 'Walk to the dog with 🏠 to bring it back here' : 'SERVE pad — customers check in here';
+        z.disabled = true; z.quiet = true;
       }
     }
     offer(z);
@@ -906,25 +1000,38 @@ function currentZone() {
     var t = o.type, it = STATION_ITEM[t];
     if (!it && t !== 'trash' && t !== 'tub' && t !== 'kennel') return;
     var pad = stationPad(o); if (!inRect(p.x, p.y, pad)) return;
-    var z = { key: 'obj' + o.id, kind: 'station', rect: pad, obj: o, prio: 2 };
+    var z = { key: 'obj' + o.id, kind: t === 'trash' ? 'trash' : 'station', rect: pad, obj: o, prio: 2 };
     if (it) {
-      if (!car) { z.label = 'Grab ' + (it === 'food' ? 'a food bowl' : it === 'ball' ? 'a ball' : 'a treat'); z.run = function () { grab(it, o); }; }
-      else if (car.type === it) { z.label = 'You have a ' + carryLabel(car); z.disabled = true; z.quiet = true; }
-      else { z.label = 'Hands full'; z.disabled = true; }
+      var maxS = stackCap();
+      var itemTitle = it === 'food' ? 'food bowl' : it === 'ball' ? 'ball' : 'treat';
+      if (!car || (car.type === it && (car.n || 1) < maxS)) {
+        var nextN = (car && car.type === it ? (car.n || 1) : 0) + 1;
+        z.label = 'Stack ' + itemTitle + ' (' + nextN + '/' + maxS + ')';
+        z.lockKey = 'obj' + o.id + ':' + nextN;
+        z.run = function () { grab(it, o); };
+      } else if (car && car.type !== 'dog' && car.type !== 'poop' && car.type !== it) {
+        z.label = 'Switch to ' + itemTitle;
+        z.lockKey = 'obj' + o.id + ':swap:' + it;
+        z.run = function () { S.player.carry = null; grab(it, o); };
+      } else if (car && car.type === it) {
+        z.label = 'Stack full (' + maxS + '/' + maxS + ')'; z.disabled = true; z.quiet = true;
+      } else {
+        z.label = 'Hands full'; z.disabled = true;
+      }
     } else if (t === 'trash') {
-      if (car && car.type === 'poop') { z.label = 'Throw the poop away'; z.run = function () { o.useAt = now; doTrash(); }; }
-      else if (car && car.type !== 'dog') { z.label = 'Put the ' + carryLabel(car) + ' away'; z.run = function () { o.useAt = now; S.player.carry = null; sfx('trash'); }; }
+      if (car && car.type === 'poop') { z.label = 'Toss poop away'; z.run = function () { o.useAt = now; doTrash(); }; }
+      else if (car && car.type !== 'dog') { z.label = 'Clear ' + carryLabel(car); z.run = function () { o.useAt = now; S.player.carry = null; sfx('trash'); }; }
       else { z.label = 'Poop Bin'; z.disabled = true; z.quiet = true; }
     } else if (t === 'tub') {
       if (o.dogId) { var bd = dogById(o.dogId); z.label = (bd ? bd.name : 'A dog') + ' is getting scrubbed…'; z.disabled = true; z.quiet = true; }
       else if (car && car.type === 'dog') { z.label = 'Give ' + dogById(car.id).name + ' a bath'; z.run = function () { doWash(o); }; }
-      else { z.label = 'Bath Tub — bring a muddy dog on the leash'; z.disabled = true; z.quiet = true; }
+      else { z.label = 'Bath Tub — walk a muddy dog here'; z.disabled = true; z.quiet = true; }
     } else if (t === 'kennel') {
       if (car && car.type === 'dog') {
         var kd = dogById(car.id);
         if (o.dogId) { z.label = 'This kennel is taken'; z.disabled = true; }
         else if (o.reservedFor && o.reservedFor !== kd.id) { z.label = 'Reserved for ' + (dogById(o.reservedFor) || {}).name; z.disabled = true; }
-        else { z.label = 'Put ' + kd.name + ' down for a nap'; z.run = function () { doKennel(o, kd); }; }
+        else { z.label = 'Tuck ' + kd.name + ' in for a nap'; z.run = function () { doKennel(o, kd); }; }
       } else if (!car && o.dogId) { var nd = dogById(o.dogId); z.label = 'Take ' + nd.name + ' out of the kennel'; z.run = function () { doLeash(nd); }; }
       else { z.label = 'Kennel'; z.disabled = true; z.quiet = true; }
     }
@@ -935,14 +1042,19 @@ function currentZone() {
     if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'eat' || d.state === 'play')) return;
     var wanted = d.called && S.owners.some(function (o) { return o.dogId === d.id && o.state === 'waitPickup'; });
     if (!wanted && (!d.need || d.need.self)) return;
-    var dd = dist(p.x, p.y, d.x, d.y); if (dd > 42) return;
+    var dd = dist(p.x, p.y, d.x, d.y); if (dd > 54) return;
     var z = { key: 'dog' + d.id, kind: 'dog', dog: d, prio: 4 - dd / 100 };
-    if (wanted && !car) { var wo2 = S.owners.filter(function (o) { return o.dogId === d.id; })[0]; z.label = 'Leash ' + d.name + ' — ' + (wo2 ? wo2.name : 'the owner') + ' is here'; z.run = function () { doLeash(d); }; }
-    else if (wanted) { z.label = 'Hands full — ' + d.name + '\'s owner is waiting'; z.disabled = true; }
-    else {
+    var holdingDog = car && car.type === 'dog';
+    if (wanted && !holdingDog) {
+      var wo2 = S.owners.filter(function (o) { return o.dogId === d.id; })[0];
+      z.label = 'Leash ' + d.name + ' for ' + (wo2 ? wo2.name : 'pickup');
+      z.run = function () { doLeash(d); };
+    } else if (wanted) {
+      z.label = 'Return your current dog first'; z.disabled = true;
+    } else {
       var n = d.need.type, info = NEED_INFO[n];
-      if (n === 'pet' && !car) { z.label = 'Cuddle ' + d.name; z.run = function () { doPet(d); }; }
-      else if (n === 'bath' && !car) { z.label = 'Leash ' + d.name + ' for a bath'; z.run = function () { doLeash(d); }; }
+      if (n === 'pet' && !holdingDog) { z.label = 'Cuddle ' + d.name; z.run = function () { doPet(d); }; }
+      else if (n === 'bath' && !holdingDog) { z.label = 'Leash ' + d.name + ' for a bath'; z.run = function () { doLeash(d); }; }
       else if (car && car.type === 'food' && (n === 'food' || n === 'treat')) { z.label = 'Feed ' + d.name; z.run = function () { doFeed(d); }; }
       else if (car && car.type === 'treat' && (n === 'treat' || n === 'food')) { z.label = 'Give ' + d.name + ' a treat'; z.run = function () { doTreat(d); }; }
       else if (car && car.type === 'ball' && n === 'play') { z.label = 'Play fetch with ' + d.name; z.run = function () { doPlay(d); }; }
@@ -950,42 +1062,40 @@ function currentZone() {
     }
     offer(z);
   });
-  // poop
+  // poop — instant walk-over scoop!
   if (!car || car.type !== 'dog') S.poops.forEach(function (pp) {
-    if (dist(p.x, p.y, pp.x, pp.y) > 26) return;
+    if (dist(p.x, p.y, pp.x, pp.y) > 38) return;
     var z = { key: 'poop' + pp.id, kind: 'poop', poop: pp, prio: 5 }, bag = car && car.type === 'poop';
-    if (!car) { z.label = 'Scoop the poop'; z.run = function () { doScoop(pp); }; }
-    else if (bag && (car.n || 1) < poopCap()) { z.label = 'Scoop it too (' + ((car.n || 1) + 1) + ' / ' + poopCap() + ')'; z.run = function () { doScoop(pp); }; }
-    else if (bag) { z.label = poopCap() > 1 ? 'Scooper full — empty it into the Poop Bin' : 'Hands full — bin that poop bag first'; z.disabled = true; }
-    else { z.label = 'Hands full'; z.disabled = true; }
+    if (!car || (car.type !== 'poop' && car.type !== 'dog')) { z.label = 'Scoop poop'; z.run = function () { doScoop(pp); }; }
+    else if (bag && (car.n || 1) < poopCap()) { z.label = 'Scoop (' + ((car.n || 1) + 1) + '/' + poopCap() + ')'; z.run = function () { doScoop(pp); }; }
+    else if (bag) { z.label = 'Scooper full — pass by the Poop Bin'; z.disabled = true; }
     offer(z);
   });
   if (best) { best.time = dwellTime(best.kind); if (!best.lockKey) best.lockKey = best.key; }
   return best;
 }
 function updateDwell(dt) {
+  updateUnlockPads(dt);
   var z = UI.mode === 'play' ? currentZone() : null;
   UI.zone = z;
-  // after an action you must step out of that box before it can fire again (owners on the mat count one by one)
   if (!z || (z.lockKey !== DWELL.lock && !(z.disabled && z.key === 'mat'))) DWELL.lock = null;
   if (!z || z.disabled || z.lockKey === DWELL.lock) { DWELL.key = z ? z.lockKey : null; DWELL.t = 0; return; }
   if (DWELL.key !== z.lockKey) { DWELL.key = z.lockKey; DWELL.t = 0; }
   DWELL.t += dt;
   if (DWELL.t >= z.time) { DWELL.t = 0; DWELL.lock = z.lockKey; z.run(); sfx('pop'); }
 }
-function triggerZoneNow() { // the E key: do it without waiting
+function triggerZoneNow() {
   var z = currentZone();
   if (z && !z.disabled && z.lockKey !== DWELL.lock) { DWELL.t = 0; DWELL.lock = z.lockKey; z.run(); return true; }
   if (z && z.disabled && !z.quiet) { float(S.player.x, S.player.y - 92, z.label, '#ffcdd2'); sfx('error'); }
   return false;
 }
-// Q: let a dog go / drop what you hold
 function qAction() {
   var car = S.player.carry; if (!car) return null;
-  if (car.type === 'dog') { var d = dogById(car.id); return canReleaseAt(S.player.x, S.player.y) ? { label: 'Let ' + d.name + ' go', run: doRelease } : { label: 'Let dogs go out in the yard', disabled: true }; }
-  return { label: 'Drop the ' + carryLabel(car), run: function () {
+  if (car.type === 'dog') { var d = dogById(car.id); return canReleaseAt(S.player.x, S.player.y) ? { label: 'Let ' + (d ? d.name : 'dog') + ' go', run: doRelease } : { label: 'Walk into the yard to let go', disabled: true }; }
+  return { label: 'Drop ' + carryLabel(car), run: function () {
     var p2 = S.player;
-    if (car.type === 'poop') { if (baseKind(tileOf(p2.x), tileOf(p2.y)) === 'yard') { for (var pi = 0; pi < (car.n || 1); pi++) S.poops.push({ id: nid(), x: p2.x + p2.face * 16 + pi * 9, y: p2.y + 4 + (pi % 2) * 6, age: car.age || 0, seed: Math.random() }); } else { float(p2.x, p2.y - 80, 'Not in here!', '#ffcdd2'); sfx('error'); return; } }
+    if (car.type === 'poop') { if (baseKind(tileOf(p2.x), tileOf(p2.y)) === 'yard') { for (var pi = 0; pi < (car.n || 1); pi++) S.poops.push({ id: nid(), x: p2.x + p2.face * 16 + pi * 9, y: p2.y + 4 + (pi % 2) * 6, age: car.age || 0, seed: Math.random() }); } else { float(p2.x, p2.y - 80, 'Not indoors!', '#ffcdd2'); sfx('error'); return; } }
     S.player.carry = null; sfx('pop'); } };
 }
 function canReleaseAt(px, py) {
@@ -993,7 +1103,23 @@ function canReleaseAt(px, py) {
   for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) if (dogWalkable(tx + dx, ty + dy)) return true;
   return false;
 }
-function grab(it, ob) { S.player.carry = { type: it }; if (ob) ob.useAt = now; sfx('pop'); pEmote('scoop', 0.35); }
+function grab(it, ob) {
+  var car = S.player.carry, maxS = stackCap();
+  if (car && car.type === it) {
+    car.n = Math.min(maxS, (car.n || 1) + 1);
+  } else {
+    S.player.carry = { type: it, n: 1 };
+  }
+  if (ob) ob.useAt = now;
+  sfx('pop'); pEmote('scoop', 0.28);
+  float(S.player.x, S.player.y - 74, S.player.carry.n + ' / ' + maxS, '#fff8e1', 0.95);
+}
+function consumeCarryItem() {
+  var car = S.player.carry;
+  if (!car) return;
+  if ((car.n || 1) > 1) car.n--;
+  else S.player.carry = null;
+}
 
 // ----- owners meet you on the check-in mat -----
 function summonOwner(o, byStaff) {
@@ -1006,8 +1132,8 @@ function doCheckIn(o) {
   if (!d) return;
   o.state = 'walkOut'; o.route = exitRoute(o); o.say = pick(['Be good, ' + d.name + '!', 'Thank you!', 'See you soon!', 'Have fun, buddy!']); o.sayT = 2.2; o.emote = 'wave'; o.emoteT = 0;
   d.checkedIn = true; d.anim = null; d.poopT = nextPoopDelay(d, false); d.ownerId = null;
-  if (o.byStaff) { d.state = 'toYard'; d.route = [SHOP_WAY.gapN, SHOP_WAY.door, SHOP_WAY.yard].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }); d.autoRelease = false; d.leashedBy = null; }
-  else { d.state = 'leashed'; d.autoRelease = true; d.leashedBy = typeof MP !== 'undefined' ? MP.playerId : null; S.player.carry = { type: 'dog', id: d.id }; }
+  // My Mini Mart flow: newly checked-in dogs trot happily through the side door into the yard on their own!
+  d.state = 'toYard'; d.route = [SHOP_WAY.gapN, SHOP_WAY.door, SHOP_WAY.yard].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }); d.autoRelease = false; d.leashedBy = null;
   if (d.overnight) { d.pickupDay = S.day + 1; d.pickupAt = rand(0.12, 0.45) * dayLen(); }
   else { d.pickupDay = S.day; d.pickupAt = Math.min(S.dayTime + rand(0.28, 0.5) * dayLen(), dayLen() - 8); }
   gainXP(8); sfx('bark', d); float(d.x, d.y - 50, 'Welcome, ' + d.name + '!', '#fff');
@@ -1041,56 +1167,55 @@ function doRelease() {
 }
 function doPet(d) {
   if (!d || d.petCd > 0) return;
-  d.petCd = 0.5;
+  d.petCd = 0.35;
   burst(d.x, d.y - 34, 'heart', 5); sfx('pet', d); S.stats.pets++;
   if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.2; d.path = null; }
   if (d.need && d.need.type === 'pet') fulfillNeed(d); else d.happy = Math.min(100, d.happy + 6);
   if (d.state !== 'kennel' && d.state !== 'leashed') setAnim(d, 'wiggle', 1.0);
-  pEmote('pet', 0.45); tut('pet');
+  pEmote('pet', 0.4); tut('pet');
   if (typeof MP !== 'undefined') MP.recordAction('pet', { dogName: d.name });
   saveGame();
 }
 function doFeed(d) {
   if (!d) return;
-  S.player.carry = null;
+  consumeCarryItem();
   if (hasTrait(d, 'picky')) float(d.x, d.y - 62, 'Hmph. Kibble again?', '#ffe0b2');
   if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) { fulfillNeed(d); if (hasTrait(d, 'picky') && d.need == null) d.happy -= 8; }
   if (hasUp('kibble')) d.happy = Math.min(100, d.happy + 6);
   d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true));
   burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); gainXP(1); tut('feed'); S.stats.feeds++;
-  float(d.x, d.y - 48, 'Nom nom!', '#fff'); pEmote('pet', 0.4);
+  float(d.x, d.y - 48, 'Nom nom!', '#fff'); pEmote('pet', 0.35);
   if (typeof MP !== 'undefined') MP.recordAction('feed', { dogName: d.name });
   saveGame();
 }
 function doTreat(d) {
   if (!d) return;
-  S.player.carry = null;
+  consumeCarryItem();
   if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) fulfillNeed(d); else d.happy = Math.min(100, d.happy + 10);
   burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); gainXP(1); tut('feed'); S.stats.feeds++;
   if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; }
   setAnim(d, 'beg', 1.2);
-  float(d.x, d.y - 48, 'Yum!', '#fff'); pEmote('pet', 0.4);
+  float(d.x, d.y - 48, 'Yum!', '#fff'); pEmote('pet', 0.35);
   if (typeof MP !== 'undefined') MP.recordAction('treat', { dogName: d.name });
   saveGame();
 }
 function doPlay(d) {
   if (!d) return;
-  S.player.carry = null;
+  consumeCarryItem();
   if (d.need && d.need.type === 'play') fulfillNeed(d);
   d.state = 'play'; d.actT = 3.5; d.path = null; d.playA = Math.random() * 6.28; d.anim = null;
   sfx('bark', d); sfx('whoosh'); burst(d.x, d.y - 24, 'star', 6); gainXP(1); S.stats.fetches++;
   FX.parts.push({ x: S.player.x, y: S.player.y - 50, vx: (d.x - S.player.x) * 1.2 + rand(-40, 40), vy: -220, life: 1.1, max: 1.1, kind: 'ball', size: 7, grav: 520 });
-  float(d.x, d.y - 48, 'Fetch!!', '#fff'); pEmote('happy', 0.5);
+  float(d.x, d.y - 48, 'Fetch!!', '#fff'); pEmote('happy', 0.45);
   if (typeof MP !== 'undefined') MP.recordAction('play', { dogName: d.name });
   saveGame();
 }
-function poopCap() { return hasUp('scooper') ? 5 : 1; }
 function doScoop(pp) {
   var idx = S.poops.indexOf(pp); if (idx >= 0) S.poops.splice(idx, 1);
-  sfx('scoop'); burst(pp.x, pp.y, 'dust', 6); pEmote('scoop', 0.45); S.stats.scoops++;
+  sfx('scoop'); burst(pp.x, pp.y, 'dust', 6); pEmote('scoop', 0.35); S.stats.scoops++;
   var car = S.player.carry;
   if (car && car.type === 'poop') { car.n = (car.n || 1) + 1; float(pp.x, pp.y - 30, car.n + ' / ' + poopCap(), '#d7ccc8'); }
-  else S.player.carry = { type: 'poop', age: pp.age, n: 1 };
+  else { S.player.carry = { type: 'poop', age: pp.age, n: 1 }; float(pp.x, pp.y - 30, '1 / ' + poopCap(), '#d7ccc8'); }
   if (typeof MP !== 'undefined') MP.recordAction('scoop', { count: 1 });
   saveGame();
 }
@@ -1371,9 +1496,7 @@ function update(dt) {
 function updatePlayer(dt) {
   var p = S.player, mx = 0, my = 0, analog = false;
   if (UI.mode === 'play' || UI.mode === 'build') {
-    if (keyDown('left')) mx -= 1; if (keyDown('right')) mx += 1; if (keyDown('up')) my -= 1; if (keyDown('down')) my += 1;
-    if (mx || my) { if (typeof UI !== 'undefined') UI.touchTarget = null; }
-    else if (typeof UI !== 'undefined' && UI.joy && UI.joy.active && (UI.joy.dx || UI.joy.dy)) {
+    if (typeof UI !== 'undefined' && UI.joy && UI.joy.active && (UI.joy.dx || UI.joy.dy)) {
       mx = UI.joy.dx; my = UI.joy.dy; analog = true; UI.touchTarget = null;
     } else if (UI.mode === 'play' && typeof UI !== 'undefined' && UI.touchTarget) {
       var tdx = UI.touchTarget.x - p.x, tdy = UI.touchTarget.y - p.y, td = Math.sqrt(tdx * tdx + tdy * tdy);
@@ -1457,7 +1580,7 @@ function updateOwner(o, dt) {
       else o.route = exitRoute(o);
     }
     var tgt = o.route[0];
-    if (moveTo(o, tgt[0], tgt[1], 112, dt)) {
+    if (moveTo(o, tgt[0], tgt[1], o.state === 'toHandover' ? 210 : 120, dt)) {
       o.route.shift();
       if (!o.route.length) {
         if (o.state === 'walkIn') {
@@ -1486,27 +1609,25 @@ function updateOwner(o, dt) {
       }
     }
   } else if (o.state === 'handover') {
-    // the hand-over only goes ahead while you stand in the box behind the counter with the right hands: empty to take a dog,
-    // holding theirs to give it back. A hired receptionist does it in your place.
     o.moving = false; o.dir = 'up';
-    var staff = o.byStaff ? npcById('receptionist') : null, actor = staff || S.player;
-    var car = S.player.carry, okHands = staff ? true : o.kind === 'dropoff' ? !car : !!(car && car.type === 'dog' && car.id === o.dogId);
+    var staff = o.byStaff ? npcById('receptionist') : null;
+    var car = S.player.carry, okHands = staff ? true : o.kind === 'dropoff' ? true : !!(car && car.type === 'dog' && car.id === o.dogId);
     if (okHands && (staff || playerOnMat())) { o.hoT += dt; o.awayT = 0; }
     else {
       o.hoT = Math.max(0, o.hoT - dt * 2); o.awayT = (o.awayT || 0) + dt;
-      if (o.awayT > 3 || (o.kind === 'pickup' && !okHands && o.hoT <= 0)) { o.state = o.kind === 'dropoff' ? 'waitCheckin' : 'waitPickup'; o.emote = null; o.dir = 'up'; o.awayT = 0; o.byStaff = false; if (d && d.state === 'toOwner') { d.state = 'toCounter'; d.path = []; d.route = [[SHOP_WAY.gapN[0] * TILE, SHOP_WAY.gapN[1] * TILE], [SHOP_WAY.desk[0] * TILE, SHOP_WAY.desk[1] * TILE]]; } return; } // back to waiting
+      if (o.awayT > 3 || (o.kind === 'pickup' && !okHands && o.hoT <= 0)) { o.state = o.kind === 'dropoff' ? 'waitCheckin' : 'waitPickup'; o.emote = null; o.dir = 'up'; o.awayT = 0; o.byStaff = false; if (d && d.state === 'toOwner') { d.state = 'toCounter'; d.path = []; d.route = [[SHOP_WAY.gapN[0] * TILE, SHOP_WAY.gapN[1] * TILE], [SHOP_WAY.desk[0] * TILE, SHOP_WAY.desk[1] * TILE]]; } return; }
     }
     if (staff) { staff.dir = 'down'; staff.face = 1; if (o.hoT > 0 && staff.emote !== (o.kind === 'pickup' ? 'handover' : 'receive')) { staff.emote = o.kind === 'pickup' ? 'handover' : 'receive'; staff.emoteT = 0; } }
     else {
-      if (!S.player.moving && playerOnMat()) S.player.dir = 'down'; // face the owner across the counter
-      if (o.hoT > 0 && !S.player.moving && S.player.emote !== (o.kind === 'pickup' ? 'handover' : 'receive')) pEmote(o.kind === 'pickup' ? 'handover' : 'receive', 0.9);
+      if (!S.player.moving && playerOnMat()) S.player.dir = 'down';
+      if (o.hoT > 0 && !S.player.moving && S.player.emote !== (o.kind === 'pickup' ? 'handover' : 'receive')) pEmote(o.kind === 'pickup' ? 'handover' : 'receive', 0.6);
     }
-    if (o.hoT >= 0.9 && d) {
-      if (o.kind === 'dropoff') { if (dist(d.x, d.y, actor.x, actor.y) < 50 || o.hoT > 5) doCheckIn(o); }
+    if (o.hoT >= 0.24 && d) {
+      if (o.kind === 'dropoff') { doCheckIn(o); }
       else if (staff) {
         if (d.state !== 'toOwner') { d.state = 'toOwner'; d.path = null; d.anim = null; d.route = [SHOP_WAY.gapN, SHOP_WAY.gapS].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }).concat([[o.x + 18, o.y + 14]]); }
-        if (dist(d.x, d.y, o.x + 18, o.y + 14) < 10 || o.hoT > 7) doReturn(o);
-      } else if (dist(d.x, d.y, o.x + 18, o.y + 14) < 26 || o.hoT > 3.5) doReturn(o);
+        if (dist(d.x, d.y, o.x + 18, o.y + 14) < 24 || o.hoT > 1.8) doReturn(o);
+      } else { doReturn(o); }
     }
   } else {
     o.moving = false;
