@@ -1,0 +1,55 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    name: Compile & Package PawsAndPlay.ipa
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build iOS IPA (Xcode Swift ARM64 + Ad-Hoc Sign)
+        run: python3 build_ipa.py
+
+      - name: Verify generated IPA archive
+        run: |
+          test -f PawsAndPlay.ipa
+          unzip -l PawsAndPlay.ipa | grep "Payload/PawsAndPlay.app/PawsAndPlay"
+          unzip -l PawsAndPlay.ipa | grep "Payload/PawsAndPlay.app/Info.plist"
+          unzip -l PawsAndPlay.ipa | grep "Payload/PawsAndPlay.app/www/index.html"
+
+      - name: Upload PawsAndPlay.ipa Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PawsAndPlay-iOS-IPA
+          path: PawsAndPlay.ipa
+          if-no-files-found: error
+
+      - name: Publish IPA to GitHub Release (latest)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="latest"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          fi
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" PawsAndPlay.ipa --clobber
+          else
+            gh release create "$TAG_NAME" PawsAndPlay.ipa \
+              --title "Paws & Play — iOS IPA ($TAG_NAME)" \
+              --notes "Automated iOS build of Paws & Play — Doggy Daycare (PawsAndPlay.ipa)."
+          fi

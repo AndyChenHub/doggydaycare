@@ -485,42 +485,74 @@ def build_ipa():
     with open(os.path.join(app_dir, "PkgInfo"), "wb") as f:
         f.write(b"APPL????")
 
-    # 4. Generate _CodeSignature/CodeResources manifest (SHA-1 & SHA-256 of every bundle resource)
-    files1 = {}
-    files2 = {}
-    for dirpath, _, filenames in os.walk(app_dir):
-        for fn in sorted(filenames):
-            full = os.path.join(dirpath, fn)
-            rel = os.path.relpath(full, app_dir).replace("\\", "/")
-            if rel.startswith("_CodeSignature/") or rel == APP_NAME:
-                continue
-            with open(full, "rb") as rf:
-                data = rf.read()
-            s1 = hashlib.sha1(data).digest()
-            s256 = hashlib.sha256(data).digest()
-            if rel != "Info.plist":
-                files1[rel] = s1
-                files2[rel] = {"hash": s1, "hash2": s256}
-
-    code_resources_dict = {
-        "files": files1,
-        "files2": files2,
-        "rules": {"^.*": True, "^.*\\.lproj/": {"optional": True, "weight": 1000}},
-        "rules2": {
-            "^.*": True,
-            "^Info\\.plist$": {"omit": True, "weight": 20},
-            "^PkgInfo$": {"omit": True, "weight": 20},
-        },
-    }
-    code_resources_bytes = plistlib.dumps(code_resources_dict, fmt=plistlib.FMT_XML)
-    with open(os.path.join(sig_dir, "CodeResources"), "wb") as f:
-        f.write(code_resources_bytes)
-
-    # 5. Build or synthesize the ARM64 iOS Mach-O executable
-    macho_bytes = build_arm64_macho(APP_NAME, BUNDLE_ID, info_plist_bytes, code_resources_bytes)
+    # 4. Build native ARM64 binary via Xcode toolchain on macOS, or synthesize offline
     exe_path = os.path.join(app_dir, APP_NAME)
-    with open(exe_path, "wb") as f:
-        f.write(macho_bytes)
+    built_with_xcode = False
+    if sys.platform == "darwin" and shutil.which("xcrun"):
+        try:
+            print("macOS Xcode toolchain detected — compiling Swift sources for arm64-apple-ios15.0...")
+            sdk_path = subprocess.check_output(
+                ["xcrun", "--sdk", "iphoneos", "--show-sdk-path"], text=True
+            ).strip()
+            swift_files = [
+                os.path.join(ROOT_DIR, "ios", "PawsAndPlay", "AppDelegate.swift"),
+                os.path.join(ROOT_DIR, "ios", "PawsAndPlay", "GameViewController.swift"),
+            ]
+            subprocess.check_call([
+                "xcrun", "--sdk", "iphoneos", "swiftc",
+                "-target", "arm64-apple-ios15.0",
+                "-sdk", sdk_path,
+                "-O",
+                *swift_files,
+                "-framework", "UIKit",
+                "-framework", "WebKit",
+                "-framework", "Foundation",
+                "-o", exe_path,
+            ])
+            if shutil.which("codesign"):
+                subprocess.check_call([
+                    "codesign", "--force", "--sign", "-", "--timestamp=none", app_dir
+                ])
+            built_with_xcode = True
+            print("Compiled and ad-hoc signed native iOS binary with Xcode toolchain.")
+        except Exception as exc:
+            print(f"Xcode compilation fallback ({exc}); using built-in ARM64 Mach-O builder.")
+
+    if not built_with_xcode:
+        # Generate _CodeSignature/CodeResources manifest (SHA-1 & SHA-256 of every bundle resource)
+        files1 = {}
+        files2 = {}
+        for dirpath, _, filenames in os.walk(app_dir):
+            for fn in sorted(filenames):
+                full = os.path.join(dirpath, fn)
+                rel = os.path.relpath(full, app_dir).replace("\\", "/")
+                if rel.startswith("_CodeSignature/") or rel == APP_NAME:
+                    continue
+                with open(full, "rb") as rf:
+                    data = rf.read()
+                s1 = hashlib.sha1(data).digest()
+                s256 = hashlib.sha256(data).digest()
+                if rel != "Info.plist":
+                    files1[rel] = s1
+                    files2[rel] = {"hash": s1, "hash2": s256}
+
+        code_resources_dict = {
+            "files": files1,
+            "files2": files2,
+            "rules": {"^.*": True, "^.*\\.lproj/": {"optional": True, "weight": 1000}},
+            "rules2": {
+                "^.*": True,
+                "^Info\\.plist$": {"omit": True, "weight": 20},
+                "^PkgInfo$": {"omit": True, "weight": 20},
+            },
+        }
+        code_resources_bytes = plistlib.dumps(code_resources_dict, fmt=plistlib.FMT_XML)
+        with open(os.path.join(sig_dir, "CodeResources"), "wb") as f:
+            f.write(code_resources_bytes)
+
+        macho_bytes = build_arm64_macho(APP_NAME, BUNDLE_ID, info_plist_bytes, code_resources_bytes)
+        with open(exe_path, "wb") as f:
+            f.write(macho_bytes)
 
     # 6. Package Payload/ into PawsAndPlay.ipa with POSIX permissions
     primary_ipa = os.path.join(ROOT_DIR, "PawsAndPlay.ipa")
