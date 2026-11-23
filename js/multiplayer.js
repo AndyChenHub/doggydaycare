@@ -181,27 +181,47 @@ var MP = (function () {
     return 'ws://localhost:8000/ws';
   }
 
-  function fetchServerInfo() {
+  var serverAvailable = (location.protocol === 'http:' || location.protocol === 'https:');
+
+  function fetchServerInfo(onSuccess) {
     try {
       fetch(apiBase() + '/api/info')
         .then(function (r) { return r.json(); })
         .then(function (info) {
           if (info && info.ok) {
+            serverAvailable = true;
             serverInfo = info;
+            if (typeof onSuccess === 'function') onSuccess();
             if (typeof UI !== 'undefined' && UI.mode === 'coop') renderCoopModal();
           }
         })
-        .catch(function () {});
+        .catch(function () {
+          if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+            serverAvailable = false;
+            transport = 'local';
+            updateCoopBadge();
+          }
+        });
     } catch (e) {}
   }
 
   function connect() {
-    fetchServerInfo();
     setupBroadcastChannel();
     loadLocalRoomFallback();
-    connectWebSocket();
-    if (!httpPollTimer) {
-      httpPollTimer = setInterval(httpFallbackTick, 1200);
+    if (serverAvailable) {
+      fetchServerInfo();
+      connectWebSocket();
+      if (!httpPollTimer) {
+        httpPollTimer = setInterval(httpFallbackTick, 1200);
+      }
+    } else {
+      transport = 'local';
+      fetchServerInfo(function () {
+        connectWebSocket();
+        if (!httpPollTimer) {
+          httpPollTimer = setInterval(httpFallbackTick, 1200);
+        }
+      });
     }
   }
 
@@ -290,10 +310,10 @@ var MP = (function () {
   }
 
   function scheduleWsRetry() {
-    if (wsRetryTimer) return;
+    if (!serverAvailable || wsRetryTimer) return;
     wsRetryTimer = setTimeout(function () {
       wsRetryTimer = null;
-      connectWebSocket();
+      if (serverAvailable) connectWebSocket();
     }, 2500);
   }
 
@@ -316,7 +336,7 @@ var MP = (function () {
       } catch (e) {}
     }
 
-    if (alsoHttp !== false) {
+    if (alsoHttp !== false && serverAvailable) {
       try {
         fetch(apiBase() + '/api/message', {
           method: 'POST',

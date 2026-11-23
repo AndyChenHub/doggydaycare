@@ -580,7 +580,7 @@ function render(dt) {
   c.setTransform(VIEW.dpr, 0, 0, VIEW.dpr, 0, 0);
   if (FX.flash > 0) { c.fillStyle = 'rgba(255,60,40,' + FX.flash * 0.3 + ')'; c.fillRect(0, 0, VIEW.w, VIEW.h); }
   if (UI.mode === 'play' || UI.mode === 'build') drawEdgeIndicators(c, t);
-  if (UI.mode === 'play' && UI.joy && UI.joy.active) {
+  if (UI.mode === 'play' && UI.joy && UI.joy.active && !UI.joy.fixed) {
     c.save();
     c.fillStyle = 'rgba(59,42,32,0.22)'; c.strokeStyle = 'rgba(251,241,216,0.55)'; c.lineWidth = 2.5;
     ell(c, UI.joy.ox, UI.joy.oy, 52, 52); c.fill(); c.stroke();

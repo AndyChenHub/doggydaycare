@@ -799,7 +799,7 @@ if ($('touchWaveBtn')) $('touchWaveBtn').onclick = function () { initAudio(); if
     var dx = cx - ox, dy = cy - oy, d = Math.sqrt(dx * dx + dy * dy);
     var r = Math.min(maxR, d), k = d > 0 ? r / d : 0;
     jk.style.transform = 'translate(' + Math.round(dx * k) + 'px,' + Math.round(dy * k) + 'px)';
-    UI.joy = { id: jId, ox: ox, oy: oy, cx: ox + dx * k, cy: oy + dy * k, dx: (dx * k) / maxR, dy: (dy * k) / maxR, active: d > 4, moved: true };
+    UI.joy = { id: jId, ox: ox, oy: oy, cx: ox + dx * k, cy: oy + dy * k, dx: (dx * k) / maxR, dy: (dy * k) / maxR, active: d > 4, moved: true, fixed: true };
     if (d > 4) UI.touchTarget = null;
   }
   jz.addEventListener('touchstart', function (ev) {
