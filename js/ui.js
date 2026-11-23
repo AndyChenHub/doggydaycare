@@ -111,13 +111,13 @@ function dailyGift() {
   var y = new Date(today.getTime() - 864e5), ykey = y.getFullYear() + '-' + (y.getMonth() + 1) + '-' + y.getDate();
   S.giftStreak = S.lastPlayDate === ykey ? (S.giftStreak || 0) + 1 : 1;
   S.lastPlayDate = key; S.playDays = (S.playDays || 0) + 1;
-  var amount = 80 + 40 * Math.min(S.giftStreak, 7);
+  var amount = 25 + 15 * Math.min(S.giftStreak, 7);
   S.cash += amount; saveGame();
   return { amount: amount, streak: S.giftStreak, days: S.playDays };
 }
 function showGift(g) {
   if (UI.inTitle || !S) return;
-  var next = g.streak < 7 ? 'Come back tomorrow for ' + fmtMoney(80 + 40 * Math.min(g.streak + 1, 7)) + '.' : 'You are at the top gift — keep the streak going!';
+  var next = g.streak < 7 ? 'Come back tomorrow for ' + fmtMoney(25 + 15 * Math.min(g.streak + 1, 7)) + '.' : 'You are at the top gift — keep the streak going!';
   openModal('<h2>🎁 Daily gift</h2><p style="text-align:center">Welcome back! The regulars chipped in:</p><div class="rating"><b class="money">+' + fmtMoney(g.amount) + '</b></div>' +
     '<p style="text-align:center">' + (g.streak > 1 ? '🔥 ' + g.streak + ' days in a row' : 'Day ' + g.days + ' of running Paws & Play') + ' · ' + next + '</p>' +
     '<div class="row"><button data-act="back" class="primary">Thanks!</button></div>', 'gift');
@@ -320,35 +320,36 @@ function objectIconURL(type) {
   return iconCache[type];
 }
 function renderBuildPanel() {
-  var tabs = [['care', 'Care'], ['fun', 'Fun'], ['decor', 'Decor'], ['land', 'Land'], ['biz', 'Staff & Perks']];
-  var h = '<div class="bp-head"><span>🔨 Shop &amp; Build</span><button id="sellBtn" class="' + (UI.buildTool === 'sell' ? 'on' : '') + '">💸 Sell</button><button id="bpClose">Done</button></div>' +
+  var tabs = [['care', 'Care'], ['fun', 'Fun'], ['decor', 'Decor'], ['land', 'Land'], ['biz', 'Research & Staff']];
+  var h = '<div class="bp-head"><span>🔨 Shop &amp; Upgrade</span><button id="upgBtn" class="' + (UI.buildTool === 'upgrade' ? 'on' : '') + '">⬆️ Upgrade</button><button id="sellBtn" class="' + (UI.buildTool === 'sell' ? 'on' : '') + '">💸 Sell</button><button id="bpClose">Done</button></div>' +
     '<div class="tabs">' + tabs.map(function (t) { return '<button data-tab="' + t[0] + '" class="' + (UI.buildTab === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div><div class="items">';
   if (UI.buildTab === 'land') {
     PLOTS.forEach(function (p) {
       if (!p.cost) return;
       var owned = plotOwned(p), pend = plotPending(p), locked = S.level < p.lvl;
       var far = !owned && !pend && !plotAdjacent(p);
-      h += '<div class="item' + (owned ? ' owned' : '') + (locked || far ? ' locked' : '') + (S.cash < p.cost && !owned && !locked ? ' poor' : '') + '" data-plot="' + p.id + '" style="grid-column:1/-1"><div class="ic">🗺️</div><div class="tx"><b>' + p.name + '</b><small>' + p.w + '×' + p.h + ' tiles' + (far && !locked ? ' · unlock neighbour first' : '') + '</small></div><div class="pr">' +
+      h += '<div class="item' + (owned ? ' owned' : '') + (locked || far ? ' locked' : '') + (S.cash < p.cost && !owned && !locked ? ' poor' : '') + '" data-plot="' + p.id + '" style="grid-column:1/-1"><div class="ic">🗺️</div><div class="tx"><b>' + p.name + '</b><small>' + p.w + '×' + p.h + ' tiles · ⏱ ' + fmtDur(p.time) + (far && !locked ? ' · unlock neighbour first' : '') + '</small></div><div class="pr">' +
         (owned ? '✅' : pend ? '🚜 ' + fmtDur((pend.end - Date.now()) / 1000) : locked ? '🔒 Lv ' + p.lvl : fmtMoney(p.cost)) + '</div></div>';
     });
   } else if (UI.buildTab === 'biz') {
+    h += '<div class="bp-sub">Endless Research Perks — upgradeable forever!</div>';
+    UPGRADES.forEach(function (u) {
+      var curLv = upLvl(u.id), reqLv = upgReqLvl(u), cost = upgCost(u);
+      var locked = S.level < reqLv, poor = S.cash < cost;
+      h += '<div class="item' + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-upg="' + u.id + '"><div class="ic">' + u.icon + '</div><div class="tx"><b>' + u.name + (curLv ? ' <span style="color:#8e6bd6">Lv' + curLv + '</span>' : '') + '</b><small>' + u.desc + '</small></div><div class="pr">' +
+        (locked ? '🔒 Lv' + reqLv : '⬆️ ' + fmtMoney(cost)) + '</div></div>';
+    });
     h += '<div class="bp-sub">Staff — paid per day at closing time</div>';
     STAFF.forEach(function (s) {
       var hired = staffHired(s.id), locked = S.level < s.lvl;
       h += '<div class="item' + (hired ? ' owned' : '') + (locked ? ' locked' : '') + '" data-staff="' + s.id + '" style="grid-column:1/-1"><div class="ic">' + s.icon + '</div><div class="tx"><b>' + s.name + '</b><small>' + s.desc + '</small></div><div class="pr">' +
         (hired ? '✅ Hired' : locked ? '🔒 Lv ' + s.lvl : fmtMoney(s.wage) + '/d') + '</div></div>';
     });
-    h += '<div class="bp-sub">Permanent Perks</div>';
-    UPGRADES.forEach(function (u) {
-      var owned = !!S.upgrades[u.id], locked = S.level < u.lvl;
-      h += '<div class="item' + (owned ? ' owned' : '') + (locked ? ' locked' : '') + (S.cash < u.cost && !owned && !locked ? ' poor' : '') + '" data-upg="' + u.id + '"><div class="ic">' + u.icon + '</div><div class="tx"><b>' + u.name + '</b><small>' + u.desc + '</small></div><div class="pr">' +
-        (owned ? '✅' : locked ? '🔒 Lv ' + u.lvl : fmtMoney(u.cost)) + '</div></div>';
-    });
   } else {
     CATALOG.filter(function (c) { return c.cat === UI.buildTab; }).forEach(function (c) {
       var locked = S.level < c.lvl, poor = S.cash < c.cost, url = objectIconURL(c.id);
       h += '<div class="item' + (UI.buildSel === c.id ? ' sel' : '') + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-item="' + c.id + '">' +
-        '<div class="ic">' + (url ? '<img src="' + url + '">' : c.icon) + '</div><div class="tx"><b>' + c.name + '</b><small>' + c.w + '×' + c.h + (c.charm >= 1 ? ' · 🌸+' + c.charm : '') + (c.cap ? ' · 🐕+' + c.cap : '') + '</small></div>' +
+        '<div class="ic">' + (url ? '<img src="' + url + '">' : c.icon) + '</div><div class="tx"><b>' + c.name + '</b><small>⏱ ' + fmtDur(c.time) + (c.charm >= 1 ? ' · 🌸+' + c.charm : '') + (c.cap ? ' · 🐕+' + c.cap : '') + '</small></div>' +
         '<div class="pr">' + (locked ? '🔒' + c.lvl : fmtMoney(c.cost)) + '</div></div>';
     });
   }
@@ -359,19 +360,20 @@ function renderBuildPanel() {
   bpShowDesc('');
   UI.bpSig = buildSig();
 }
-var BP_HELP = 'Pick an item below, then tap the yard above to build (drag the yard to pan).';
+var BP_HELP = 'Tap a building in the yard to upgrade it (Lv 1 → Lv 2 → Lv 3…), or pick a new item below.';
 function bpShowDesc(txt) {
   var el = $('bpDesc');
-  if (el) el.textContent = txt || (UI.buildTool === 'sell' ? 'Sell mode: tap a building in the yard to sell it for half price.' : UI.buildSel ? 'Tap any green tile in the yard to place ' + CAT_BY_ID[UI.buildSel].name + ' (' + CAT_BY_ID[UI.buildSel].desc + ')' : BP_HELP);
+  if (el) el.textContent = txt || (UI.buildTool === 'sell' ? 'Sell mode: tap a building in the yard to sell it.' : UI.buildTool === 'upgrade' ? 'Upgrade mode: tap any building in the yard to level it up!' : UI.buildSel ? 'Tap any green tile in the yard to build ' + CAT_BY_ID[UI.buildSel].name + ' (⏱ ' + fmtDur(CAT_BY_ID[UI.buildSel].time) + ')' : BP_HELP);
 }
 (function () {
   var bp = $('buildpanel');
   bp.addEventListener('pointerdown', function (ev) {
     if (!ev.target.closest) return;
-    var t = ev.target.closest('#bpClose,#sellBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff]'); if (!t) return;
+    var t = ev.target.closest('#bpClose,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff]'); if (!t) return;
     initAudio();
     if (t.id === 'bpClose') { setMode('play'); sfx('ui_close'); return; }
     if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; renderBuildPanel(); sfx('click'); return; }
     if (t.hasAttribute('data-tab')) { UI.buildTab = t.getAttribute('data-tab'); UI.buildSel = null; sfx('click'); renderBuildPanel(); var it = bp.querySelector('.items'); if (it) it.scrollTop = 0; return; }
     if (t.hasAttribute('data-item')) {
       var id = t.getAttribute('data-item'), c = CAT_BY_ID[id];
@@ -388,29 +390,50 @@ function bpShowDesc(txt) {
     if (t.hasAttribute('data-plot')) { tryBuyPlot(PLOTS.filter(function (q) { return q.id === t.getAttribute('data-plot'); })[0]); return; }
     if (t.hasAttribute('data-upg')) {
       var u = UPG_BY_ID[t.getAttribute('data-upg')];
-      if (S.upgrades[u.id]) return;
-      if (S.level < u.lvl) { toast('🔒 Reach level ' + u.lvl + ' for ' + u.name, 'bad'); sfx('error'); return; }
-      if (S.cash < u.cost) { toast('Not enough cash for ' + u.name + ' (' + fmtMoney(u.cost) + ')', 'bad'); sfx('error'); return; }
-      confirmBox('Buy <b>' + u.name + '</b> for ' + fmtMoney(u.cost) + '?<br>' + u.desc, function () { buyUpgrade(u); renderBuildPanel(); });
+      var req = upgReqLvl(u), cost = upgCost(u), nextLv = upLvl(u.id) + 1;
+      if (S.level < req) { toast('🔒 Reach Daycare Level ' + req + ' for ' + u.name + ' Lv ' + nextLv, 'bad'); sfx('error'); return; }
+      if (S.cash < cost) { toast('Not enough cash for ' + u.name + ' Lv ' + nextLv + ' (' + fmtMoney(cost) + ')', 'bad'); sfx('error'); return; }
+      confirmBox('Upgrade <b>' + u.name + '</b> to <b>Lv ' + nextLv + '</b> for ' + fmtMoney(cost) + '?<br>' + u.desc, function () { buyUpgrade(u); renderBuildPanel(); });
     }
   });
 })();
 function buildSig() {
   var pend = UI.buildTab === 'land' && S.plots.some(function (p) { return Date.now() < p.end + 1000; });
-  return CATALOG.map(function (c) { return S.cash >= c.cost ? 1 : 0; }).join('') + PLOTS.map(function (p) { return S.cash >= p.cost ? 1 : 0; }).join('') + UPGRADES.map(function (u) { return S.cash >= u.cost ? 1 : 0; }).join('') + '|' + S.level + '|' + S.plots.length + '|' + Object.keys(S.upgrades).length + '|' + (pend ? Math.floor(Date.now() / 1000) : '');
+  return CATALOG.map(function (c) { return S.cash >= c.cost ? 1 : 0; }).join('') + PLOTS.map(function (p) { return S.cash >= p.cost ? 1 : 0; }).join('') + UPGRADES.map(function (u) { return upLvl(u.id) + ':' + (S.cash >= upgCost(u) ? 1 : 0); }).join(',') + '|' + S.level + '|' + S.plots.length + '|' + (pend ? Math.floor(Date.now() / 1000) : '');
 }
 function tryBuyPlot(p) {
   if (plotOwned(p) || plotPending(p)) return;
   if (S.level < p.lvl) { toast('🔒 Reach level ' + p.lvl + ' to buy ' + p.name, 'bad'); sfx('error'); return; }
   if (!plotAdjacent(p)) { toast(p.name + ' does not touch your land yet — unlock a neighbouring plot first', 'bad'); sfx('error'); return; }
   if (S.cash < p.cost) { toast('Not enough cash for ' + p.name + ' (' + fmtMoney(p.cost) + ')', 'bad'); sfx('error'); return; }
-  confirmBox('Buy <b>' + p.name + '</b> for ' + fmtMoney(p.cost) + '?', function () { buyPlot(p); renderBuildPanel(); });
+  confirmBox('Clear <b>' + p.name + '</b> for ' + fmtMoney(p.cost) + '?<br><small>⏱ Clearing takes ' + fmtDur(p.time) + ' in real time.</small>', function () { buyPlot(p); renderBuildPanel(); });
+}
+function promptRushSite(o) {
+  var cost = rushCost(o), cName = CAT_BY_ID[o.type].name;
+  var what = o.upgrading ? (cName + ' Lv ' + ((o.lvl || 1) + 1) + ' upgrade') : cName;
+  if (S.cash < cost) { toast('Rushing costs ' + fmtMoney(cost) + ' — not enough cash', 'bad'); sfx('error'); return; }
+  confirmBox('Finish the <b>' + what + '</b> right now for ' + fmtMoney(cost) + '?', function () {
+    var c2 = rushCost(o);
+    if (S.cash >= c2 && !o.done) {
+      S.cash -= c2; S.stats.spent += c2; o.buildEnd = Date.now(); sfx('buy'); saveGame();
+      if (typeof MP !== 'undefined') MP.recordAction('rush', { item: o.type, name: cName, icon: CAT_BY_ID[o.type].icon, cost: c2 });
+    }
+  });
+}
+function promptUpgradeObject(o) {
+  var c = CAT_BY_ID[o.type], nextLv = (o.lvl || 1) + 1, req = objUpgradeReqLvl(o), cost = objUpgradeCost(o), dur = objUpgradeTime(o);
+  if (S.level < req) { toast('🔒 Reach Daycare Level ' + req + ' to upgrade ' + c.name + ' to Lv ' + nextLv, 'bad'); sfx('error'); return; }
+  if (S.cash < cost) { toast('Not enough cash to upgrade ' + c.name + ' to Lv ' + nextLv + ' (' + fmtMoney(cost) + ')', 'bad'); sfx('error'); return; }
+  var perkTxt = c.cap ? ('+Capacity every 2 levels & +Charm') : c.charm ? ('+' + Math.round(c.charm * 0.6 * 10) / 10 + ' extra Charm') : '+Care bonus, speed & Charm';
+  confirmBox('Upgrade <b>' + c.name + '</b> to <b>Lv ' + nextLv + '</b> for ' + fmtMoney(cost) + '?<br><small>⏱ Takes ' + fmtDur(dur) + ' · ' + perkTxt + '</small>', function () {
+    upgradeObject(o); renderBuildPanel();
+  });
 }
 function handleBuildTap(clientX, clientY) {
   if (UI.mode !== 'build' || !S) return;
   var mw = screenToWorld(clientX, clientY), tx = tileOf(mw.x), ty = tileOf(mw.y);
   var site = objAt(tx, ty);
-  if (UI.buildSel && !(site && !site.done)) {
+  if (UI.buildSel && !(site && !site.done) && UI.buildTool !== 'upgrade' && UI.buildTool !== 'sell') {
     var def = CAT_BY_ID[UI.buildSel], x = tx - Math.floor((def.w - 1) / 2), y = ty - Math.floor((def.h - 1) / 2);
     if (S.cash < def.cost) { toast('Not enough cash for a ' + def.name, 'bad'); sfx('error'); return; }
     if (!canPlace(UI.buildSel, x, y)) { toast('Tap an open green tile in the yard', 'bad'); sfx('error'); return; }
@@ -421,19 +444,15 @@ function handleBuildTap(clientX, clientY) {
   var o = site;
   if (o && UI.buildTool === 'sell') {
     if (!canSell(o)) { toast(isLastEssential(o) ? 'You need at least one ' + CAT_BY_ID[o.type].name : 'A dog is using that right now', 'bad'); sfx('error'); return; }
-    confirmBox('Sell the ' + CAT_BY_ID[o.type].name + ' for ' + fmtMoney(sellValue(o)) + '?', function () { sellObject(o); renderBuildPanel(); });
+    confirmBox('Sell the ' + CAT_BY_ID[o.type].name + ' (Lv ' + (o.lvl || 1) + ') for ' + fmtMoney(sellValue(o)) + '?', function () { sellObject(o); renderBuildPanel(); });
     return;
   }
   if (o && !o.done) {
-    var cost = rushCost(o);
-    if (S.cash < cost) { toast('Rushing costs ' + fmtMoney(cost) + ' — not enough cash', 'bad'); sfx('error'); return; }
-    confirmBox('Finish the ' + CAT_BY_ID[o.type].name + ' right now for ' + fmtMoney(cost) + '?', function () {
-      var c2 = rushCost(o);
-      if (S.cash >= c2 && !o.done) {
-        S.cash -= c2; S.stats.spent += c2; o.buildEnd = Date.now(); sfx('buy'); saveGame();
-        if (typeof MP !== 'undefined') MP.recordAction('rush', { item: o.type, name: CAT_BY_ID[o.type].name, icon: CAT_BY_ID[o.type].icon, cost: c2 });
-      }
-    });
+    promptRushSite(o);
+    return;
+  }
+  if (o && o.done) {
+    promptUpgradeObject(o);
     return;
   }
   var p = plotAt(tx, ty);

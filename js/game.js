@@ -15,7 +15,19 @@ function fmtDur(sec) {
 }
 function tileOf(px) { return Math.floor(px / TILE); }
 function hasTrait(d, t) { return d.traits.indexOf(t) >= 0; }
-function hasUp(id) { return !!(S && S.upgrades && S.upgrades[id]); }
+function upLvl(id) { var v = S && S.upgrades && S.upgrades[id]; return v === true ? 1 : (typeof v === 'number' && v > 0 ? Math.floor(v) : 0); }
+function hasUp(id) { return upLvl(id) > 0; }
+function upgCost(u) { var lv = upLvl(u.id); return Math.round(u.cost * Math.pow(1.75, lv)); }
+function upgReqLvl(u) { var lv = upLvl(u.id); return u.lvl + lv * 2; }
+function stationLvl(type) {
+  if (!S || !S.objects) return 1;
+  var best = 1;
+  for (var i = 0; i < S.objects.length; i++) {
+    var o = S.objects[i];
+    if (o.done && o.type === type && (o.lvl || 1) > best) best = o.lvl || 1;
+  }
+  return best;
+}
 
 // ================= settings & storage helpers =================
 var SETTINGS_KEY = 'pawsPlaySettings_v1', SAVE_KEY = 'pawsPlaySave_v2', BACKUP_SAVE_KEY = 'pawsPlaySave_backup';
@@ -226,7 +238,7 @@ function nid() { return S.nextId++; }
 
 function addObject(type, x, y, instant) {
   var c = CAT_BY_ID[type];
-  var o = { id: nid(), type: type, x: x, y: y, w: c.w, h: c.h, done: !!instant, buildEnd: instant ? 0 : Date.now() + c.time * 1000,
+  var o = { id: nid(), type: type, x: x, y: y, w: c.w, h: c.h, lvl: 1, upgrading: false, done: !!instant, buildEnd: instant ? 0 : Date.now() + c.time * 1000,
             buildDur: c.time, dogId: null, reservedFor: null, useAt: -99 };
   S.objects.push(o);
   markDirty();
@@ -285,8 +297,12 @@ function buildWalk() {
   for (var i = 0; i < N; i++) objGrid[i] = null;
   var cap = 4, ch = 0, objs = S ? S.objects : [];
   for (var oi = 0; oi < objs.length; oi++) {
-    var o = objs[oi], def = CAT_BY_ID[o.type];
-    if (o.done && def) { if (def.cap) cap += def.cap; if (def.charm) ch += def.charm; }
+    var o = objs[oi], def = CAT_BY_ID[o.type], olv = o.lvl || 1;
+    if (o.done && def) {
+      if (def.cap) cap += def.cap + Math.floor((olv - 1) / 2);
+      if (def.charm) ch += def.charm * (1 + (olv - 1) * 0.6);
+      else if (olv > 1) ch += (olv - 1) * 1.5;
+    }
     for (var oy = o.y; oy < o.y + o.h; oy++) for (var ox = o.x; ox < o.x + o.w; ox++) {
       if (ox >= 0 && oy >= 0 && ox < W && oy < H) objGrid[oy * W + ox] = o;
     }
@@ -443,7 +459,7 @@ function freeKennel() {
   return null;
 }
 function activeDogCount() { return S.dogs.filter(function (d) { return d.state !== 'leaving'; }).length; }
-function patienceMul() { return diff().patience * (hasUp('lounge') ? 1.35 : 1); }
+function patienceMul() { return diff().patience * (1 + upLvl('lounge') * 0.18); }
 
 function spawnArrival() {
   if (freeSlot() < 0) return false;
@@ -458,13 +474,16 @@ function spawnArrival() {
   return true;
 }
 function scheduleArrival() {
-  var base = rand(14, 26);
-  var repMul = 0.7 + S.rep * 0.12;
-  var charmMul = 1 + Math.min(charm(), 80) * 0.01;
-  var early = S.day === 1 ? 1.3 : 1;
-  S.arrivalTimer = base * early / (repMul * charmMul * (hasUp('flyers') ? 1.2 : 1));
+  var base = rand(18, 32);
+  var repMul = 0.7 + S.rep * 0.1;
+  var charmMul = 1 + Math.min(charm(), 120) * 0.006;
+  var early = S.day === 1 ? 1.35 : 1;
+  S.arrivalTimer = base * early / (repMul * charmMul * (1 + upLvl('flyers') * 0.1));
 }
-function dogPrice(d) { return Math.round(((d.overnight ? 60 : 0) + breedOf(d).price + Math.min(S.day, 20)) * (hasUp('webcam') ? 1.2 : 1) * (d.special ? 5 : 1)); }
+function dogPrice(d) {
+  var base = (d.overnight ? 28 * (1 + upLvl('nightstaff') * 0.15) : 0) + breedOf(d).price * 0.45 + Math.min(S.day, 120) * 0.35;
+  return Math.max(12, Math.round(base * (1 + upLvl('webcam') * 0.12) * (d.special ? 3.5 : 1)));
+}
 // real dogs go once or twice a day, and soon after a meal
 function nextPoopDelay(d, afterMeal) { var D = dayLen(); return afterMeal ? rand(0.08, 0.16) * D : rand(0.25, 0.55) * D * (hasTrait(d, 'pooper') ? 0.55 : 1); }
 
@@ -746,10 +765,15 @@ function dexSeen(d) {
 }
 function dexCount() { return Object.keys(S.dex).length; }
 
-// ================= daily goals =================
+// ================= daily goals (endless scaling with Daycare Level) =================
 function rollGoals() {
-  var tier = clamp(Math.floor((S.level - 1) / 3), 0, 2), pool = GOALS.slice(), out = [];
-  for (var i = 0; i < 3 && pool.length; i++) { var g = pool.splice(randi(0, pool.length - 1), 1)[0]; out.push({ id: g.id, n: g.n[tier], reward: Math.round(g.reward * (1 + tier * 0.6)), done: false }); }
+  var tier = Math.max(0, Math.floor((S.level - 1) / 2)), pool = GOALS.slice(), out = [];
+  for (var i = 0; i < 3 && pool.length; i++) {
+    var g = pool.splice(randi(0, pool.length - 1), 1)[0];
+    var baseN = g.n[Math.min(2, tier)];
+    var extra = tier > 2 ? Math.round(baseN * (tier - 2) * 0.35) : 0;
+    out.push({ id: g.id, n: baseN + extra, reward: Math.round(g.reward * (0.45 + tier * 0.25)), done: false });
+  }
   S.goals = out;
 }
 function goalDef(id) { for (var i = 0; i < GOALS.length; i++) if (GOALS[i].id === id) return GOALS[i]; return null; }
@@ -761,7 +785,7 @@ function checkGoals() {
   S.goals.forEach(function (g) {
     if (g.done || !goalDef(g.id) || goalProgress(g) < g.n) return;
     g.done = true; S.cash += g.reward; S.stats.goalCash += g.reward; completed = true;
-    toast('🎯 Goal complete: ' + goalText(g) + '  +' + fmtMoney(g.reward), 'good'); sfx('goal'); gainXP(15);
+    toast('🎯 Goal complete: ' + goalText(g) + '  +' + fmtMoney(g.reward), 'good'); sfx('goal'); gainXP(10);
     confetti(S.player.x, S.player.y - 50, 30);
   });
   if (completed) saveGame();
@@ -836,8 +860,8 @@ function dropPoop(d) {
 // ================= My Mini Mart proximity & carry-stack interactions =================
 var DWELL = { key: null, t: 0, lock: null };
 var PAD_FILL = { id: null, prog: 0, coinT: 0 };
-function stackCap() { return ((window.GAME_CONFIG && window.GAME_CONFIG.stackCapacity) || 3) + (hasUp('scooper') ? 2 : 0); }
-function poopCap() { return hasUp('scooper') ? 5 : 3; }
+function stackCap() { return ((window.GAME_CONFIG && window.GAME_CONFIG.stackCapacity) || 2) + upLvl('scooper'); }
+function poopCap() { return 2 + upLvl('scooper'); }
 function carryLabel(c) {
   if (!c) return '';
   var n = c.n || 1;
@@ -935,17 +959,17 @@ function updateUnlockPads(dt) {
     if (hit.kind === 'obj') {
       var c = CAT_BY_ID[hit.type];
       S.cash -= c.cost; S.stats.spent += c.cost;
-      var o = addObject(hit.type, hit.x, hit.y, true);
+      var o = addObject(hit.type, hit.x, hit.y, false);
       var ox = (o.x + o.w / 2) * TILE, oy = (o.y + o.h / 2) * TILE;
-      // Push player/dogs gently outside solid footprint if needed
       if (!c.floor && !canStand(p.x, p.y)) { p.y = (o.y + o.h + 0.45) * TILE; }
       S.dogs.forEach(function (d) {
         if (d.state === 'leashed' || d.state === 'bath' || d.state === 'kennel' || d.state === 'leaving' || d.state === 'arriving') return;
         var tx = tileOf(d.x), ty = tileOf(d.y);
         if (tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h) { var t2 = nearestWalkable(d.x, d.y); d.x = (t2[0] + .5) * TILE; d.y = (t2[1] + .5) * TILE; }
       });
-      confetti(ox, oy, 28); float(ox, o.y * TILE - 10, c.name + ' unlocked!', '#b9f6ca', 1.3);
-      sfx('built'); gainXP(Math.round(c.cost / 18) + 3); tut('build');
+      burst(ox, oy, 'dust', 18); float(ox, o.y * TILE - 10, '🔨 Building ' + c.name + ' (' + fmtDur(c.time) + ')', '#ffe082', 1.15);
+      toast('🏗️ Started building ' + c.name + ' — finishes in ' + fmtDur(c.time), 'good');
+      sfx('place'); tut('build');
       if (typeof MP !== 'undefined') MP.recordAction('build', { item: hit.type, name: c.name, icon: c.icon, cost: c.cost, x: hit.x, y: hit.y });
       saveGame();
     } else if (hit.kind === 'staff') {
@@ -1137,7 +1161,7 @@ function doCheckIn(o) {
   d.state = 'toYard'; d.route = [SHOP_WAY.gapN, SHOP_WAY.door, SHOP_WAY.yard].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }); d.autoRelease = false; d.leashedBy = null;
   if (d.overnight) { d.pickupDay = S.day + 1; d.pickupAt = rand(0.12, 0.45) * dayLen(); }
   else { d.pickupDay = S.day; d.pickupAt = Math.min(S.dayTime + rand(0.28, 0.5) * dayLen(), dayLen() - 8); }
-  gainXP(8); sfx('bark', d); float(d.x, d.y - 50, 'Welcome, ' + d.name + '!', '#fff');
+  gainXP(4); sfx('bark', d); float(d.x, d.y - 50, 'Welcome, ' + d.name + '!', '#fff');
   burst(d.x, d.y - 24, 'sparkle', 8);
   dexSeen(d); if (d.special) specialArrived(d);
   if (!o.byStaff) {
@@ -1182,7 +1206,8 @@ function doFeed(d) {
   consumeCarryItem();
   if (hasTrait(d, 'picky')) float(d.x, d.y - 62, 'Hmph. Kibble again?', '#ffe0b2');
   if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) { fulfillNeed(d); if (hasTrait(d, 'picky') && d.need == null) d.happy -= 8; }
-  if (hasUp('kibble')) d.happy = Math.min(100, d.happy + 6);
+  var bonus = upLvl('kibble') * 5 + (stationLvl('foodbin') - 1) * 3;
+  if (bonus > 0) d.happy = Math.min(100, d.happy + bonus);
   d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true));
   burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); gainXP(1); tut('feed'); S.stats.feeds++;
   float(d.x, d.y - 48, 'Nom nom!', '#fff'); pEmote('pet', 0.35);
@@ -1192,7 +1217,9 @@ function doFeed(d) {
 function doTreat(d) {
   if (!d) return;
   consumeCarryItem();
-  if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) fulfillNeed(d); else d.happy = Math.min(100, d.happy + 10);
+  var tBonus = (stationLvl('treatjar') - 1) * 4;
+  if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) fulfillNeed(d); else d.happy = Math.min(100, d.happy + 10 + tBonus);
+  if (tBonus > 0) d.happy = Math.min(100, d.happy + tBonus);
   burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); gainXP(1); tut('feed'); S.stats.feeds++;
   if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; }
   setAnim(d, 'beg', 1.2);
@@ -1204,6 +1231,8 @@ function doPlay(d) {
   if (!d) return;
   consumeCarryItem();
   if (d.need && d.need.type === 'play') fulfillNeed(d);
+  var pBonus = (stationLvl('toybox') - 1) * 3;
+  if (pBonus > 0) d.happy = Math.min(100, d.happy + pBonus);
   d.state = 'play'; d.actT = 3.5; d.path = null; d.playA = Math.random() * 6.28; d.anim = null;
   sfx('bark', d); sfx('whoosh'); burst(d.x, d.y - 24, 'star', 6); gainXP(1); S.stats.fetches++;
   FX.parts.push({ x: S.player.x, y: S.player.y - 50, vx: (d.x - S.player.x) * 1.2 + rand(-40, 40), vy: -220, life: 1.1, max: 1.1, kind: 'ball', size: 7, grav: 520 });
@@ -1222,7 +1251,7 @@ function doScoop(pp) {
 }
 function doTrash() {
   var n = (S.player.carry && S.player.carry.n) || 1;
-  S.player.carry = null; sfx('trash'); gainXP(3 * n); tut('scoop');
+  S.player.carry = null; sfx('trash'); gainXP((1 + stationLvl('trash')) * n); tut('scoop');
   float(S.player.x, S.player.y - 80, '+ Clean yard!', '#b9f6ca'); burst(S.player.x, S.player.y - 50, 'sparkle', 8);
   if (typeof MP !== 'undefined') MP.sendWorldSync(false);
   saveGame();
@@ -1230,9 +1259,10 @@ function doTrash() {
 function doWash(ob) {
   var d = S.player.carry ? dogById(S.player.carry.id) : null; S.player.carry = null;
   if (!d) { saveGame(); return; }
-  d.state = 'bath'; d.actT = 4; d.objId = ob.id; ob.dogId = d.id; ob.useAt = now; d.anim = null; d.autoRelease = false; d.leashedBy = null;
+  var tLv = (ob && ob.lvl) || 1;
+  d.state = 'bath'; d.actT = Math.max(1.6, 4.2 - (tLv - 1) * 0.35); d.objId = ob.id; ob.dogId = d.id; ob.useAt = now; d.anim = null; d.autoRelease = false; d.leashedBy = null;
   d.x = (ob.x + ob.w / 2) * TILE; d.y = (ob.y + 0.75) * TILE;
-  sfx('splash'); gainXP(4); tut('wash'); S.stats.baths++;
+  sfx('splash'); gainXP(2 + tLv); tut('wash'); S.stats.baths++;
   if (typeof MP !== 'undefined') MP.recordAction('wash', { dogName: d.name });
   saveGame();
 }
@@ -1251,12 +1281,12 @@ function doReturn(o) {
   if (!d) { o.state = 'walkOut'; o.slot = null; o.route = exitRoute(o); saveGame(); return; }
   if (p.carry && p.carry.id === d.id) p.carry = null;
   var h = happiness(d), price = dogPrice(d);
-  var tipRate = h >= 90 ? 0.8 : h >= 75 ? 0.5 : h >= 55 ? 0.2 : 0;
-  if (hasTrait(d, 'diva')) tipRate *= 2;
+  var tipRate = h >= 90 ? 0.45 : h >= 75 ? 0.28 : h >= 55 ? 0.12 : 0;
+  if (hasTrait(d, 'diva')) tipRate *= 1.75;
   var complaint = h < complaintLine(d);
   if (!complaint && h >= 75) { S.streak++; S.bestStreak = Math.max(S.bestStreak, S.streak); } else S.streak = 0;
-  var streakMul = 1 + Math.min(S.streak, 10) * 0.1;
-  var tip = o.angry ? 0 : Math.round(price * tipRate * (1 + charm() * 0.015) * streakMul * (hasUp('loyalty') ? 1.25 : 1));
+  var streakMul = 1 + Math.min(S.streak, 10) * 0.06;
+  var tip = o.angry ? 0 : Math.round(price * tipRate * (1 + charm() * 0.008) * streakMul * (1 + upLvl('loyalty') * 0.15));
   var total = price + tip;
   S.cash += total; S.stats.earned += total; S.stats.tips += tip; S.stats.served++; S.totalServed++; S.life.earned += total; S.life.served++;
   if (d.overnight) S.life.overnights = (S.life.overnights || 0) + 1;
@@ -1270,14 +1300,14 @@ function doReturn(o) {
     fileComplaint(o.name + ': "' + d.name + ' ' + why + '!"', 0.45);
     o.say = 'I\'m filing a complaint!'; o.sayT = 3; o.emote = 'angry'; o.emoteT = 0;
   } else {
-    var g = h >= 90 ? 0.12 : h >= 75 ? 0.07 : h >= 55 ? 0.03 : 0;
+    var g = h >= 90 ? 0.08 : h >= 75 ? 0.04 : h >= 55 ? 0.02 : 0;
     S.rep = Math.min(5, S.rep + g);
     if (h >= 90) { S.stats.perfect++; S.life.perfect++; float(o.x, o.y - 120, 'PAWSOME! ★', '#ff8ad8', 1.6); confetti(o.x, o.y - 50, 30); sfx('perfect'); o.emote = 'happy'; o.emoteT = 0; pEmote('happy', 0.8); }
     else sfx('coin');
     o.say = pick(h >= 75 ? ['Wow, so happy!', 'Best daycare ever!', 'Look at that tail go!', 'Five stars!'] : ['Thanks.', 'Okay, see you.', 'Hmm, alright.']); o.sayT = 2.5;
     if (S.streak >= 2) float(p.x, p.y - 110, 'Happy streak x' + S.streak + '!', '#80d8ff', 1.2);
   }
-  gainXP(10 + Math.round(h / 8));
+  gainXP(5 + Math.round(h / 18));
   d.state = 'leaving'; d.ownerId = o.id; d.anim = null; d.need = null; d.route = null; d.leashedBy = null;
   if (d.kennelId) { var k = objById(d.kennelId); if (k) k.reservedFor = null; d.kennelId = null; }
   o.state = 'walkOut'; o.slot = null; o.route = exitRoute(o);
@@ -1309,10 +1339,10 @@ function tut(id) {
   if (S.tutorialDone || S.tutorial[id]) return;
   var tDef = TUTORIAL.filter(function (t) { return t.id === id; })[0];
   if (!tDef) return;
-  S.tutorial[id] = true; S.cash += 15;
-  toast('✅ ' + tDef.text + '  +$15', 'good'); sfx('goal');
+  S.tutorial[id] = true; S.cash += 5;
+  toast('✅ ' + tDef.text + '  +$5', 'good'); sfx('goal');
   if (TUTORIAL.every(function (t) { return S.tutorial[t.id]; })) {
-    S.tutorialDone = true; S.cash += 100; toast('🎓 Training complete! +$100 bonus. Daily goals unlocked.', 'good'); confetti(S.player.x, S.player.y - 50, 50);
+    S.tutorialDone = true; S.cash += 25; toast('🎓 Training complete! +$25 bonus. Daily goals unlocked.', 'good'); confetti(S.player.x, S.player.y - 50, 50);
     rollGoals();
   }
   saveGame();
@@ -1376,8 +1406,44 @@ function placeBuild(type, x, y) {
   saveGame();
   return true;
 }
-function rushCost(o) { return Math.ceil(Math.max(0, (o.buildEnd - Date.now()) / 1000) * 1.5) + 5; }
-function sellValue(o) { var c = CAT_BY_ID[o.type]; return c ? Math.floor(c.cost * (o.done ? 0.5 : 1)) : 0; }
+function rushCost(o) {
+  var left = Math.max(0, (o.buildEnd - Date.now()) / 1000);
+  return Math.max(15, Math.ceil(Math.pow(left, 0.78) * 1.4) + 10);
+}
+function objUpgradeCost(o) {
+  var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
+  return Math.max(40, Math.round((c ? c.cost : 100) * Math.pow(1.65, lv)));
+}
+function objUpgradeTime(o) {
+  var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
+  return Math.max(25, Math.round((c ? c.time : 45) * Math.pow(1.5, lv)));
+}
+function objUpgradeReqLvl(o) {
+  var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
+  return (c ? c.lvl : 1) + lv;
+}
+function upgradeObject(o) {
+  var c = o && CAT_BY_ID[o.type];
+  if (!o || !c || !o.done) { sfx('error'); return false; }
+  var cost = objUpgradeCost(o), req = objUpgradeReqLvl(o), dur = objUpgradeTime(o);
+  if (S.level < req || S.cash < cost) { sfx('error'); return false; }
+  S.cash -= cost; S.stats.spent += cost;
+  o.done = false; o.upgrading = true; o.buildDur = dur; o.buildEnd = Date.now() + dur * 1000;
+  markDirty();
+  var cx = (o.x + o.w / 2) * TILE, cy = o.y * TILE;
+  float(cx, cy - 12, '-' + fmtMoney(cost), '#ff8a80');
+  burst(cx, (o.y + o.h / 2) * TILE, 'dust', 14); sfx('place');
+  toast('⬆️ Upgrading ' + c.name + ' to Lv ' + ((o.lvl || 1) + 1) + ' (' + fmtDur(dur) + ')', 'good');
+  saveGame();
+  return true;
+}
+function sellValue(o) {
+  var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
+  if (!c) return 0;
+  var invested = c.cost;
+  for (var i = 1; i < lv; i++) invested += Math.round(c.cost * Math.pow(1.65, i));
+  return Math.floor(invested * (o.done ? 0.5 : 0.75));
+}
 var ESSENTIAL = { foodbin: 1, toybox: 1, trash: 1, tub: 1 };
 function isLastEssential(o) { return ESSENTIAL[o.type] && o.done && S.objects.filter(function (x) { return x.type === o.type && x.done; }).length <= 1; }
 function canSell(o) { return !o.dogId && !o.reservedFor && !isLastEssential(o); }
@@ -1409,10 +1475,13 @@ function buyPlot(p) {
   saveGame();
 }
 function buyUpgrade(u) {
-  if (!u || S.upgrades[u.id] || S.cash < u.cost || S.level < u.lvl) { sfx('error'); return false; }
-  S.cash -= u.cost; S.stats.spent += u.cost; S.upgrades[u.id] = true;
-  sfx('buy'); toast(u.icon + ' ' + u.name + ' bought — ' + u.desc, 'good'); confetti(S.player.x, S.player.y - 50, 24);
-  if (typeof MP !== 'undefined') MP.recordAction('upgrade', { item: u.id, name: u.name, icon: u.icon, cost: u.cost });
+  if (!u) { sfx('error'); return false; }
+  var cost = upgCost(u), req = upgReqLvl(u), nextLv = upLvl(u.id) + 1;
+  if (S.cash < cost || S.level < req) { sfx('error'); return false; }
+  S.cash -= cost; S.stats.spent += cost; S.upgrades[u.id] = nextLv;
+  sfx('buy'); gainXP(Math.round(cost / 35) + 4);
+  toast(u.icon + ' ' + u.name + ' upgraded to Lv ' + nextLv + '!', 'good'); confetti(S.player.x, S.player.y - 50, 24);
+  if (typeof MP !== 'undefined') MP.recordAction('upgrade', { item: u.id, name: u.name + ' Lv ' + nextLv, icon: u.icon, cost: cost });
   saveGame();
   return true;
 }
@@ -1420,12 +1489,15 @@ function checkBuilds() {
   var t = Date.now(), changed = false;
   S.objects.forEach(function (o) {
     if (!o.done && t >= o.buildEnd) {
+      var wasUpg = !!o.upgrading;
+      if (wasUpg) { o.lvl = (o.lvl || 1) + 1; o.upgrading = false; }
       o.done = true; markDirty(); changed = true;
       var c = CAT_BY_ID[o.type];
       if (c) {
         var cx = (o.x + o.w / 2) * TILE, cy = (o.y + o.h / 2) * TILE;
-        confetti(cx, cy, 30); float(cx, o.y * TILE - 10, c.name + ' built!', '#b9f6ca', 1.3);
-        toast('🏗️ ' + c.name + ' finished!', 'good'); sfx('built'); gainXP(Math.round(c.cost / 20) + 2);
+        var msg = wasUpg ? (c.name + ' Lv ' + (o.lvl || 1) + '!') : (c.name + ' built!');
+        confetti(cx, cy, 30); float(cx, o.y * TILE - 10, msg, '#b9f6ca', 1.3);
+        toast((wasUpg ? '⬆️ ' : '🏗️ ') + msg, 'good'); sfx('built'); gainXP(Math.round(c.cost * (o.lvl || 1) / 30) + 4);
       }
     }
   });
@@ -1509,7 +1581,7 @@ function updatePlayer(dt) {
   var len = Math.sqrt(mx * mx + my * my);
   p.moving = len > 0.02;
   if (p.moving) {
-    var sp = (window.GAME_CONFIG.playerSpeed || 250) * (hasUp('sneakers') ? 1.15 : 1);
+    var sp = (window.GAME_CONFIG.playerSpeed || 250) * (1 + upLvl('sneakers') * 0.08);
     var spdScale = analog ? Math.min(1, len) : 1;
     mx = mx / len * sp * spdScale * dt; my = my / len * sp * spdScale * dt;
     if (Math.abs(mx) > 0.01) p.face = mx > 0 ? 1 : -1;
@@ -2076,9 +2148,11 @@ function sanitizeAndMigrateState(s) {
     if (oid >= maxId) maxId = oid + 1;
     var ox = _isnum(o.x) ? Math.floor(o.x) : 20;
     var oy = _isnum(o.y) ? Math.floor(o.y) : 18;
+    var olv = (_isnum(o.lvl) && o.lvl >= 1) ? Math.floor(o.lvl) : 1;
     var buildDur = (_isnum(o.buildDur) && o.buildDur > 0) ? o.buildDur : (cDef.time || 10);
     var buildEnd = _isnum(o.buildEnd) ? o.buildEnd : 0;
     var isDone = !!o.done || buildEnd <= 0 || Date.now() >= buildEnd;
+    if (isDone && o.upgrading && buildEnd > 0 && Date.now() >= buildEnd) olv++;
     cleanObjects.push({
       id: oid,
       type: o.type,
@@ -2086,6 +2160,8 @@ function sanitizeAndMigrateState(s) {
       y: clamp(oy, 0, H - cDef.h),
       w: cDef.w,
       h: cDef.h,
+      lvl: olv,
+      upgrading: !isDone && !!o.upgrading,
       done: isDone,
       buildEnd: isDone ? 0 : buildEnd,
       buildDur: buildDur,

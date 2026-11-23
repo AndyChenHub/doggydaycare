@@ -348,19 +348,38 @@ function drawObjectBase(c, o, t) {
   }
   if (art && art.drawFront) { try { art.drawFront(c, ao, t, ENV); } catch (e) {} }
   if (occ && occ.state === 'bath') {
-    var left = occ.actT / 4, bx = px + w / 2;
+    var left = clamp(occ.actT / 4, 0, 1), bx = px + w / 2;
     c.fillStyle = 'rgba(40,26,16,0.7)'; rr(c, bx - 26, py - 16, 52, 9, 4.5); c.fill(); c.fillStyle = '#66bde3'; rr(c, bx - 24.5, py - 14.5, 49 * (1 - left), 6, 3); c.fill();
+  }
+  var olv = o.lvl || 1;
+  if (olv > 1 || UI.mode === 'build') {
+    var lx = px + w - 13, ly = py + 10;
+    c.fillStyle = olv > 1 ? '#8e6bd6' : 'rgba(59,42,32,0.78)';
+    rr(c, lx - 13, ly - 7, 26, 14, 5); c.fill();
+    c.strokeStyle = '#fff8e6'; c.lineWidth = 1.2; c.stroke();
+    c.font = '10.5px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = olv > 1 ? '#ffe66d' : '#fff8e6';
+    c.fillText('Lv' + olv, lx, ly + 0.5);
   }
 }
 function drawSite(c, o, t) {
   var px = o.x * TILE, py = o.y * TILE, w = o.w * TILE, left = Math.max(0, (o.buildEnd - Date.now()) / 1000), prog = clamp(1 - left / Math.max(1, o.buildDur), 0, 1);
+  if (o.upgrading) {
+    var artU = artOf(o.type);
+    if (artU) {
+      c.save(); c.globalAlpha = 0.72;
+      try { artU.draw(c, artObj(o), t, ENV); if (artU.drawFront) artU.drawFront(c, artObj(o), t, ENV); } catch (e) {}
+      c.restore();
+    }
+  }
   var ok = false;
-  if (typeof drawConstruction === 'function') { try { drawConstruction(c, artObj(o), t, prog); ok = true; } catch (e) {} }
-  if (!ok) { c.fillStyle = '#a1887f'; rr(c, px + 2, py + 2, w - 4, o.h * TILE - 4, 6); c.fill(); }
-  var bw = Math.max(64, w - 10), bx = px + w / 2 - bw / 2, by = py - 20;
-  c.fillStyle = 'rgba(40,26,16,0.78)'; rr(c, bx - 2, by - 2, bw + 4, 17, 7); c.fill();
-  c.fillStyle = '#8bd46e'; rr(c, bx, by, Math.max(5, bw * prog), 13, 5); c.fill();
-  c.font = '14px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle'; outlined(c, fmtDur(left), px + w / 2, by + 7, '#fff', 'rgba(40,26,16,0.9)', 2.5);
+  if (!o.upgrading && typeof drawConstruction === 'function') { try { drawConstruction(c, artObj(o), t, prog); ok = true; } catch (e) {} }
+  if (!ok && !o.upgrading) { c.fillStyle = '#a1887f'; rr(c, px + 2, py + 2, w - 4, o.h * TILE - 4, 6); c.fill(); }
+  var bw = Math.max(68, w - 6), bx = px + w / 2 - bw / 2, by = py - 20;
+  c.fillStyle = 'rgba(40,26,16,0.82)'; rr(c, bx - 2, by - 2, bw + 4, 17, 7); c.fill();
+  c.fillStyle = o.upgrading ? '#c3a6ff' : '#8bd46e'; rr(c, bx, by, Math.max(5, bw * prog), 13, 5); c.fill();
+  var lbl = (o.upgrading ? '⬆️Lv' + ((o.lvl || 1) + 1) + ' ' : '🔨 ') + fmtDur(left);
+  c.font = '12.5px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle'; outlined(c, lbl, px + w / 2, by + 6.5, '#fff', 'rgba(40,26,16,0.9)', 2.5);
 }
 
 // ---------------- speech & tags ----------------
@@ -794,9 +813,11 @@ function drawBuildGhost(c, t) {
     if (o) {
       var sell = UI.buildTool === 'sell';
       if (!sell && !o.done) { siteHint(c, o); return; }
-      c.strokeStyle = sell ? '#ff6b5a' : '#ffe082'; c.lineWidth = 3; rr(c, o.x * TILE + 1, o.y * TILE + 1, o.w * TILE - 2, o.h * TILE - 2, 8); c.stroke();
-      var label = sell ? (canSell(o) ? 'Sell for ' + fmtMoney(sellValue(o)) : isLastEssential(o) ? 'Your only one — can\'t sell' : 'In use — can\'t sell') : CAT_BY_ID[o.type].name;
-      bubble(c, (o.x + o.w / 2) * TILE, o.y * TILE - 10, label, { size: 12, bg: '#4a3426', fg: '#fff', stroke: '#2a1a10' });
+      c.strokeStyle = sell ? '#ff6b5a' : '#c3a6ff'; c.lineWidth = 3; rr(c, o.x * TILE + 1, o.y * TILE + 1, o.w * TILE - 2, o.h * TILE - 2, 8); c.stroke();
+      var label = sell
+        ? (canSell(o) ? 'Sell for ' + fmtMoney(sellValue(o)) : isLastEssential(o) ? 'Your only one — can\'t sell' : 'In use — can\'t sell')
+        : (CAT_BY_ID[o.type].name + ' Lv' + (o.lvl || 1) + ' · ⬆️ Lv' + ((o.lvl || 1) + 1) + ' (' + fmtMoney(objUpgradeCost(o)) + ')');
+      bubble(c, (o.x + o.w / 2) * TILE, o.y * TILE - 10, label, { size: 11.5, bg: '#4a3426', fg: '#fff', stroke: '#2a1a10' });
     } else {
       var p = plotAt(tx, ty);
       if (p && !plotOwned(p) && !plotPending(p)) { c.strokeStyle = '#ffe082'; c.lineWidth = 5; c.strokeRect(p.x * TILE + 3, p.y * TILE + 3, p.w * TILE - 6, p.h * TILE - 6); }
