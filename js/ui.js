@@ -107,6 +107,7 @@ function startGame(fresh) {
 }
 function dailyGift() {
   var today = new Date(), key = today.getFullYear() + '-' + (today.getMonth() + 1) + '-' + today.getDate();
+  if (!S.lastPlayDate) { S.lastPlayDate = key; S.giftStreak = 1; S.playDays = 1; saveGame(); return null; }
   if (S.lastPlayDate === key) return null;
   var y = new Date(today.getTime() - 864e5), ykey = y.getFullYear() + '-' + (y.getMonth() + 1) + '-' + y.getDate();
   S.giftStreak = S.lastPlayDate === ykey ? (S.giftStreak || 0) + 1 : 1;
