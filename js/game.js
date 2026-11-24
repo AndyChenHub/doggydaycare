@@ -1160,7 +1160,7 @@ function advanceTutorialPacing() {
   } else if (step.id === 'build_tub') {
     if (hasDone('tub') && inYard && (!d.need || d.need.type !== 'bath')) setTutNeed('bath', 'scratch');
   } else if (step.id === 'return') {
-    if (d.state !== 'bath' && !d.called && !S.owners.some(function (o) { return o.dogId === d.id && (o.state === 'waitPickup' || o.state === 'walkIn' || o.state === 'toHandover' || o.state === 'handover'); })) {
+    if (!d.called && !S.owners.some(function (o) { return o.dogId === d.id && (o.state === 'waitPickup' || o.state === 'walkIn' || o.state === 'toHandover' || o.state === 'handover'); })) {
       d.need = null;
       d.pickupDay = S.day;
       d.pickupAt = S.dayTime;
@@ -1290,6 +1290,11 @@ function tutorialGuidance() {
       callout = 'RETURN AT SERVE PAD';
       subText = 'Walk back to the SERVE pad behind the counter to return ' + dName + ' to their owner!';
       col = '#ffd54a';
+    } else if (d && d.state === 'bath') {
+      tx = d.x; ty = d.y;
+      callout = 'FINISHING BATH…';
+      subText = dName + ' is finishing their bath while their owner arrives at the counter!';
+      col = '#80d8ff';
     } else {
       if (d) { tx = d.x; ty = d.y; }
       callout = 'LEASH ' + dName.toUpperCase();
