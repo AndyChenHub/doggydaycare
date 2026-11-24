@@ -1,7 +1,7 @@
 'use strict';
 var UI = {
   mode: 'title', prevMode: 'play', actions: null, mouse: { sx: 0, sy: 0, in: false },
-  buildSel: null, buildTool: null, buildTab: 'care',
+  buildSel: null, buildTool: null, buildTab: 'care', moveObj: null, actionObj: null,
   summary: null, cashShown: 0, cashPulse: 0, lastRoster: 0, modalStack: [], dexSel: null, dexNew: 0,
   tasksOpen: false, rosterOpen: false,
   camFocus: null, sceneT: 0, miniT: 0, miniDirty: true, cashWorld: null, titleT: 0,
@@ -17,7 +17,7 @@ function setMode(m) {
   UI.mode = m;
   document.body.classList.toggle('building', m === 'build');
   document.body.classList.toggle('title', !!UI.inTitle);
-  if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; CAM.panX = 0; CAM.panY = 0; }
+  if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; }
   if (m !== 'play') { UI.joy = null; UI.touchTarget = null; }
   $('buildpanel').hidden = m !== 'build';
   if (m === 'build') renderBuildPanel();
@@ -141,6 +141,23 @@ var MODAL_ACTS = {
   defaults: function () { var od = dayLen(); settings = defaultSettings(); if (S && dayLen() !== od) S.dayTime *= dayLen() / od; saveSettings(); closeModal(); openSettings(); },
   yes: function () { var f = UI.confirmYes; closeModal(); if (f) f(); },
   no: function () { closeModal(); },
+  moveobj: function () {
+    var o = UI.actionObj; closeModal();
+    if (!o) return;
+    if (o.type === 'tub' && o.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
+    setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; renderBuildPanel();
+    toast('↔️ Tap any open green tile in the yard to move ' + CAT_BY_ID[o.type].name, '');
+  },
+  upgobj: function () {
+    var o = UI.actionObj; closeModal();
+    if (o) promptUpgradeObject(o);
+  },
+  sellobj: function () {
+    var o = UI.actionObj; closeModal();
+    if (!o) return;
+    if (!canSell(o)) { toast(isLastEssential(o) ? 'You need at least one ' + CAT_BY_ID[o.type].name : 'A dog is using that right now', 'bad'); sfx('error'); return; }
+    confirmBox('Sell the ' + CAT_BY_ID[o.type].name + ' (Lv ' + (o.lvl || 1) + ') for ' + fmtMoney(sellValue(o)) + '?', function () { sellObject(o); renderBuildPanel(); });
+  },
   totitle: function () { saveGame(); if (typeof setActiveSession === 'function') setActiveSession(false); fadeThen(function () { S = null; UI.modalStack = []; groundDirty = true; walkGrid = null; CAM.ready = false; FX.parts = []; FX.floats = []; $('toasts').innerHTML = ''; toastQ.length = 0; openTitle(); }); },
 };
 function confirmBox(text, yes) {
@@ -322,14 +339,16 @@ function objectIconURL(type) {
 }
 function renderBuildPanel() {
   var tabs = [['care', 'Care'], ['fun', 'Fun'], ['decor', 'Decor'], ['land', 'Land'], ['biz', 'Research & Staff']];
-  var h = '<div class="bp-head"><span>🔨 Shop &amp; Upgrade</span><button id="upgBtn" class="' + (UI.buildTool === 'upgrade' ? 'on' : '') + '">⬆️ Upgrade</button><button id="sellBtn" class="' + (UI.buildTool === 'sell' ? 'on' : '') + '">💸 Sell</button><button id="bpClose">Done</button></div>' +
+  var h = '<div class="bp-head"><span>🔨 Shop</span><button id="moveBtn" class="' + (UI.buildTool === 'move' ? 'on' : '') + '">↔️ Move</button><button id="upgBtn" class="' + (UI.buildTool === 'upgrade' ? 'on' : '') + '">⬆️ Upgrade</button><button id="sellBtn" class="' + (UI.buildTool === 'sell' ? 'on' : '') + '">💸 Sell</button><button id="bpClose">Done</button></div>' +
     '<div class="tabs">' + tabs.map(function (t) { return '<button data-tab="' + t[0] + '" class="' + (UI.buildTab === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div><div class="items">';
   if (UI.buildTab === 'land') {
+    h += '<div class="bp-sub">Stand on the golden 🗺️ box at the yard border or tap below to expand!</div>';
     PLOTS.forEach(function (p) {
       if (!p.cost) return;
       var owned = plotOwned(p), pend = plotPending(p), locked = S.level < p.lvl;
       var far = !owned && !pend && !plotAdjacent(p);
-      h += '<div class="item' + (owned ? ' owned' : '') + (locked || far ? ' locked' : '') + (S.cash < p.cost && !owned && !locked ? ' poor' : '') + '" data-plot="' + p.id + '" style="grid-column:1/-1"><div class="ic">🗺️</div><div class="tx"><b>' + p.name + '</b><small>' + p.w + '×' + p.h + ' tiles · ⏱ ' + fmtDur(p.time) + (far && !locked ? ' · unlock neighbour first' : '') + '</small></div><div class="pr">' +
+      var unlTxt = (p.unlocks && p.unlocks.length) ? ' · Unlocks: ' + p.unlocks.join(', ') : '';
+      h += '<div class="item' + (owned ? ' owned' : '') + (locked || far ? ' locked' : '') + (S.cash < p.cost && !owned && !locked ? ' poor' : '') + '" data-plot="' + p.id + '" style="grid-column:1/-1"><div class="ic">🗺️</div><div class="tx"><b>' + p.name + '</b><small>' + p.w + '×' + p.h + ' tiles · ⏱ ' + fmtDur(p.time) + unlTxt + (far && !locked ? ' · unlock neighbour first' : '') + '</small></div><div class="pr">' +
         (owned ? '✅' : pend ? '🚜 ' + fmtDur((pend.end - Date.now()) / 1000) : locked ? '🔒 Lv ' + p.lvl : fmtMoney(p.cost)) + '</div></div>';
     });
   } else if (UI.buildTab === 'biz') {
@@ -361,25 +380,26 @@ function renderBuildPanel() {
   bpShowDesc('');
   UI.bpSig = buildSig();
 }
-var BP_HELP = 'Tap a building in the yard to upgrade it (Lv 1 → Lv 2 → Lv 3…), or pick a new item below.';
+var BP_HELP = 'Tap any building in the yard to Move, Upgrade, or Sell it, or pick a new item below.';
 function bpShowDesc(txt) {
   var el = $('bpDesc');
-  if (el) el.textContent = txt || (UI.buildTool === 'sell' ? 'Sell mode: tap a building in the yard to sell it.' : UI.buildTool === 'upgrade' ? 'Upgrade mode: tap any building in the yard to level it up!' : UI.buildSel ? 'Tap any green tile in the yard to build ' + CAT_BY_ID[UI.buildSel].name + ' (⏱ ' + fmtDur(CAT_BY_ID[UI.buildSel].time) + ')' : BP_HELP);
+  if (el) el.textContent = txt || (UI.buildTool === 'move' ? (UI.moveObj ? 'Moving ' + CAT_BY_ID[UI.moveObj.type].name + ' — tap any open green spot in the yard to place it!' : 'Move mode: tap any building or item in the yard to relocate it for free.') : UI.buildTool === 'sell' ? 'Sell mode: tap a building in the yard to sell it.' : UI.buildTool === 'upgrade' ? 'Upgrade mode: tap any building in the yard to level it up!' : UI.buildSel ? 'Tap any green tile in the yard to build ' + CAT_BY_ID[UI.buildSel].name + ' (⏱ ' + fmtDur(CAT_BY_ID[UI.buildSel].time) + ')' : BP_HELP);
 }
 (function () {
   var bp = $('buildpanel');
   bp.addEventListener('pointerdown', function (ev) {
     if (!ev.target.closest) return;
-    var t = ev.target.closest('#bpClose,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff]'); if (!t) return;
+    var t = ev.target.closest('#bpClose,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff]'); if (!t) return;
     initAudio();
     if (t.id === 'bpClose') { setMode('play'); sfx('ui_close'); return; }
-    if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; renderBuildPanel(); sfx('click'); return; }
-    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; renderBuildPanel(); sfx('click'); return; }
-    if (t.hasAttribute('data-tab')) { UI.buildTab = t.getAttribute('data-tab'); UI.buildSel = null; sfx('click'); renderBuildPanel(); var it = bp.querySelector('.items'); if (it) it.scrollTop = 0; return; }
+    if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
+    if (t.hasAttribute('data-tab')) { UI.buildTab = t.getAttribute('data-tab'); UI.buildSel = null; UI.moveObj = null; sfx('click'); renderBuildPanel(); var it = bp.querySelector('.items'); if (it) it.scrollTop = 0; return; }
     if (t.hasAttribute('data-item')) {
       var id = t.getAttribute('data-item'), c = CAT_BY_ID[id];
       if (S.level < c.lvl) { toast('🔒 Reach level ' + c.lvl + ' to build a ' + c.name, 'bad'); sfx('error'); return; }
-      UI.buildSel = UI.buildSel === id ? null : id; UI.buildTool = null; sfx('click'); renderBuildPanel(); return;
+      UI.buildSel = UI.buildSel === id ? null : id; UI.buildTool = null; UI.moveObj = null; sfx('click'); renderBuildPanel(); return;
     }
     if (t.hasAttribute('data-staff')) {
       var sid = t.getAttribute('data-staff'), sd = STAFF_BY_ID[sid];
@@ -404,10 +424,26 @@ function buildSig() {
 }
 function tryBuyPlot(p) {
   if (plotOwned(p) || plotPending(p)) return;
-  if (S.level < p.lvl) { toast('🔒 Reach level ' + p.lvl + ' to buy ' + p.name, 'bad'); sfx('error'); return; }
+  if (S.level < p.lvl) { toast('🔒 Reach level ' + p.lvl + ' to expand ' + p.name, 'bad'); sfx('error'); return; }
   if (!plotAdjacent(p)) { toast(p.name + ' does not touch your land yet — unlock a neighbouring plot first', 'bad'); sfx('error'); return; }
   if (S.cash < p.cost) { toast('Not enough cash for ' + p.name + ' (' + fmtMoney(p.cost) + ')', 'bad'); sfx('error'); return; }
-  confirmBox('Clear <b>' + p.name + '</b> for ' + fmtMoney(p.cost) + '?<br><small>⏱ Clearing takes ' + fmtDur(p.time) + ' in real time.</small>', function () { buyPlot(p); renderBuildPanel(); });
+  var unlHtml = (p.unlocks && p.unlocks.length) ? '<br><small>🎁 Unlocks in this area: <b>' + p.unlocks.join(' · ') + '</b></small>' : '';
+  confirmBox('Expand into <b>' + p.name + '</b> for ' + fmtMoney(p.cost) + '?<br><small>⏱ Clearing takes ' + fmtDur(p.time) + ' in real time.</small>' + unlHtml, function () { buyPlot(p); renderBuildPanel(); });
+}
+function promptObjectActions(o) {
+  var c = CAT_BY_ID[o.type], lv = o.lvl || 1, nextLv = lv + 1, cost = objUpgradeCost(o), req = objUpgradeReqLvl(o);
+  UI.actionObj = o;
+  var upgLabel = S.level < req ? ('⬆️ Upgrade Lv ' + nextLv + ' (🔒 Lv ' + req + ')') : ('⬆️ Upgrade to Lv ' + nextLv + ' (' + fmtMoney(cost) + ')');
+  var sellBtn = canSell(o) ? '<button data-act="sellobj" class="flat">💸 Sell (' + fmtMoney(sellValue(o)) + ')</button>' : '';
+  openModal('<h2>' + c.icon + ' ' + esc(c.name) + ' <small>Lv ' + lv + '</small></h2>' +
+    '<p style="text-align:center">' + esc(c.desc) + '</p>' +
+    '<div class="row col">' +
+    '<button data-act="moveobj" class="primary">↔️ Move to Another Spot</button>' +
+    '<button data-act="upgobj">' + upgLabel + '</button>' +
+    sellBtn +
+    '<button data-act="back" class="flat">Cancel</button>' +
+    '</div>', 'confirm', 'narrow');
+  bindModalButtons();
 }
 function promptRushSite(o) {
   var cost = rushCost(o), cName = CAT_BY_ID[o.type].name;
@@ -434,6 +470,33 @@ function handleBuildTap(clientX, clientY) {
   if (UI.mode !== 'build' || !S) return;
   var mw = screenToWorld(clientX, clientY), tx = tileOf(mw.x), ty = tileOf(mw.y);
   var site = objAt(tx, ty);
+  if (UI.moveObj) {
+    var mo = UI.moveObj, mDef = CAT_BY_ID[mo.type], mx = tx - Math.floor((mDef.w - 1) / 2), my = ty - Math.floor((mDef.h - 1) / 2);
+    if (canMoveObject(mo, mx, my)) {
+      moveObject(mo, mx, my);
+      UI.moveObj = null;
+      renderBuildPanel();
+      return;
+    }
+    if (site && site !== mo) {
+      if (site.type === 'tub' && site.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
+      UI.moveObj = site; sfx('click'); renderBuildPanel();
+      toast('↔️ Picked up ' + CAT_BY_ID[site.type].name + ' — tap an open green spot in the yard!', '');
+      return;
+    }
+    toast('Tap an open green tile in the yard to place ' + mDef.name, 'bad'); sfx('error');
+    return;
+  }
+  if (UI.buildTool === 'move') {
+    if (site) {
+      if (site.type === 'tub' && site.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
+      UI.moveObj = site; sfx('click'); renderBuildPanel();
+      toast('↔️ Picked up ' + CAT_BY_ID[site.type].name + ' — tap any open green spot to move it!', '');
+    } else {
+      toast('Tap any building or item in the yard that you want to move', '');
+    }
+    return;
+  }
   if (UI.buildSel && !(site && !site.done) && UI.buildTool !== 'upgrade' && UI.buildTool !== 'sell') {
     var def = CAT_BY_ID[UI.buildSel], x = tx - Math.floor((def.w - 1) / 2), y = ty - Math.floor((def.h - 1) / 2);
     if (S.cash < def.cost) { toast('Not enough cash for a ' + def.name, 'bad'); sfx('error'); return; }
@@ -453,7 +516,8 @@ function handleBuildTap(clientX, clientY) {
     return;
   }
   if (o && o.done) {
-    promptUpgradeObject(o);
+    if (UI.buildTool === 'upgrade') promptUpgradeObject(o);
+    else promptObjectActions(o);
     return;
   }
   var p = plotAt(tx, ty);

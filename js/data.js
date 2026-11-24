@@ -28,13 +28,13 @@ var MAP = {
 var FURN = {};
 MAP.shop.furniture.forEach(function (f) { FURN[f[0] + ',' + f[1]] = f[2]; });
 
-// yard land. 'base' is owned from the start. Long-term Clash of Clans expansion milestones.
+// yard land. 'base' is owned from the start. Walk onto the border expansion box or use the Land tab to expand!
 var PLOTS = [
-  { id: 'base',      name: 'Starter Yard',   x: 18, y: 18, w: 14, h: 14, cost: 0,     lvl: 1,  time: 0 },
-  { id: 'north',     name: 'North Lawn',     x: 18, y: 6,  w: 14, h: 12, cost: 850,   lvl: 3,  time: 180 },
-  { id: 'east',      name: 'East Meadow',    x: 32, y: 18, w: 13, h: 14, cost: 2400,  lvl: 6,  time: 600 },
-  { id: 'northeast', name: 'Orchard Corner', x: 32, y: 6,  w: 13, h: 12, cost: 6500,  lvl: 10, time: 1800 },
-  { id: 'far',       name: 'Lakeside Field', x: 45, y: 6,  w: 12, h: 26, cost: 18000, lvl: 15, time: 5400 },
+  { id: 'base',      name: 'Starter Yard',   x: 18, y: 18, w: 14, h: 14, cost: 0,    lvl: 1,  time: 0,   unlocks: [] },
+  { id: 'north',     name: 'North Lawn',     x: 18, y: 6,  w: 14, h: 12, cost: 450,  lvl: 2,  time: 45,  padX: 21, padY: 18, unlocks: ['🏖️ Sand Pit', '🧺 Picnic Table', '🚧 Agility Course'] },
+  { id: 'east',      name: 'East Meadow',    x: 32, y: 18, w: 13, h: 14, cost: 1200, lvl: 4,  time: 120, padX: 30, padY: 23, unlocks: ['🏊 Splash Pool', '🤖 Auto-Feeder', '🏠 Extra Kennel', '🐩 Dog Topiary'] },
+  { id: 'northeast', name: 'Orchard Corner', x: 32, y: 6,  w: 13, h: 12, cost: 3200, lvl: 7,  time: 300, padX: 30, padY: 11, unlocks: ['🪷 Lily Pond', '⛲ Fountain', '🦴 Golden Bone'] },
+  { id: 'far',       name: 'Lakeside Field', x: 45, y: 6,  w: 12, h: 26, cost: 7500, lvl: 10, time: 600, padX: 43, padY: 22, unlocks: ['🏛️ Royal Gazebo', '🏊 Lakeside Pool', '🚧 Agility Arena'] },
 ];
 // tiles that must stay free so the yard door is never blocked
 var KEEP_CLEAR = [[18, 23], [18, 24]];
@@ -119,16 +119,33 @@ var CATALOG = [
   { id: 'gazebo',     cat: 'decor', name: 'Gazebo',          icon: '🏛️', w: 3, h: 3, cost: 4800, time: 1800, lvl: 12, charm: 20, solid: true, desc: '+20 charm. The crown jewel of the daycare.' },
 ];
 
-// In-world floor unlock pads (shown progressively, 2 at a time, well-spaced across the yard)
+// In-world floor unlock pads (shown progressively across starter yard and newly expanded land plots!)
 var UNLOCK_PADS = [
-  { id: 'pad_water',   kind: 'obj',   type: 'waterbowl',  x: 29, y: 23 },
-  { id: 'pad_kennel',  kind: 'obj',   type: 'kennel',     x: 28, y: 28 },
-  { id: 'pad_play',    kind: 'obj',   type: 'playzone',   x: 23, y: 24 },
-  { id: 'pad_treat',   kind: 'obj',   type: 'treatjar',   x: 20, y: 23 },
-  { id: 'pad_recep',   kind: 'staff', staffId: 'receptionist', x: 5,  y: 23, w: 2, h: 2 },
-  { id: 'pad_sand',    kind: 'obj',   type: 'sandpit',    x: 24, y: 29 },
-  { id: 'pad_helper',  kind: 'staff', staffId: 'helper',       x: 20, y: 20, w: 2, h: 2 },
-  { id: 'pad_feeder',  kind: 'obj',   type: 'autofeeder', x: 26, y: 18 },
+  // Starter Yard ('base')
+  { id: 'pad_water',     plot: 'base',      kind: 'obj',   type: 'waterbowl',  x: 29, y: 21, uniqueType: true },
+  { id: 'pad_kennel',    plot: 'base',      kind: 'obj',   type: 'kennel',     x: 28, y: 28 },
+  { id: 'pad_play',      plot: 'base',      kind: 'obj',   type: 'playzone',   x: 23, y: 24 },
+  { id: 'pad_treat',     plot: 'base',      kind: 'obj',   type: 'treatjar',   x: 20, y: 23, uniqueType: true },
+  { id: 'pad_nap',       plot: 'base',      kind: 'obj',   type: 'napmat',     x: 24, y: 29 },
+  { id: 'pad_recep',     plot: 'base',      kind: 'staff', staffId: 'receptionist', x: 5,  y: 23, w: 2, h: 2 },
+  { id: 'pad_helper',    plot: 'base',      kind: 'staff', staffId: 'helper',       x: 20, y: 20, w: 2, h: 2 },
+  // Unlocked when North Lawn ('north') is expanded!
+  { id: 'pad_n_sand',    plot: 'north',     kind: 'obj',   type: 'sandpit',    x: 20, y: 13, ignoreLvl: true },
+  { id: 'pad_n_picnic',  plot: 'north',     kind: 'obj',   type: 'picnic',     x: 27, y: 13, ignoreLvl: true },
+  { id: 'pad_n_agility', plot: 'north',     kind: 'obj',   type: 'agility',    x: 22, y: 8,  ignoreLvl: true },
+  // Unlocked when East Meadow ('east') is expanded!
+  { id: 'pad_e_pool',    plot: 'east',      kind: 'obj',   type: 'pool',       x: 35, y: 22, ignoreLvl: true },
+  { id: 'pad_e_feeder',  plot: 'east',      kind: 'obj',   type: 'autofeeder', x: 34, y: 19, ignoreLvl: true },
+  { id: 'pad_e_kennel2', plot: 'east',      kind: 'obj',   type: 'kennel',     x: 36, y: 28, ignoreLvl: true },
+  { id: 'pad_e_topiary', plot: 'east',      kind: 'obj',   type: 'topiary',    x: 41, y: 24, ignoreLvl: true },
+  // Unlocked when Orchard Corner ('northeast') is expanded!
+  { id: 'pad_ne_pond',   plot: 'northeast', kind: 'obj',   type: 'pond',       x: 35, y: 10, ignoreLvl: true },
+  { id: 'pad_ne_fount',  plot: 'northeast', kind: 'obj',   type: 'fountain',   x: 40, y: 13, ignoreLvl: true },
+  { id: 'pad_ne_statue', plot: 'northeast', kind: 'obj',   type: 'statue',     x: 34, y: 14, ignoreLvl: true },
+  // Unlocked when Lakeside Field ('far') is expanded!
+  { id: 'pad_f_gazebo',  plot: 'far',       kind: 'obj',   type: 'gazebo',     x: 49, y: 13, ignoreLvl: true },
+  { id: 'pad_f_pool2',   plot: 'far',       kind: 'obj',   type: 'pool',       x: 48, y: 21, ignoreLvl: true },
+  { id: 'pad_f_agil2',   plot: 'far',       kind: 'obj',   type: 'agility',    x: 48, y: 26, ignoreLvl: true },
 ];
 var CAT_BY_ID = {};
 CATALOG.forEach(function (c) { CAT_BY_ID[c.id] = c; });

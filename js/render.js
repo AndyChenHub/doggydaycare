@@ -556,31 +556,47 @@ function drawZones(c, t, v) {
     drawPad(c, pad, t, useful, act);
     c.globalAlpha = useful || act ? 1 : 0.55; emoji(c, PAD_ICON[o.type], pad.x + pad.w / 2, pad.y + pad.h / 2 + 1, 15); c.globalAlpha = 1;
   });
-  // 3. In-world My Mini Mart floor unlock pads ($Cost pads)
+  // 3. In-world My Mini Mart floor unlock pads ($Cost pads & Land Expansion boxes)
   if (typeof activeUnlockPads === 'function') {
     var upads = activeUnlockPads();
     for (var ui = 0; ui < upads.length; ui++) {
       var up = upads[ui], rx = up.x * TILE + 3, ry = up.y * TILE + 3, rw = up.w * TILE - 6, rh = up.h * TILE - 6;
-      if (!inView(v, rx, ry, rw, rh)) continue;
-      var canAfford = S.cash >= up.cost, filling = typeof PAD_FILL !== 'undefined' && PAD_FILL.id === up.id && PAD_FILL.prog > 0;
+      if (!inView(v, rx - 40, ry - 40, rw + 80, rh + 80)) continue;
+      var isPlot = up.kind === 'plot';
+      var pend = isPlot ? up.pending : null;
+      var lvlOk = !isPlot || S.level >= (up.lvl || 1);
+      var canAfford = !pend && lvlOk && S.cash >= up.cost;
+      var filling = typeof PAD_FILL !== 'undefined' && PAD_FILL.id === up.id && PAD_FILL.prog > 0;
       var pulse = canAfford ? 0.5 + Math.sin(t * 5) * 0.25 : 0;
-      c.fillStyle = canAfford ? 'rgba(85, 195, 75, ' + (0.24 + pulse * 0.14) + ')' : 'rgba(40, 26, 16, 0.24)';
+      c.fillStyle = pend ? 'rgba(255, 193, 7, 0.28)' : isPlot ? (canAfford ? 'rgba(245, 180, 45, ' + (0.28 + pulse * 0.16) + ')' : 'rgba(65, 44, 24, 0.34)') : (canAfford ? 'rgba(85, 195, 75, ' + (0.24 + pulse * 0.14) + ')' : 'rgba(40, 26, 16, 0.24)');
       rr(c, rx, ry, rw, rh, 10); c.fill();
       if (filling) {
         c.save(); rr(c, rx, ry, rw, rh, 10); c.clip();
-        c.fillStyle = 'rgba(127, 235, 100, 0.65)';
+        c.fillStyle = isPlot ? 'rgba(255, 213, 74, 0.72)' : 'rgba(127, 235, 100, 0.65)';
         var fh = rh * clamp(PAD_FILL.prog, 0, 1);
         c.fillRect(rx, ry + rh - fh, rw, fh);
         c.restore();
       }
-      c.strokeStyle = filling ? '#ffe66d' : canAfford ? '#9ef08a' : 'rgba(255,250,230,0.4)';
-      c.lineWidth = canAfford ? 2.6 : 1.6;
+      c.strokeStyle = filling ? '#ffe66d' : pend ? '#ffd54a' : isPlot ? (canAfford ? '#ffe082' : 'rgba(255,224,130,0.55)') : (canAfford ? '#9ef08a' : 'rgba(255,250,230,0.4)');
+      c.lineWidth = canAfford || isPlot ? 2.6 : 1.6;
       c.setLineDash(canAfford ? [] : [6, 5]);
       rr(c, rx, ry, rw, rh, 10); c.stroke(); c.setLineDash([]);
       var cx = rx + rw / 2, cy = ry + rh / 2;
-      emoji(c, up.icon, cx, cy - 8, 16);
-      c.font = '13px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
-      outlined(c, fmtMoney(up.cost), cx, cy + 9, canAfford ? '#b9f6ca' : '#ffd0c4', 'rgba(30,18,10,0.9)', 2.5);
+      if (isPlot) {
+        emoji(c, pend ? '🚜' : '🗺️', cx, cy - 16, 16);
+        c.font = '11.5px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+        outlined(c, up.name, cx, cy + 1, '#fff8e1', 'rgba(30,18,10,0.92)', 2.4);
+        var pSub = pend ? fmtDur((pend.end - Date.now()) / 1000) : !lvlOk ? ('🔒 Lv ' + up.lvl) : fmtMoney(up.cost);
+        c.font = '12.5px ' + HEAD_FONT;
+        outlined(c, pSub, cx, cy + 16, pend ? '#ffe082' : canAfford ? '#b9f6ca' : '#ffd0c4', 'rgba(30,18,10,0.92)', 2.5);
+        if (up.unlocks && up.unlocks.length && dist(S.player.x, S.player.y, cx, cy) < 135) {
+          bubble(c, cx, ry - 6, 'Unlocks: ' + up.unlocks.join(' · '), { size: 11, bg: '#4a3426', fg: '#ffe9a8', stroke: '#2a1a10' });
+        }
+      } else {
+        emoji(c, up.icon, cx, cy - 8, 16);
+        c.font = '13px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+        outlined(c, fmtMoney(up.cost), cx, cy + 9, canAfford ? '#b9f6ca' : '#ffd0c4', 'rgba(30,18,10,0.9)', 2.5);
+      }
     }
   }
   // 4. Rings round the dogs that need you
@@ -795,8 +811,29 @@ function drawBuildGrid(c) {
 }
 function mouseWorld() { return screenToWorld(UI.mouse.sx, UI.mouse.sy); }
 function drawBuildGhost(c, t) {
+  if (UI.moveObj) {
+    var mo = UI.moveObj, mc = CAT_BY_ID[mo.type];
+    c.save();
+    c.strokeStyle = '#80d8ff'; c.lineWidth = 3; c.setLineDash([7, 5]);
+    rr(c, mo.x * TILE + 1, mo.y * TILE + 1, mo.w * TILE - 2, mo.h * TILE - 2, 8); c.stroke();
+    c.setLineDash([]);
+    bubble(c, (mo.x + mo.w / 2) * TILE, mo.y * TILE - 10, '↔️ Moving ' + (mc ? mc.name : 'item') + ' — tap new green spot', { size: 11.5, bg: '#1b4d6e', fg: '#e1f5fe', stroke: '#0d2b40' });
+    c.restore();
+  }
   var m = UI.mouse; if (!m.in) return;
   var mw = mouseWorld(), tx = tileOf(mw.x), ty = tileOf(mw.y);
+  if (UI.moveObj) {
+    var mo2 = UI.moveObj, mDef = CAT_BY_ID[mo2.type], mx = tx - Math.floor((mDef.w - 1) / 2), my = ty - Math.floor((mDef.h - 1) / 2);
+    var mOk = canMoveObject(mo2, mx, my);
+    c.fillStyle = mOk ? 'rgba(128,216,255,0.34)' : 'rgba(255,90,80,0.32)';
+    rr(c, mx * TILE + 1, my * TILE + 1, mDef.w * TILE - 2, mDef.h * TILE - 2, 8); c.fill();
+    c.strokeStyle = mOk ? '#80d8ff' : '#ff6b5a'; c.lineWidth = 2.5; c.stroke();
+    c.globalAlpha = mOk ? 0.85 : 0.5;
+    var mArt = artOf(mo2.type);
+    if (mArt) { try { mArt.draw(c, { type: mo2.type, x: mx, y: my, w: mDef.w, h: mDef.h, id: mo2.id, occupied: false, useT: 99, label: null }, t, ENV); } catch (e) {} }
+    c.globalAlpha = 1;
+    return;
+  }
   if (UI.buildSel) {
     var def = CAT_BY_ID[UI.buildSel], x = tx - Math.floor((def.w - 1) / 2), y = ty - Math.floor((def.h - 1) / 2);
     var site = objAt(tx, ty);
@@ -811,12 +848,14 @@ function drawBuildGhost(c, t) {
   } else {
     var o = objAt(tx, ty);
     if (o) {
-      var sell = UI.buildTool === 'sell';
-      if (!sell && !o.done) { siteHint(c, o); return; }
-      c.strokeStyle = sell ? '#ff6b5a' : '#c3a6ff'; c.lineWidth = 3; rr(c, o.x * TILE + 1, o.y * TILE + 1, o.w * TILE - 2, o.h * TILE - 2, 8); c.stroke();
+      var sell = UI.buildTool === 'sell', mv = UI.buildTool === 'move';
+      if (!sell && !mv && !o.done) { siteHint(c, o); return; }
+      c.strokeStyle = sell ? '#ff6b5a' : mv ? '#80d8ff' : '#c3a6ff'; c.lineWidth = 3; rr(c, o.x * TILE + 1, o.y * TILE + 1, o.w * TILE - 2, o.h * TILE - 2, 8); c.stroke();
       var label = sell
         ? (canSell(o) ? 'Sell for ' + fmtMoney(sellValue(o)) : isLastEssential(o) ? 'Your only one — can\'t sell' : 'In use — can\'t sell')
-        : (CAT_BY_ID[o.type].name + ' Lv' + (o.lvl || 1) + ' · ⬆️ Lv' + ((o.lvl || 1) + 1) + ' (' + fmtMoney(objUpgradeCost(o)) + ')');
+        : mv
+        ? ('↔️ Tap to pick up & move ' + CAT_BY_ID[o.type].name)
+        : (CAT_BY_ID[o.type].name + ' Lv' + (o.lvl || 1) + ' · Tap to Move / Upgrade');
       bubble(c, (o.x + o.w / 2) * TILE, o.y * TILE - 10, label, { size: 11.5, bg: '#4a3426', fg: '#fff', stroke: '#2a1a10' });
     } else {
       var p = plotAt(tx, ty);

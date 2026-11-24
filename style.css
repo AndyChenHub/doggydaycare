@@ -210,10 +210,10 @@ body.building #bottom-context { display: none !important; }
   display: flex; flex-direction: column; padding: 6px 8px;
 }
 #buildpanel[hidden], #roster[hidden], #tasks[hidden] { display: none !important; }
-.bp-head { display: flex; gap: 5px; align-items: center; font: 400 18px var(--head); margin-bottom: 4px; }
-.bp-head span { margin-right: auto; }
+.bp-head { display: flex; gap: 4px; align-items: center; font: 400 16px var(--head); margin-bottom: 4px; }
+.bp-head span { margin-right: auto; white-space: nowrap; }
 .bp-head .on { background: linear-gradient(#e8796c, #c2483c) !important; }
-.bp-head button { padding: 2px 9px !important; font-size: 14px !important; }
+.bp-head button { padding: 2px 7px !important; font-size: 13px !important; white-space: nowrap; }
 .tabs { display: flex; gap: 3px; margin-bottom: 5px; }
 .tabs button { flex: 1; padding: 4px 2px !important; font-size: 14px !important; border-radius: 7px !important; }
 .tabs button.on { background: linear-gradient(#f2a93b, #d9782b) !important; }

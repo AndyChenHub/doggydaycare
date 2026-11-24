@@ -930,22 +930,61 @@ function canPlacePadObj(type, x, y) {
   }
   return keepsConnected(x, y, c.w, c.h);
 }
+function plotById(id) {
+  for (var i = 0; i < PLOTS.length; i++) if (PLOTS[i].id === id) return PLOTS[i];
+  return null;
+}
+function findPlotPadSpot(p) {
+  if (!p) return null;
+  var pw = 2, ph = 2;
+  function validSpot(sx, sy) {
+    for (var ty = sy; ty < sy + ph; ty++) for (var tx = sx; tx < sx + pw; tx++) {
+      if (baseKind(tx, ty) !== 'yard') return false;
+      if (objAt(tx, ty)) return false;
+    }
+    return true;
+  }
+  if (p.padX != null && p.padY != null && validSpot(p.padX, p.padY)) return [p.padX, p.padY];
+  // Search border tiles inside owned yard right next to plot p
+  var candidates = [];
+  for (var y = Math.max(MAP.yard.y0, p.y - ph); y <= Math.min(MAP.yard.y1 - ph + 1, p.y + p.h); y++) {
+    for (var x = Math.max(MAP.yard.x0, p.x - pw); x <= Math.min(MAP.yard.x1 - pw + 1, p.x + p.w); x++) {
+      var touches = (x + pw === p.x && y < p.y + p.h && y + ph > p.y) ||
+                    (x === p.x + p.w && y < p.y + p.h && y + ph > p.y) ||
+                    (y + ph === p.y && x < p.x + p.w && x + pw > p.x) ||
+                    (y === p.y + p.h && x < p.x + p.w && x + pw > p.x);
+      if (touches && validSpot(x, y)) candidates.push([x, y]);
+    }
+  }
+  if (!candidates.length) return null;
+  var cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+  candidates.sort(function (a, b) { return dist(a[0] + 1, a[1] + 1, cx, cy) - dist(b[0] + 1, b[1] + 1, cx, cy); });
+  return candidates[0];
+}
 function activeUnlockPads() {
   if (!S || typeof UNLOCK_PADS === 'undefined') return [];
-  var out = [];
+  if (!S.builtPads) S.builtPads = {};
+  var out = [], itemCount = 0;
   for (var i = 0; i < UNLOCK_PADS.length; i++) {
-    if (out.length >= 2) break; // My Mini Mart progressive reveal: show at most 2 unlock pads at once
+    if (itemCount >= 2) break; // Show at most 2 building/staff unlock pads at once
     var up = UNLOCK_PADS[i];
+    if (S.builtPads[up.id]) continue;
+    if (up.plot && up.plot !== 'base') {
+      var reqP = plotById(up.plot);
+      if (!reqP || !plotOwned(reqP)) continue;
+    }
     if (up.kind === 'obj') {
       var def = CAT_BY_ID[up.type];
-      if (!def || S.level < def.lvl) continue;
-      if (S.objects.some(function (o) { return o.type === up.type; })) continue;
+      if (!def) continue;
+      if (!up.ignoreLvl && S.level < def.lvl) continue;
+      if (up.uniqueType && S.objects.some(function (o) { return o.type === up.type; })) continue;
       if (!canPlacePadObj(up.type, up.x, up.y)) continue;
       out.push({
         id: up.id, kind: 'obj', type: up.type, x: up.x, y: up.y, w: def.w, h: def.h,
         name: def.name, icon: def.icon, cost: def.cost,
         rect: { x: up.x * TILE + 2, y: up.y * TILE + 2, w: def.w * TILE - 4, h: def.h * TILE - 4 },
       });
+      itemCount++;
     } else if (up.kind === 'staff') {
       var sd = STAFF_BY_ID[up.staffId];
       if (!sd || S.level < sd.lvl || staffHired(up.staffId)) continue;
@@ -955,7 +994,23 @@ function activeUnlockPads() {
         name: sd.name, icon: sd.icon, cost: sd.wage,
         rect: { x: up.x * TILE + 2, y: up.y * TILE + 2, w: sw * TILE - 4, h: sh * TILE - 4 },
       });
+      itemCount++;
     }
+  }
+  // Stand-on Land Expansion Boxes along the border of adjacent locked plots!
+  for (var pi = 0; pi < PLOTS.length; pi++) {
+    var pl = PLOTS[pi];
+    if (!pl.cost || plotOwned(pl)) continue;
+    if (!plotAdjacent(pl)) continue;
+    var spot = findPlotPadSpot(pl);
+    if (!spot) continue;
+    var pend = plotPending(pl);
+    out.push({
+      id: 'pad_plot_' + pl.id, kind: 'plot', plotId: pl.id, plot: pl,
+      x: spot[0], y: spot[1], w: 2, h: 2,
+      name: pl.name, icon: '🗺️', cost: pl.cost, lvl: pl.lvl, pending: pend, unlocks: pl.unlocks || [],
+      rect: { x: spot[0] * TILE + 2, y: spot[1] * TILE + 2, w: 2 * TILE - 4, h: 2 * TILE - 4 },
+    });
   }
   return out;
 }
@@ -965,8 +1020,22 @@ function updateUnlockPads(dt) {
   for (var i = 0; i < pads.length; i++) {
     if (inRect(p.x, p.y, pads[i].rect)) { hit = pads[i]; break; }
   }
-  if (!hit) { PAD_FILL.id = null; PAD_FILL.prog = 0; return; }
+  if (!hit) { PAD_FILL.id = null; PAD_FILL.prog = 0; PAD_FILL.warnId = null; return; }
+  if (hit.kind === 'plot') {
+    if (hit.pending) { PAD_FILL.id = hit.id; PAD_FILL.prog = 0; return; }
+    if (S.level < hit.lvl) {
+      if (PAD_FILL.warnId !== hit.id) {
+        PAD_FILL.warnId = hit.id;
+        toast('🔒 Reach Level ' + hit.lvl + ' to expand ' + hit.name + (hit.unlocks.length ? ' (Unlocks ' + hit.unlocks.join(', ') + ')' : ''), 'bad');
+      }
+      PAD_FILL.id = hit.id; PAD_FILL.prog = 0; return;
+    }
+  }
   if (S.cash < hit.cost) {
+    if (hit.kind === 'plot' && PAD_FILL.warnId !== hit.id) {
+      PAD_FILL.warnId = hit.id;
+      toast('🗺️ Expand ' + hit.name + ' (' + fmtMoney(hit.cost) + ') — Unlocks: ' + (hit.unlocks || []).join(', '), '');
+    }
     PAD_FILL.id = hit.id; PAD_FILL.prog = 0;
     return;
   }
@@ -981,9 +1050,11 @@ function updateUnlockPads(dt) {
   }
   if (PAD_FILL.prog >= 1) {
     PAD_FILL.id = null; PAD_FILL.prog = 0;
+    if (!S.builtPads) S.builtPads = {};
     if (hit.kind === 'obj') {
       var c = CAT_BY_ID[hit.type];
       S.cash -= c.cost; S.stats.spent += c.cost;
+      S.builtPads[hit.id] = true;
       var o = addObject(hit.type, hit.x, hit.y, false);
       var ox = (o.x + o.w / 2) * TILE, oy = (o.y + o.h / 2) * TILE;
       if (!c.floor && !canStand(p.x, p.y)) { p.y = (o.y + o.h + 0.45) * TILE; }
@@ -998,9 +1069,15 @@ function updateUnlockPads(dt) {
       if (typeof MP !== 'undefined') MP.recordAction('build', { item: hit.type, name: c.name, icon: c.icon, cost: c.cost, x: hit.x, y: hit.y });
       saveGame();
     } else if (hit.kind === 'staff') {
+      S.builtPads[hit.id] = true;
       toggleStaff(hit.staffId);
       var sx = (hit.x + hit.w / 2) * TILE, sy = (hit.y + hit.h / 2) * TILE;
       confetti(sx, sy, 28); tut('build');
+    } else if (hit.kind === 'plot' && hit.plot) {
+      buyPlot(hit.plot);
+      var px = (hit.x + 1) * TILE, py = (hit.y + 1) * TILE;
+      burst(px, py, 'dust', 22);
+      confetti(px, py, 32);
     }
   }
 }
@@ -1417,6 +1494,82 @@ function keepsConnected(x, y, w, h) {
   var nAfter = flood(_floodGrid, _floodSeen); if (nAfter === -1) return false;
   return nAfter === nBefore - lost; // everything that was reachable (minus the footprint) still is
 }
+function canMoveObject(o, nx, ny) {
+  if (!o) return false;
+  if (o.type === 'tub' && o.dogId) return false; // wait until bath finishes
+  for (var ty = ny; ty < ny + o.h; ty++) for (var tx = nx; tx < nx + o.w; tx++) {
+    if (baseKind(tx, ty) !== 'yard') return false;
+    var existing = objAt(tx, ty);
+    if (existing && existing !== o) return false;
+    for (var i = 0; i < KEEP_CLEAR.length; i++) if (KEEP_CLEAR[i][0] === tx && KEEP_CLEAR[i][1] === ty) return false;
+  }
+  return keepsConnectedMoving(o, nx, ny);
+}
+function keepsConnectedMoving(o, nx, ny) {
+  if (!walkGrid || _gridState !== S) buildWalk();
+  var start = YARD_ENTRY[1] * W + YARD_ENTRY[0];
+  function flood(g, seen) {
+    if (!g[start]) return -1;
+    seen.fill(0);
+    var q = _floodQ, qt = 0, n = 0;
+    seen[start] = 1; q[qt++] = start;
+    while (qt > 0) {
+      var cI = q[--qt]; n++;
+      var cx = cI % W, cy = (cI / W) | 0;
+      if (cx + 1 < W) { var n0 = cI + 1; if (g[n0] && !seen[n0]) { seen[n0] = 1; q[qt++] = n0; } }
+      if (cx > 0)     { var n1 = cI - 1; if (g[n1] && !seen[n1]) { seen[n1] = 1; q[qt++] = n1; } }
+      if (cy + 1 < H) { var n2 = cI + W; if (g[n2] && !seen[n2]) { seen[n2] = 1; q[qt++] = n2; } }
+      if (cy > 0)     { var n3 = cI - W; if (g[n3] && !seen[n3]) { seen[n3] = 1; q[qt++] = n3; } }
+    }
+    return n;
+  }
+  _floodGrid.set(walkGrid);
+  // Free o's current footprint if it was solid
+  if (objSolid(o)) {
+    for (var oy = o.y; oy < o.y + o.h; oy++) for (var ox = o.x; ox < o.x + o.w; ox++) {
+      if (ox >= 0 && oy >= 0 && ox < W && oy < H && baseKind(ox, oy) === 'yard') _floodGrid[oy * W + ox] = 1;
+    }
+  }
+  var nBefore = flood(_floodGrid, _floodSeen); if (nBefore === -1) return false;
+  if (!objSolid(o)) return true;
+  var lost = 0;
+  for (var ty = ny; ty < ny + o.h; ty++) for (var tx = nx; tx < nx + o.w; tx++) {
+    var idx = ty * W + tx;
+    if (_floodGrid[idx] && _floodSeen[idx]) lost++;
+    _floodGrid[idx] = 0;
+  }
+  var nAfter = flood(_floodGrid, _floodSeen); if (nAfter === -1) return false;
+  return nAfter === nBefore - lost;
+}
+function moveObject(o, nx, ny) {
+  if (!canMoveObject(o, nx, ny)) { sfx('error'); return false; }
+  o.x = nx; o.y = ny;
+  markDirty();
+  var c = CAT_BY_ID[o.type];
+  if (o.dogId) {
+    var kd = dogById(o.dogId);
+    if (kd && kd.state === 'kennel') { kd.x = (o.x + o.w / 2) * TILE; kd.y = (o.y + o.h - 0.3) * TILE; }
+  }
+  if (!c.floor && !canStand(S.player.x, S.player.y)) { S.player.y = (o.y + o.h + 0.45) * TILE; }
+  S.dogs.forEach(function (d) {
+    if (d.state === 'leashed' || d.state === 'bath' || d.state === 'kennel' || d.state === 'leaving' || d.state === 'arriving') return;
+    var tx = tileOf(d.x), ty = tileOf(d.y);
+    if (tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h && objSolid(o)) {
+      var t2 = nearestWalkable(d.x, d.y); d.x = (t2[0] + .5) * TILE; d.y = (t2[1] + .5) * TILE;
+    }
+    d.path = null;
+  });
+  if (objSolid(o)) {
+    S.poops = S.poops.filter(function (pp) { var tx = tileOf(pp.x), ty = tileOf(pp.y); return !(tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h); });
+  }
+  var cx = (o.x + o.w / 2) * TILE, cy = (o.y + o.h / 2) * TILE;
+  burst(cx, cy, 'dust', 14);
+  float(cx, o.y * TILE - 10, '↔️ Moved ' + (c ? c.name : 'item'), '#80d8ff', 1.15);
+  sfx('place');
+  if (typeof MP !== 'undefined') MP.sendWorldSync(true);
+  saveGame();
+  return true;
+}
 function placeBuild(type, x, y) {
   var c = CAT_BY_ID[type];
   if (!c || S.level < c.lvl || S.cash < c.cost || !canPlace(type, x, y)) { sfx('error'); return false; }
@@ -1501,7 +1654,10 @@ function buyPlot(p) {
   if (!p || S.cash < p.cost || S.level < p.lvl || plotOwned(p) || plotPending(p) || !plotAdjacent(p)) { sfx('error'); return; }
   S.cash -= p.cost; S.stats.spent += p.cost;
   S.plots.push({ id: p.id, end: Date.now() + p.time * 1000 });
-  sfx('buy'); toast('🚜 Clearing ' + p.name + ' — ready in ' + fmtDur(p.time), 'good'); markDirty(p);
+  sfx('buy');
+  var unlTxt = (p.unlocks && p.unlocks.length) ? ' · Unlocks: ' + p.unlocks.join(', ') : '';
+  toast('🚜 Expanding ' + p.name + ' — ready in ' + fmtDur(p.time) + unlTxt, 'good');
+  markDirty(p);
   if (typeof MP !== 'undefined') MP.recordAction('plot', { item: p.id, name: p.name, icon: '🗺️', cost: p.cost });
   saveGame();
 }
@@ -1538,7 +1694,10 @@ function checkBuilds() {
       var p = PLOTS.filter(function (q) { return q.id === pl.id; })[0];
       if (p) {
         markDirty(p);
-        toast('🗺️ ' + p.name + ' is open! More room to build.', 'good'); sfx('built'); confetti((p.x + p.w / 2) * TILE, (p.y + p.h / 2) * TILE, 50);
+        var unlMsg = (p.unlocks && p.unlocks.length) ? ' New unlock boxes ready: ' + p.unlocks.join(' · ') : ' More room to build!';
+        toast('🗺️ ' + p.name + ' is open!' + unlMsg, 'good');
+        if (typeof showBanner === 'function') showBanner('🗺️ ' + p.name + ' Expanded!', (p.unlocks && p.unlocks.length) ? 'Unlocked: ' + p.unlocks.join(' · ') : 'New buildable land & unlock boxes!');
+        sfx('built'); confetti((p.x + p.w / 2) * TILE, (p.y + p.h / 2) * TILE, 55);
       } else markDirty(true);
     }
   });
