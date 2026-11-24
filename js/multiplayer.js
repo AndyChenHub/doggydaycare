@@ -54,6 +54,7 @@ var MP = (function () {
   var lastRetainedSent = 0;
   var lastLocalActionAt = 0;
   var lastResetTs = 0;
+  var joiningWaitUntil = 0;
   var pendingRetainedPublish = false;
   var browserOnline = (typeof navigator === 'undefined' || navigator.onLine !== false);
   var summaryPending = false;
@@ -542,6 +543,7 @@ var MP = (function () {
   }
 
   function sendJoin() {
+    var waitRemote = joiningWaitUntil > Date.now() && !roomState;
     sendPacket({
       type: 'join',
       rev: rev,
@@ -551,7 +553,7 @@ var MP = (function () {
       dir: S && S.player ? S.player.dir : 'down',
       face: S && S.player ? S.player.face : 1,
       carry: S && S.player ? S.player.carry : null,
-      state: (!roomState && S) ? serializeSharedState() : undefined,
+      state: (!roomState && S && !waitRemote) ? serializeSharedState() : undefined,
     }, false);
   }
 
@@ -1095,7 +1097,8 @@ var MP = (function () {
 
     // Periodically sync shared world state (every 380ms if host or alone, plus retained snapshot every 2.5s)
     var isHost = !hostId || hostId === playerId || !peers[hostId] || !peers[hostId].online;
-    if (isHost && nowMs - lastWorldSent >= 380) {
+    var waitRemoteSnap = joiningWaitUntil > nowMs && !roomState;
+    if (isHost && !waitRemoteSnap && nowMs - lastWorldSent >= 380) {
       lastWorldSent = nowMs;
       var saveSnap = (nowMs - lastRetainedSent >= 2500);
       sendWorldSync(saveSnap);
@@ -1723,13 +1726,18 @@ var MP = (function () {
     });
   }
 
-  function switchRoom(newCode) {
+  function switchRoom(newCode, isJoiningExisting) {
     roomCode = cleanCode(newCode);
     peers = {};
     roomState = null;
     unreadEvents = [];
     recentEvents = [];
     lastSeenSeq = 0;
+    if (isJoiningExisting) {
+      lastResetTs = 0;
+      lastLocalActionAt = 0;
+      joiningWaitUntil = Date.now() + 4000;
+    }
     saveTabSession();
     loadLocalRoomFallback();
     if (mqttWs && mqttWs.readyState === WebSocket.OPEN && mqttConnected) {
@@ -1960,6 +1968,7 @@ var MP = (function () {
     getOnlinePeers: getOnlinePeerList,
     setProfile: setProfile,
     switchRoom: switchRoom,
+    generateRoomCode: generateSecureRoomCode,
     onStartGame: onStartGame,
     update: update,
     recordAction: recordAction,

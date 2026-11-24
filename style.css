@@ -351,6 +351,31 @@ body.title #modalwrap { background: rgba(30,20,12,.22); }
 .chars .ch.on { border-color: var(--teal); background: #dff5ef; }
 .chars img { width: 42px; height: 42px; display: block; }
 .chars small { display: block; font: 400 13.5px var(--head); color: var(--ink); }
+.title-step-head {
+  font: 400 20px var(--head); color: var(--ink); text-align: center;
+  margin: 4px 0 6px; padding: 3px 10px; border-radius: 8px;
+  background: rgba(255,255,255,.6); border: 1.5px solid rgba(122,78,42,.28);
+}
+.title-setup-box {
+  display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px;
+  background: rgba(255,255,255,.55); border: 1.5px solid rgba(122,78,42,.28);
+  border-radius: 10px; padding: 8px 10px; text-align: left;
+}
+.title-field { display: flex; flex-direction: column; gap: 3px; }
+.title-field label { font: 800 11.5px var(--body); color: var(--ink2); text-align: center; }
+.title-input {
+  font: 800 14px var(--body); color: var(--ink); background: #fff;
+  border: 2px solid var(--wood2); border-radius: 8px; padding: 6px 10px;
+  text-align: center; width: 100%; box-shadow: inset 0 1px 2px rgba(0,0,0,.08);
+}
+.title-input.code {
+  text-transform: uppercase; letter-spacing: 1.5px; font-size: 15px;
+}
+.title-code-badge {
+  background: #fff9e6; border: 2px dashed var(--wood2); border-radius: 8px;
+  padding: 6px 10px; text-align: center; font-size: 13px; color: var(--ink);
+}
+.title-code-badge b { font: 400 19px var(--head); letter-spacing: 1.5px; color: #2b6826; }
 .help p { margin: 5px 0; font-size: 12px; text-align: left; }
 .opts { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; margin-top: 8px; align-items: center; font-size: 12.5px; }
 .opts select { font: inherit; padding: 4px 7px; border-radius: 6px; border: 1.5px solid var(--wood2); background: #fff; color: var(--ink); }

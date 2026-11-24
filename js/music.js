@@ -496,22 +496,23 @@ function AU_step(P, silent) {
   if (++P.step >= spb) { P.step = 0; P.bar++; }
 }
 function AU_applyBuild(P, now) {
-  var M = AU_M, b = M.build;
-  if (Math.abs(b - M.buildApplied) < 0.02) return;
+  var M = AU_M, b = M.build < 0.015 ? 0 : M.build;
+  if (Math.abs(b - M.buildApplied) < 0.015 && !(b === 0 && M.buildApplied !== 0)) return;
   M.buildApplied = b;
-  var L = P.g.L, tc = 0.25;
-  L.lead.node.gain.setTargetAtTime(1 - 0.88 * b, now, tc); L.wind.node.gain.setTargetAtTime(1 - 0.9 * b, now, tc);
-  L.perc.node.gain.setTargetAtTime(1 - 0.7 * b, now, tc); L.bass.node.gain.setTargetAtTime(1 - 0.4 * b, now, tc);
-  L.acc.node.gain.setTargetAtTime(1 - 0.3 * b, now, tc); L.pad.node.gain.setTargetAtTime(1 + 0.2 * b, now, tc);
+  var L = P.g.L, tc = 0.22;
+  // Keep full, cheerful music playing during and after building (only a subtle 10% warm blend in build mode)
+  L.lead.node.gain.setTargetAtTime(1 - 0.10 * b, now, tc); L.wind.node.gain.setTargetAtTime(1 - 0.10 * b, now, tc);
+  L.perc.node.gain.setTargetAtTime(1 - 0.08 * b, now, tc); L.bass.node.gain.setTargetAtTime(1 - 0.05 * b, now, tc);
+  L.acc.node.gain.setTargetAtTime(1 - 0.05 * b, now, tc); L.pad.node.gain.setTargetAtTime(1 + 0.10 * b, now, tc);
 }
 function AU_conduct(now, hz) {
   var M = AU_M, sc = M.scene, want = AU_themeFor(sc), P = M.piece;
   if (P) {
-    if (AU_themeGroup(P.th) !== AU_themeGroup(want)) {                    // title <-> day <-> summary: fade out, short pause, new piece
-      AU_retirePiece(P, now, 2.2); M.piece = P = null; M.gapUntil = now + (want === 'title' ? 2.4 : 3.0);
+    if (AU_themeGroup(P.th) !== AU_themeGroup(want)) {                    // title <-> day <-> summary: quick crossfade into the new piece
+      AU_retirePiece(P, now, 0.55); M.piece = P = null; M.gapUntil = now + 0.65;
     } else if (P.th !== want && !P.wrapUp) { P.wrapUp = true; }           // the day moved on: finish this section, then end
-  } else if (AU_themeGroup(M.lastTheme) !== AU_themeGroup(want) && M.gapUntil > now + 3.2) M.gapUntil = now + 3.0;   // do not sit in a long pause after a scene change
-  if (!P && now >= M.gapUntil) P = AU_startPiece(want, Math.max(now + 0.06, M.gapUntil));
+  } else if (AU_themeGroup(M.lastTheme) !== AU_themeGroup(want) && M.gapUntil > now + 0.8) M.gapUntil = now + 0.65;   // do not sit in a long pause after a scene change
+  if (!P && now >= M.gapUntil) P = AU_startPiece(want, Math.max(now + 0.05, M.gapUntil));
   if (!P) return;
   AU_applyBuild(P, now);
   var guard = 0;
@@ -519,10 +520,7 @@ function AU_conduct(now, hz) {
   guard = 0;
   while (!P.done && P.nextT < hz && guard++ < 96) AU_step(P, false);
   if (P.done) {
-    var dayLen = M.rate > 0 ? 1 / M.rate : 300, g;
-    if (P.th === 'title' || P.th === 'summary') g = AU_rr(9, 15);                           // menus: only a short breath
-    else if (P.wrapUp) g = AU_clamp(dayLen * 0.055, 8, 20) * AU_rr(0.85, 1.15);             // the day moved on to its next theme
-    else g = dayLen < 400 ? AU_rr(16, 24) : AU_rr(22, 38);                                  // birdsong only for a while, then a new piece
+    var g = AU_rr(1.2, 2.4);                                              // short natural breath between pieces so music never stops
     M.gapUntil = P.endT + g;
     if (M.log) M.log.push({ t: +P.endT.toFixed(3), end: P.th, gap: +g.toFixed(1) });
     AU_retirePiece(P, P.endT, 0); M.piece = null;
@@ -684,9 +682,19 @@ function AU_ambTick(now, hz) {
 
 // Called by sfx(): let an important jingle speak by dipping the music for a moment.
 function AU_duck(t, depth, dur) {
-  var M = AU_M;
-  if (!M.on || !M.duck) return;
-  [M.duck, M.duckWet].forEach(function (g) { g.gain.setTargetAtTime(depth, t, 0.05); g.gain.setTargetAtTime(1, t + dur, 0.3); });
+  var M = AU_M, S = AU_S;
+  if (!M.on || !M.duck || !S) return;
+  var now = S.ctx.currentTime, start = Math.max(now, t), end = start + Math.max(0.15, dur || 0.8);
+  M.duckUntil = Math.max(M.duckUntil || 0, end + 0.4);
+  [M.duck, M.duckWet].forEach(function (g) {
+    try {
+      var cur = g.gain.value;
+      g.gain.cancelScheduledValues(now);
+      g.gain.setValueAtTime(isFinite(cur) ? AU_clamp(cur, 0.25, 1) : 1, now);
+      g.gain.setTargetAtTime(AU_clamp(depth, 0.3, 1), start, 0.05);
+      g.gain.setTargetAtTime(1, end, 0.25);
+    } catch (e) {}
+  });
 }
 // ---------------------------------------------------------------------------------------------------------------------
 // Scheduler and public object
@@ -695,7 +703,18 @@ function AU_musicTick() {
   var M = AU_M, S = AU_S;
   if (!M.on || !S) return;
   try {
-    var now = S.ctx.currentTime, hidden = M.forceHidden || (typeof document !== 'undefined' && document.hidden && !M.manual);
+    var hidden = M.forceHidden || (typeof document !== 'undefined' && document.hidden && !M.manual);
+    if (!hidden && S.ctx && (S.ctx.state === 'suspended' || S.ctx.state === 'interrupted') && S.ctx.resume) {
+      try { var pr = S.ctx.resume(); if (pr && pr.catch) pr.catch(function () {}); } catch (e) {}
+    }
+    if (typeof AU_sweepVoices === 'function') AU_sweepVoices(S);
+    var now = S.ctx.currentTime;
+    if (M.duck && M.duckUntil && now > M.duckUntil + 0.8) {
+      M.duckUntil = 0;
+      [M.duck, M.duckWet].forEach(function (g) {
+        try { g.gain.cancelScheduledValues(now); g.gain.setTargetAtTime(1, now, 0.15); } catch (e) {}
+      });
+    }
     var hz = now + (hidden ? 1.7 : 0.45), dt = Math.max(0, Math.min(2, now - M.lastNow));
     M.lastNow = now;
     var sc = M.scene, bt = sc.mode === 'build' ? 1 : 0, tt = sc.mode === 'play' ? AU_clamp(sc.tension, 0, 1) : 0;
@@ -706,7 +725,7 @@ function AU_musicTick() {
     for (var i = M.old.length - 1; i >= 0; i--) if (now > M.old[i].kill) { AU_killGraph(M.old[i].g); M.old.splice(i, 1); }
     M.errs = 0;
   } catch (e) {
-    if (++M.errs > 8) { try { Music.stop(); } catch (e2) {} }          // never spam errors into the game loop
+    M.errs++;
     if (typeof console !== 'undefined' && M.errs === 1) console.warn('music:', e);
   }
 }

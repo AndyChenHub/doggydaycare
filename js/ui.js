@@ -19,18 +19,23 @@ function setMode(m) {
   document.body.classList.toggle('title', !!UI.inTitle);
   if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; }
   if (m !== 'play') { UI.joy = null; UI.touchTarget = null; }
-  if (m === 'build' && S && !S.tutorialDone && typeof tutorialRequiredBuildType === 'function') {
-    var reqType = tutorialRequiredBuildType();
-    if (reqType) {
-      UI.buildTab = 'care';
-      UI.buildSel = reqType;
-      UI.buildTool = null;
-      UI.moveObj = null;
+  if (m === 'build') {
+    UI.buildSel = null;
+    UI.buildTool = null;
+    UI.moveObj = null;
+    if (S && !S.tutorialDone && typeof tutorialRequiredBuildType === 'function') {
+      var reqType = tutorialRequiredBuildType();
+      if (reqType && CAT_BY_ID[reqType]) {
+        UI.buildTab = CAT_BY_ID[reqType].cat || 'care';
+      }
     }
   }
   $('buildpanel').hidden = m !== 'build';
   if (m === 'build') renderBuildPanel();
   $('buildBtn').classList.toggle('on', m === 'build');
+  if (typeof setScene === 'function' && !UI.inTitle) {
+    setScene(m === 'summary' ? 'summary' : m === 'build' ? 'build' : 'play');
+  }
 }
 function openModal(html, mode, cls) {
   if (UI.mode === 'play' || UI.mode === 'build') UI.prevMode = UI.mode;
@@ -73,21 +78,35 @@ function bindModalButtons() {
     };
   });
   var tName = $('titleNameInput'), tRoom = $('titleRoomInput');
-  if (tName && typeof MP !== 'undefined') {
-    tName.onchange = tName.onblur = function () { MP.setProfile(tName.value, UI.pickLook, tRoom ? tRoom.value : undefined); };
+  if (tName) {
+    tName.oninput = function () { UI._userTypedName = true; };
+    tName.onchange = tName.onblur = function () {
+      UI.pendingPlayerName = tName.value.trim().slice(0, 18);
+      if (typeof MP !== 'undefined') MP.setProfile(UI.pendingPlayerName || undefined, UI.pickLook);
+    };
   }
-  if (tRoom && typeof MP !== 'undefined') {
-    tRoom.onchange = tRoom.onblur = function () { MP.setProfile(tName ? tName.value : undefined, UI.pickLook, tRoom.value); };
+  if (tRoom) {
+    tRoom.oninput = tRoom.onchange = tRoom.onblur = function () {
+      UI.pendingJoinCode = tRoom.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    };
   }
   m.querySelectorAll('[data-breed]').forEach(function (b) { b.onclick = function () { UI.dexSel = b.getAttribute('data-breed'); sfx('page'); renderDex(); }; });
 }
 function fadeThen(fn) { var f = $('fade'); f.style.display = 'block'; void f.offsetWidth; f.classList.add('on'); setTimeout(function () { fn(); setTimeout(function () { f.classList.remove('on'); setTimeout(function () { if (!f.classList.contains('on')) f.style.display = 'none'; }, 700); }, 160); }, 420); }
 function enterPlayFromState(fresh) {
   var isFreshStart = !!fresh;
+  var isJoiningRoom = !!UI.joiningDaycare;
+  UI.joiningDaycare = false;
   if (fresh) {
     if (typeof clearSavedGame === 'function') clearSavedGame();
     else { try { localStorage.removeItem(SAVE_KEY); localStorage.setItem(OLD_DONE_KEY, '1'); } catch (e) {} }
     S = null; newState(); S.player.look = UI.pickLook || 0;
+  } else if (isJoiningRoom) {
+    // Joining a shared daycare by Room Code: start from a clean base with savedAt=0 so the shared room snapshot applies without broadcasting a New Game reset!
+    isFreshStart = false;
+    S = null; newState();
+    S.created = 0; S.savedAt = 0;
+    S.player.look = UI.pickLook || 0;
   } else if (!loadGame()) {
     isFreshStart = true;
     newState(); S.player.look = UI.pickLook || 0;
@@ -99,9 +118,10 @@ function enterPlayFromState(fresh) {
     S.chores = [];
     markDirty(true);
   }
-  if (S && (isFreshStart || UI._userPickedLook) && UI.pickLook != null) S.player.look = UI.pickLook;
+  if (S && (isFreshStart || isJoiningRoom || UI._userPickedLook) && UI.pickLook != null) S.player.look = UI.pickLook;
   else if (S && S.player && typeof S.player.look === 'number') UI.pickLook = S.player.look;
   UI._userPickedLook = false;
+  UI.titleStep = 'menu';
   UI.inTitle = false;
   if (typeof setActiveSession === 'function') setActiveSession(true);
   if (typeof MP !== 'undefined') MP.onStartGame(isFreshStart);
@@ -115,10 +135,10 @@ function enterPlayFromState(fresh) {
     toast('🧑‍💼 Staff ran the shop for ' + fmtDur(rep.sec) + ' while closed: cared for ' + rep.dogs + ' dogs and netted +' + fmtMoney(rep.earned) + ' (after supplies & staff cut)!', 'good');
   }
   if (S.migrated) { var r = S.migrated.refund; delete S.migrated; saveGame(); openModal('<h2>Welcome back!</h2><p>Paws &amp; Play has moved into a bigger, prettier home. Your level, reputation and cash came along' + (r ? ', and everything you had built was refunded: <b class="good">+' + fmtMoney(r) + '</b>' : '') + '. The yard is a fresh start — time to decorate!</p><div class="row"><button data-act="back" class="primary">Let\'s go</button></div>', 'note'); bindModalButtons(); }
-  else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Drag anywhere on screen to walk to the SERVE pad behind the counter!', 'good');
-  saveGame();
+  else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Tap 🔨 Shop at the bottom to select and place your first Kennel on the lawn!', 'good');
+  if (!isJoiningRoom) saveGame();
 }
-var CURRENT_ASSET_VER = '20';
+var CURRENT_ASSET_VER = '21';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();
@@ -191,10 +211,70 @@ function showGift(g) {
   bindModalButtons(); sfx('coin'); confetti(S.player.x, S.player.y - 50, 30);
 }
 var MODAL_ACTS = {
-  play: function () { startGame(!hasSave()); },
+  play: function () { UI.joiningDaycare = false; startGame(!hasSave()); },
   newgame: function () {
-    if (hasSave()) confirmBox('Start over? Your daycare, cash and buildings will be erased.', function () { startGame(true); });
-    else startGame(true);
+    UI.titleStep = 'create';
+    UI.pendingRoomCode = (typeof MP !== 'undefined' && MP.generateRoomCode) ? MP.generateRoomCode() : 'PAWS24';
+    openTitle();
+  },
+  titlecreate: function () {
+    UI.titleStep = 'create';
+    if (!UI.pendingRoomCode) {
+      UI.pendingRoomCode = (typeof MP !== 'undefined' && MP.generateRoomCode) ? MP.generateRoomCode() : 'PAWS24';
+    }
+    openTitle();
+  },
+  titlejoin: function () {
+    UI.titleStep = 'join';
+    openTitle();
+  },
+  titleback: function () {
+    UI.titleStep = 'menu';
+    openTitle();
+  },
+  confirmcreate: function () {
+    var tName = $('titleNameInput');
+    var looks = (typeof PLAYER_LOOKS !== 'undefined') ? PLAYER_LOOKS : [];
+    var defName = (looks[UI.pickLook || 0] && looks[UI.pickLook || 0].name) || 'Sam';
+    var chosenName = (tName && tName.value.trim()) ? tName.value.trim().slice(0, 18) : defName;
+    var createCode = UI.pendingRoomCode || ((typeof MP !== 'undefined' && MP.roomCode) ? MP.roomCode : 'PAWS24');
+    UI.pendingPlayerName = chosenName;
+    UI.joiningDaycare = false;
+    var doCreate = function () {
+      if (typeof MP !== 'undefined') {
+        MP.setProfile(chosenName, UI.pickLook, createCode);
+      }
+      UI.pendingRoomCode = null;
+      startGame(true);
+    };
+    if (hasSave()) {
+      confirmBox('Create a new Daycare (Room <b>' + esc(createCode) + '</b>) as <b>' + esc(chosenName) + '</b>?<br><small>Your previous local daycare will be replaced by this new Daycare.</small>', doCreate);
+    } else {
+      doCreate();
+    }
+  },
+  confirmjoin: function () {
+    var tName = $('titleNameInput'), tRoom = $('titleRoomInput');
+    var looks = (typeof PLAYER_LOOKS !== 'undefined') ? PLAYER_LOOKS : [];
+    var defName = (looks[UI.pickLook || 0] && looks[UI.pickLook || 0].name) || 'Sam';
+    var chosenName = (tName && tName.value.trim()) ? tName.value.trim().slice(0, 18) : defName;
+    var rawCode = (tRoom ? tRoom.value : (UI.pendingJoinCode || '')).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    if (!rawCode || rawCode.length < 3) {
+      sfx('error');
+      if (tRoom) {
+        tRoom.focus();
+        tRoom.style.borderColor = '#d9574a';
+      }
+      return;
+    }
+    UI.pendingPlayerName = chosenName;
+    UI.pendingJoinCode = rawCode;
+    UI.joiningDaycare = true;
+    if (typeof MP !== 'undefined') {
+      MP.setProfile(chosenName, UI.pickLook);
+      MP.switchRoom(rawCode, true);
+    }
+    startGame(false);
   },
   resume: function () { closeModal(); },
   settings: function () { openSettings(); },
@@ -248,19 +328,48 @@ function lookPortrait(i, size) {
 function openTitle() {
   var has = hasSave();
   UI.mode = 'title'; UI.inTitle = true; document.body.classList.add('title');
+  if (!UI.titleStep) UI.titleStep = 'menu';
   var looks = (typeof PLAYER_LOOKS !== 'undefined') ? PLAYER_LOOKS : [];
   var savedLook = (has && typeof peekSavedLook === 'function') ? peekSavedLook() : null;
   if (savedLook != null && !UI._userPickedLook) UI.pickLook = savedLook;
   else if (typeof MP !== 'undefined' && UI.pickLook == null) UI.pickLook = MP.playerLook;
   else if (UI.pickLook == null) UI.pickLook = 0;
-  var pName = (typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : ((looks[UI.pickLook] && looks[UI.pickLook].name) || 'Sam');
+  var pName = UI.pendingPlayerName || ((typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : ((looks[UI.pickLook] && looks[UI.pickLook].name) || 'Sam'));
   var rCode = (typeof MP !== 'undefined' && MP.roomCode) ? MP.roomCode : 'PAWS';
-  var chars = looks.length ? '<p class="small" style="margin-bottom:0">Choose your keeper</p><div class="chars">' + looks.map(function (l, i) { return '<div class="ch' + (i === UI.pickLook ? ' on' : '') + '" data-look="' + i + '"><img src="' + lookPortrait(i, 64) + '"><small>' + esc(l.name || ('Keeper ' + (i + 1))) + '</small></div>'; }).join('') + '</div>' : '';
+
+  if (UI.titleStep === 'create' || UI.titleStep === 'join') {
+    var isCreate = UI.titleStep === 'create';
+    if (isCreate && !UI.pendingRoomCode) {
+      UI.pendingRoomCode = (typeof MP !== 'undefined' && MP.generateRoomCode) ? MP.generateRoomCode() : rCode;
+    }
+    var joinCodeVal = UI.pendingJoinCode != null ? UI.pendingJoinCode : ((typeof window !== 'undefined' && window.location && window.location.search.indexOf('room=') >= 0) ? rCode : '');
+    var chars = looks.length ? '<div class="title-field"><label>1. Select a Keeper</label><div class="chars">' + looks.map(function (l, i) { return '<div class="ch' + (i === UI.pickLook ? ' on' : '') + '" data-look="' + i + '"><img src="' + lookPortrait(i, 64) + '"><small>' + esc(l.name || ('Keeper ' + (i + 1))) + '</small></div>'; }).join('') + '</div></div>' : '';
+    var nameField = '<div class="title-field"><label for="titleNameInput">2. Type in Your Name</label><input type="text" id="titleNameInput" class="title-input" maxlength="18" value="' + esc(pName) + '" placeholder="Enter your name…"></div>';
+    var roomField = isCreate
+      ? '<div class="title-field"><label>3. Your Daycare Code (Share with friends!)</label><div class="title-code-badge">🏠 Room Code: <b>' + esc(UI.pendingRoomCode) + '</b></div></div>'
+      : '<div class="title-field"><label for="titleRoomInput">3. Enter Daycare Code to Join</label><input type="text" id="titleRoomInput" class="title-input code" maxlength="8" value="' + esc(joinCodeVal) + '" placeholder="Enter 6-character code…"></div>';
+
+    $('modal').innerHTML = '<div class="card title"><div class="logo">Paws &amp; Play<span>DOGGY DAYCARE</span></div>' +
+      '<div class="title-step-head">' + (isCreate ? '🏠 Create a Daycare' : '🤝 Join a Daycare') + '</div>' +
+      '<div class="title-setup-box">' + chars + nameField + roomField + '</div>' +
+      '<div class="row col">' +
+        (isCreate
+          ? '<button data-act="confirmcreate" class="primary big">🏠 Start My Daycare</button>'
+          : '<button data-act="confirmjoin" class="primary big">🤝 Join Daycare</button>') +
+        '<button data-act="titleback" class="flat">← Back</button>' +
+      '</div></div>';
+    $('modalwrap').hidden = false; bindModalButtons();
+    return;
+  }
+
   $('modal').innerHTML = '<div class="card title"><div class="logo">Paws &amp; Play<span>DOGGY DAYCARE</span></div>' +
-    '<p class="tag">Drag with one thumb to welcome pups, stack supplies,<br>and expand the cosiest daycare on iPhone!</p>' + chars +
-    '<div class="row col"><button data-act="play" class="primary big">' + (has ? '▶ Continue Daycare' : '▶ Play Daycare') + '</button>' +
-    (has ? '<button data-act="newgame" class="flat">New Game</button>' : '') +
-    '<div class="row" style="margin-top:0"><button data-act="help" class="flat">How to Play</button><button data-act="settings" class="flat">Settings &amp; Co-op</button></div></div></div>';
+    '<p class="tag">Drag with one thumb to welcome pups, stack supplies,<br>and run a shared daycare synced across iPhones!</p>' +
+    '<div class="row col">' +
+      (has ? '<button data-act="play" class="primary big">▶ Continue Daycare (Room: ' + esc(rCode) + ')</button>' : '') +
+      '<button data-act="titlecreate" class="' + (has ? 'wood big' : 'primary big') + '">🏠 Create a Daycare</button>' +
+      '<button data-act="titlejoin" class="wood big">🤝 Join a Daycare</button>' +
+      '<div class="row" style="margin-top:2px"><button data-act="help" class="flat">How to Play</button><button data-act="settings" class="flat">Settings &amp; Co-op</button></div>' +
+    '</div></div>';
   $('modalwrap').hidden = false; bindModalButtons();
 }
 function openPause() {
@@ -499,7 +608,7 @@ function renderBuildPanel() {
   } else {
     var reqTutItem = (!S.tutorialDone && typeof tutorialRequiredBuildType === 'function') ? tutorialRequiredBuildType() : null;
     if (reqTutItem && CAT_BY_ID[reqTutItem]) {
-      h += '<div class="bp-sub">🎓 Tutorial: Tap any open green spot on the lawn above to place your <b>' + CAT_BY_ID[reqTutItem].icon + ' ' + esc(CAT_BY_ID[reqTutItem].name) + '</b>!</div>';
+      h += '<div class="bp-sub">🎓 Tutorial: Select <b>' + CAT_BY_ID[reqTutItem].icon + ' ' + esc(CAT_BY_ID[reqTutItem].name) + '</b> below to place it on the lawn!</div>';
     }
     CATALOG.filter(function (c) { return c.cat === UI.buildTab; }).forEach(function (c) {
       var cCost = typeof itemCost === 'function' ? itemCost(c.id) : c.cost;
@@ -862,9 +971,14 @@ function updateHUD(dt) {
       var adv = typeof currentAdvisorHint === 'function' ? currentAdvisorHint() : null;
       if (adv) hh2 = '<span data-hact="' + esc(adv.act || 'staff') + '">' + esc(adv.text) + '</span>';
     }
-  } else if (UI.mode === 'build' && !S.tutorialDone && tutReqBuild && CAT_BY_ID[tutReqBuild]) {
-    var bDef = CAT_BY_ID[tutReqBuild];
-    hh2 = '<span data-hact="build">🎓 Tap any open green spot on the lawn to place your ' + bDef.icon + ' ' + esc(bDef.name) + '!</span>';
+  } else if (UI.mode === 'build') {
+    if (UI.buildSel && CAT_BY_ID[UI.buildSel]) {
+      var selDef = CAT_BY_ID[UI.buildSel];
+      hh2 = '<span data-hact="build">🎓 Tap any open green spot on the lawn to place your ' + selDef.icon + ' ' + esc(selDef.name) + '!</span>';
+    } else if (!S.tutorialDone && tutReqBuild && CAT_BY_ID[tutReqBuild]) {
+      var bDef = CAT_BY_ID[tutReqBuild];
+      hh2 = '<span data-hact="build">🎓 Select ' + bDef.icon + ' ' + esc(bDef.name) + ' in the Shop below to place it on the lawn!</span>';
+    }
   }
   if (UI.hintHTML !== hh2) { UI.hintHTML = hh2; $('hint').innerHTML = hh2; }
   // Floating Drop button when carrying items or a dog

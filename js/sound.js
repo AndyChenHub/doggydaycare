@@ -67,7 +67,7 @@ function AU_makeIR(ctx, secs, t60) {
   return b;
 }
 function AU_setup(ctx, dest) {
-  var S = { ctx: ctx, sr: ctx.sampleRate, last: {}, ks: {}, ksOrder: [], keyTr: 0, voices: 0, bus: {}, woke: 0 };
+  var S = { ctx: ctx, sr: ctx.sampleRate, last: {}, ks: {}, ksOrder: [], keyTr: 0, voices: 0, liveVoices: [], bus: {}, woke: 0 };
   S.out = ctx.createGain(); S.out.gain.value = 1;
   S.hp = ctx.createBiquadFilter(); S.hp.type = 'highpass'; S.hp.frequency.value = 34; S.hp.Q.value = 0.707;
   S.comp = ctx.createDynamicsCompressor();
@@ -149,14 +149,56 @@ function AU_free(G) {
   try { G.node.disconnect(); } catch (e) {}
   for (var i = 0; i < G.extra.length; i++) { try { G.extra[i].disconnect(); } catch (e) {} }
 }
-function AU_track(S, src, G, endNode) {
-  G.n++; S.voices++;
-  var done = false;
+function AU_cleanupVoiceEntry(S, entry) {
+  if (!entry || entry.done) return;
+  entry.done = true;
+  try { if (entry.endNode) entry.endNode.disconnect(); } catch (e) {}
+  if (entry.extra) {
+    for (var i = 0; i < entry.extra.length; i++) {
+      try { if (entry.extra[i]) entry.extra[i].disconnect(); } catch (e) {}
+    }
+  }
+  entry.src = null;
+  if (entry.G && --entry.G.n <= 0 && entry.G.sealed) AU_free(entry.G);
+}
+function AU_sweepVoices(S) {
+  if (!S || !S.liveVoices) return;
+  var now = S.ctx ? S.ctx.currentTime : 0, lv = S.liveVoices;
+  for (var i = lv.length - 1; i >= 0; i--) {
+    var v = lv[i];
+    if (v.done || (v.endT && now > v.endT + 0.25)) {
+      if (!v.done) AU_cleanupVoiceEntry(S, v);
+      lv.splice(i, 1);
+    }
+  }
+  S.voices = lv.length;
+}
+function AU_track(S, src, G, endNode, endT, extraNodes) {
+  G.n++;
+  var entry = {
+    src: src,
+    G: G,
+    endNode: endNode,
+    extra: extraNodes || null,
+    endT: endT || ((S.ctx ? S.ctx.currentTime : 0) + 3.5),
+    done: false
+  };
+  if (S.liveVoices) {
+    S.liveVoices.push(entry);
+    S.voices = S.liveVoices.length;
+  } else {
+    S.voices++;
+  }
   src.onended = function () {
-    if (done) return;                       // some browsers report 'ended' twice for a source that was also told to stop
-    done = true; S.voices--;
-    try { endNode.disconnect(); } catch (e) {}
-    if (--G.n <= 0 && G.sealed) AU_free(G);
+    if (entry.done) return;
+    AU_cleanupVoiceEntry(S, entry);
+    if (S.liveVoices) {
+      var idx = S.liveVoices.indexOf(entry);
+      if (idx >= 0) S.liveVoices.splice(idx, 1);
+      S.voices = S.liveVoices.length;
+    } else {
+      S.voices = Math.max(0, S.voices - 1);
+    }
   };
 }
 
@@ -186,39 +228,43 @@ function AU_tone(S, G, o) {
   if (o.fp) for (i = 0; i < o.fp.length; i++) osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.fp[i][1]), t + o.fp[i][0]);
   else if (o.f2) osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.f2), t + (o.ft || dur));
   if (o.det) osc.detune.value = o.det;
-  var lfo = null;
+  var lfo = null, extra = null;
   if (o.vib) {
     lfo = ctx.createOscillator(); var lg = ctx.createGain();
     lfo.frequency.value = o.vib.rate; lg.gain.setValueAtTime(0, t);
     lg.gain.setValueAtTime(0, t + (o.vib.delay || 0)); lg.gain.linearRampToValueAtTime(o.vib.depth, t + (o.vib.delay || 0) + (o.vib.ramp || 0.15));
     lfo.connect(lg); lg.connect(osc.detune); lfo.start(t); lfo.stop(t + dur + 0.05);
+    extra = [lfo, lg];
   }
   AU_env(g.gain, t, o);
-  if (o.flt) { var fl = AU_filter(S, o.flt, t, dur); osc.connect(fl); fl.connect(g); } else osc.connect(g);
+  if (o.flt) { var fl = AU_filter(S, o.flt, t, dur); osc.connect(fl); fl.connect(g); (extra || (extra = [])).push(fl); } else osc.connect(g);
   g.connect(o.to || G.node);
-  osc.start(t); osc.stop(t + dur + 0.04);
-  AU_track(S, osc, G, g);
+  var stopT = t + dur + 0.04;
+  osc.start(t); osc.stop(stopT);
+  AU_track(S, osc, G, g, stopT, extra);
   return osc;
 }
 // Filtered-noise voice. o: { t, dur, vol, a, hold, k, lin, type, f, f2, ft, fp, q, hp, am:{rate,rate2,depth} }
 function AU_noise(S, G, o) {
   var ctx = S.ctx, t = o.t, dur = o.dur, src = ctx.createBufferSource(), g = ctx.createGain();
   src.buffer = o.pink ? S.pink : S.noise; src.loop = true;
-  var fl = AU_filter(S, o, t, dur), last = fl;
+  var fl = AU_filter(S, o, t, dur), last = fl, extra = [fl];
   src.connect(fl);
-  if (o.hp) { var h = ctx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = o.hp; h.Q.value = 0.6; last.connect(h); last = h; }
-  if (o.lp) { var l = ctx.createBiquadFilter(); l.type = 'lowpass'; l.frequency.value = o.lp; l.Q.value = 0.6; last.connect(l); last = l; }
+  if (o.hp) { var h = ctx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = o.hp; h.Q.value = 0.6; last.connect(h); last = h; extra.push(h); }
+  if (o.lp) { var l = ctx.createBiquadFilter(); l.type = 'lowpass'; l.frequency.value = o.lp; l.Q.value = 0.6; last.connect(l); last = l; extra.push(l); }
   if (o.am) {
     var m = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain(), d = AU_clamp(o.am.depth, 0, 1);
     m.gain.value = 1 - d / 2; lg.gain.value = d / 2; lfo.type = o.am.type || 'sine';
     lfo.frequency.setValueAtTime(o.am.rate, t); if (o.am.rate2) lfo.frequency.linearRampToValueAtTime(o.am.rate2, t + dur);
     lfo.connect(lg); lg.connect(m.gain); last.connect(m); last = m; lfo.start(t); lfo.stop(t + dur + 0.05);
+    extra.push(m, lfo, lg);
   }
   last.connect(g);
   AU_env(g.gain, t, o);
   g.connect(o.to || G.node);
-  src.start(t, Math.random() * 1.5); src.stop(t + dur + 0.04);
-  AU_track(S, src, G, g);
+  var stopT = t + dur + 0.04;
+  src.start(t, Math.random() * 1.5); src.stop(stopT);
+  AU_track(S, src, G, g, stopT, extra);
   return src;
 }
 
@@ -297,7 +343,7 @@ function AU_pluck(S, G, t, midi, vel, dur, name, to) {
   if (dur && t + dur + 0.4 < end) { g.gain.setValueAtTime(vel, t + dur); g.gain.setTargetAtTime(0, t + dur, 0.07); end = t + dur + 0.45; }
   src.connect(lp); lp.connect(g); g.connect(to || G.node);
   src.start(t); src.stop(end);
-  AU_track(S, src, G, g);
+  AU_track(S, src, G, g, end, [lp]);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -343,8 +389,9 @@ function AU_bark1(S, G, t, s, vol, pm, lm) {
   lp.type = 'lowpass'; lp.frequency.value = Math.max(320, f0 * 2.4); lp.Q.value = 0.7; glp.gain.value = 0.16 + 0.08 * s;
   mix.connect(b1); mix.connect(b2); mix.connect(lp); b1.connect(env); b2.connect(gb2); gb2.connect(env); lp.connect(glp); glp.connect(env);
   env.connect(G.node);
-  o1.start(t); o2.start(t); o1.stop(t + dur + 0.04); o2.stop(t + dur + 0.04);
-  AU_track(S, o1, G, env);
+  var stopT = t + dur + 0.04;
+  o1.start(t); o2.start(t); o1.stop(stopT); o2.stop(stopT);
+  AU_track(S, o1, G, env, stopT, [o2, g2, mix, b1, b2, lp, gb2, glp]);
   AU_noise(S, G, { t: t, dur: dur * 0.85, vol: vol * (0.30 + 0.25 * s), f: F1 * 1.35, q: 0.8, a: 0.004, lp: 5200 });
 }
 // Round water "bloop".
@@ -647,6 +694,10 @@ function sfx(name, dog) {
     var S = AU_S;
     if (!S || !AC || S.ctx !== AC || AC.state === 'closed') return;
     var def = AU_SFX[name] || AU_SFX[AU_ALIAS[name]]; if (!def) return;
+    if (AC.state === 'suspended' || AC.state === 'interrupted') {
+      try { var pr = AC.resume(); if (pr && pr.catch) pr.catch(function () {}); } catch (e) {}
+    }
+    AU_sweepVoices(S);
     if (AC.state !== 'running' && Date.now() - S.woke > 600) return;   // asleep (no gesture yet / tab suspended): do not queue sounds up
     if (S.voices > 220) return;                                   // runaway guard
     var now = AC.currentTime, min = def.min || 0.03, last = S.last[name];
