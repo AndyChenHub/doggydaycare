@@ -1160,6 +1160,7 @@ function advanceTutorialPacing() {
   } else if (step.id === 'build_tub') {
     if (hasDone('tub') && inYard && (!d.need || d.need.type !== 'bath')) setTutNeed('bath', 'scratch');
   } else if (step.id === 'return') {
+    if (inYard && d.state !== 'idle') { d.state = 'idle'; d.path = null; d.idleT = 1e9; }
     if (!d.called && !S.owners.some(function (o) { return o.dogId === d.id && (o.state === 'waitPickup' || o.state === 'walkIn' || o.state === 'toHandover' || o.state === 'handover'); })) {
       d.need = null;
       d.pickupDay = S.day;
