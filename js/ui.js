@@ -118,7 +118,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Drag anywhere on screen to walk to the SERVE pad behind the counter!', 'good');
   saveGame();
 }
-var CURRENT_ASSET_VER = '17';
+var CURRENT_ASSET_VER = '18';
 function checkAndReloadIfUpdated( startFreshAfterReload ) {
   if (typeof fetch !== 'function' || (location.protocol !== 'http:' && location.protocol !== 'https:')) return false;
   try {
@@ -396,6 +396,36 @@ function objectIconURL(type) {
   return iconCache[type];
 }
 function renderBuildPanel() {
+  var isPlacing = !!(UI.buildSel || UI.moveObj);
+  $('buildpanel').classList.toggle('minimized', isPlacing);
+  if (isPlacing) {
+    var hMin = '';
+    if (UI.buildSel && CAT_BY_ID[UI.buildSel]) {
+      var sDef = CAT_BY_ID[UI.buildSel];
+      var sCost = typeof itemCost === 'function' ? itemCost(sDef.id) : sDef.cost;
+      var sTime = typeof itemBuildTime === 'function' ? itemBuildTime(sDef.id) : sDef.time;
+      var effT = !S.tutorialDone ? Math.min(sTime, 2.5) : sTime;
+      var sUrl = objectIconURL(sDef.id);
+      hMin = '<div class="bp-min-bar">' +
+        '<div class="ic">' + (sUrl ? '<img src="' + sUrl + '">' : sDef.icon) + '</div>' +
+        '<div class="tx"><b>Placing ' + esc(sDef.name) + ' (' + fmtMoney(sCost) + ' · ⏱ ' + fmtDur(effT) + ')</b>' +
+        '<small>Tap any open green tile on the lawn to place · Drag to pan</small></div>' +
+        '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
+      '</div>';
+    } else if (UI.moveObj && CAT_BY_ID[UI.moveObj.type]) {
+      var mDef = CAT_BY_ID[UI.moveObj.type];
+      var mUrl = objectIconURL(mDef.id);
+      hMin = '<div class="bp-min-bar">' +
+        '<div class="ic">' + (mUrl ? '<img src="' + mUrl + '">' : mDef.icon) + '</div>' +
+        '<div class="tx"><b>↔️ Moving ' + esc(mDef.name) + '</b>' +
+        '<small>Tap any open green tile on the lawn to relocate</small></div>' +
+        '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
+      '</div>';
+    }
+    $('buildpanel').innerHTML = hMin;
+    UI.bpSig = buildSig();
+    return;
+  }
   var tabs = [['care', 'Care'], ['fun', 'Fun'], ['decor', 'Decor'], ['land', 'Land'], ['biz', 'Research & Staff']];
   var h = '<div class="bp-head"><span>🔨 Shop</span><button id="moveBtn" class="' + (UI.buildTool === 'move' ? 'on' : '') + '">↔️ Move</button><button id="upgBtn" class="' + (UI.buildTool === 'upgrade' ? 'on' : '') + '">⬆️ Upgrade</button><button id="sellBtn" class="' + (UI.buildTool === 'sell' ? 'on' : '') + '">💸 Sell</button><button id="bpClose">Done</button></div>' +
     '<div class="tabs">' + tabs.map(function (t) { return '<button data-tab="' + t[0] + '" class="' + (UI.buildTab === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div><div class="items">';
@@ -473,9 +503,17 @@ function bpShowDesc(txt) {
   var bp = $('buildpanel');
   bp.addEventListener('pointerdown', function (ev) {
     if (!ev.target.closest) return;
-    var t = ev.target.closest('#bpClose,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise]'); if (!t) return;
+    var t = ev.target.closest('#bpClose,#bpCancelPlace,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise]'); if (!t) return;
     initAudio();
     if (t.id === 'bpClose') { setMode('play'); sfx('ui_close'); return; }
+    if (t.id === 'bpCancelPlace') {
+      UI.buildSel = null; UI.moveObj = null;
+      if (UI.buildTool === 'move') UI.buildTool = null;
+      CAM.panX = 0; CAM.panY = 0;
+      sfx('ui_close');
+      renderBuildPanel();
+      return;
+    }
     if (t.hasAttribute('data-repboost')) { runRepCampaign(t.getAttribute('data-repboost')); renderBuildPanel(); return; }
     if (t.hasAttribute('data-franchise')) { buyFranchiseTier(); renderBuildPanel(); return; }
     if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
@@ -490,7 +528,7 @@ function bpShowDesc(txt) {
         else toast('🔒 Reach Daycare Level ' + reqL + ' to build another ' + c.name, 'bad');
         sfx('error'); return;
       }
-      UI.buildSel = UI.buildSel === id ? null : id; UI.buildTool = null; UI.moveObj = null; sfx('click'); renderBuildPanel(); return;
+      UI.buildSel = UI.buildSel === id ? null : id; UI.buildTool = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; sfx('click'); renderBuildPanel(); return;
     }
     if (t.hasAttribute('data-staff')) {
       var sid = t.getAttribute('data-staff'), sd = STAFF_BY_ID[sid];
@@ -608,13 +646,12 @@ function handleBuildTap(clientX, clientY) {
     if (S.cash < bCost) { toast('Not enough cash for a ' + def.name + ' (' + fmtMoney(bCost) + ')', 'bad'); sfx('error'); return; }
     if (!canPlace(UI.buildSel, x, y)) { toast('Tap an open green tile on the lawn', 'bad'); sfx('error'); return; }
     placeBuild(UI.buildSel, x, y);
-    if (!S.tutorialDone || UI.buildSel === 'kennel') {
-      UI.buildSel = null;
-      if (!S.tutorialDone) setMode('play');
-      else renderBuildPanel();
+    UI.buildSel = null;
+    CAM.panX = 0; CAM.panY = 0;
+    if (!S.tutorialDone) {
+      setMode('play');
       return;
     }
-    if (S.cash < itemCost(UI.buildSel)) UI.buildSel = null;
     renderBuildPanel(); return;
   }
   var o = site;
@@ -906,9 +943,18 @@ function frame(ts) {
       if (UI.camFocusPeer && typeof MP !== 'undefined') { UI.camFocusPeer.t -= dt; var fp = MP.getPeer(UI.camFocusPeer.id); if (fp && fp.online && UI.camFocusPeer.t > 0 && !P.moving) { tx = fp.x; ty = fp.y - 24; } else UI.camFocusPeer = null; }
       var building = UI.mode === 'build' || (UI.mode === 'confirm' && UI.prevMode === 'build');
       if (building) {
-        if (P.moving) { CAM.panX *= 0.9; CAM.panY *= 0.9; }
+        var zoomSection = !!(UI.buildSel || UI.moveObj || UI.buildTool === 'move');
+        if (zoomSection && typeof ownedYardView === 'function') {
+          var yv = ownedYardView();
+          tx = yv.cx;
+          ty = yv.cy;
+          zm = yv.zoomMul;
+        } else {
+          if (P.moving) { CAM.panX *= 0.9; CAM.panY *= 0.9; }
+          ty += 70 / CAM.zoom;
+        }
         CAM.panX = clamp(CAM.panX, -W * TILE, W * TILE); CAM.panY = clamp(CAM.panY, -H * TILE, H * TILE);
-        tx += CAM.panX; ty += CAM.panY + 70 / CAM.zoom;
+        tx += CAM.panX; ty += CAM.panY;
         var hw = VIEW.w / 2 / CAM.zoom, hh = VIEW.h / 2 / CAM.zoom;
         CAM.panX += clamp(tx, hw, Math.max(hw, W * TILE - hw)) - tx; CAM.panY += clamp(ty, hh, Math.max(hh, H * TILE - hh)) - ty;
       }

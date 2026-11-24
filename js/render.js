@@ -80,11 +80,11 @@ function baseZoom() {
   return Math.max(z, minZ);
 }
 function updateCamera(dt, tx, ty, zoomMul, snap) {
-  var tz = baseZoom();
+  var minZ = Math.max(VIEW.w / (W * TILE), VIEW.h / (H * TILE));
+  var tz = Math.max(minZ, baseZoom() * (zoomMul || 1));
   var k = snap ? 1 : 1 - Math.exp(-dt * 4.5), kz = snap ? 1 : 1 - Math.exp(-dt * 10);
   CAM.zoom += (tz - CAM.zoom) * kz;
   if (Math.abs(tz - CAM.zoom) < 0.004) CAM.zoom = tz;
-  var minZ = Math.max(VIEW.w / (W * TILE), VIEW.h / (H * TILE));
   if (CAM.zoom < minZ) CAM.zoom = minZ;
   CAM.zooming = CAM.zoom !== tz;
   var hw = VIEW.w / 2 / CAM.zoom, hh = VIEW.h / 2 / CAM.zoom;
