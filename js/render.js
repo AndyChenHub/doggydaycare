@@ -652,6 +652,25 @@ function drawZones(c, t, v) {
       outlined(c, '+' + fmtMoney(ch.cash) + ' ★', ch.x, ch.y + 11, '#ffe66d', 'rgba(30,18,10,0.9)', 2.4);
     });
   }
+  // 4b. Active Random Reputation Event (walk over before timer expires for +★ Reputation!)
+  if (S.repEvent) {
+    var re = S.repEvent;
+    if (inView(v, re.x - 60, re.y - 60, 120, 120)) {
+      var actR = z && z.key === 'repev' + re.id, puR = 0.5 + Math.sin(t * 8) * 0.5;
+      var fracR = clamp(re.t / (re.dur || 20), 0, 1);
+      c.fillStyle = actR ? 'rgba(255, 213, 74, 0.48)' : 'rgba(255, 138, 128, ' + (0.24 + puR * 0.16) + ')';
+      ell(c, re.x, re.y, 32, 16); c.fill();
+      c.strokeStyle = actR ? '#ffe66d' : '#ff8a80';
+      c.lineWidth = 3; c.setLineDash(actR ? [] : [6, 4]);
+      ell(c, re.x, re.y, 32, 16); c.stroke(); c.setLineDash([]);
+      var bobR = re.y - 16 + Math.sin(t * 7) * 4;
+      emoji(c, re.icon, re.x, bobR, 22);
+      // Countdown bar
+      c.fillStyle = 'rgba(40,26,16,0.75)'; rr(c, re.x - 24, re.y + 6, 48, 6, 3); c.fill();
+      c.fillStyle = fracR > 0.35 ? '#ffd54a' : '#ff5252'; rr(c, re.x - 23, re.y + 7, Math.max(3, 46 * fracR), 4, 2); c.fill();
+      bubble(c, re.x, re.y - 36, re.icon + ' +' + re.upRep.toFixed(2) + '★ / -' + re.downRep.toFixed(2) + '★', { size: 11, bg: '#3b2316', fg: '#ffe66d', stroke: '#ff8a80' });
+    }
+  }
   // 5. Rings round the dogs that have an active care need (never highlight pickup dogs — player must find them!)
   S.dogs.forEach(function (d) {
     if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'eat' || d.state === 'play')) return;
@@ -833,6 +852,9 @@ function drawEdgeIndicators(c, t) {
     if (o.state === 'waitCheckin') items.push({ x: o.x, y: o.y - 40, icon: '🔔', col: '#fff1c9', urgent: o.patience / o.patienceMax < 0.3 });
     else if (o.state === 'waitPickup') items.push({ x: o.x, y: o.y - 40, icon: (S.player.carry && S.player.carry.id === o.dogId) ? '💰' : '🔔', col: (S.player.carry && S.player.carry.id === o.dogId) ? '#c8f7b0' : '#ffe082', urgent: o.patience / o.patienceMax < 0.3 });
   });
+  if (S.repEvent) {
+    items.push({ x: S.repEvent.x, y: S.repEvent.y - 20, icon: S.repEvent.icon, col: '#ffd9d4', urgent: true });
+  }
   S.dogs.forEach(function (d) { if (!d.checkedIn || !d.need || d.need.self || d.state === 'leaving' || d.state === 'leashed' || d.state === 'kennel' || d.need.t < 2) return; items.push({ x: d.x, y: d.y - 20, icon: NEED_INFO[d.need.type].icon, col: d.need.t > NEED_GRACE ? '#ffd9d4' : '#fffaf0', urgent: d.need.t > NEED_GRACE, small: true }); });
   var padX = 32, topY = 114, botY = VIEW.h - 88;
   items.forEach(function (it) {

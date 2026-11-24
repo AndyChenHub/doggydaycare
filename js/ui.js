@@ -118,7 +118,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Drag anywhere on screen to walk to the SERVE pad behind the counter!', 'good');
   saveGame();
 }
-var CURRENT_ASSET_VER = '16';
+var CURRENT_ASSET_VER = '17';
 function checkAndReloadIfUpdated( startFreshAfterReload ) {
   if (typeof fetch !== 'function' || (location.protocol !== 'http:' && location.protocol !== 'https:')) return false;
   try {

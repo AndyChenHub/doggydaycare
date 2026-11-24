@@ -350,7 +350,21 @@ function boostRep(amt, px, py) {
     float(px, py, '+' + gain.toFixed(2) + '★', '#ffd54a', 1.05);
   }
   if (newCap > oldCap) {
-    toast('⭐ Star Rating rose to ' + S.rep.toFixed(1) + '★ — up to ' + newCap + ' dogs will now visit!', 'good');
+    toast('⭐ Star Rating rose to ' + S.rep.toFixed(1) + '★!', 'good');
+  }
+}
+function dropRep(amt, reason, px, py) {
+  if (!S || !(amt > 0)) return;
+  var prev = S.rep;
+  S.rep = clamp(S.rep - amt, 0.5, 5.0);
+  if (Math.floor(S.rep * 10) !== Math.floor(prev * 10)) markDirty();
+  var fxX = px != null ? px : S.player.x, fxY = py != null ? py : (S.player.y - 70);
+  if (S.rep < prev) {
+    float(fxX, fxY, '-' + amt.toFixed(2) + '★', '#ff8a80', 1.25);
+  }
+  if (reason) {
+    toast(reason + ' (Star Rating: ' + S.rep.toFixed(2) + '★)', 'bad');
+    sfx('complaint');
   }
 }
 function buildWalk() {
@@ -589,6 +603,140 @@ function buyFranchiseTier() {
   saveGame();
   return true;
 }
+
+// ================= Random Reputation Events (Make Star Rating go UP or DOWN dynamically!) =================
+var SPOT_REP_EVENTS = [
+  { kind: 'squirrel',  icon: '🐿️', label: 'Shoo noisy squirrel',       where: 'yard', dur: 20, cash: 15, upRep: 0.22, downRep: 0.20,
+    startMsg: '🐿️ Random Event: A cheeky squirrel is riling up the dogs! Walk over to shoo it away (+0.22★) before neighbours complain (-0.20★)!',
+    winMsg:   '🐿️ Shooed the squirrel & calmed the pack! +0.22★ Reputation & +$15!',
+    loseMsg:  '🐿️ Non-stop barking at the squirrel annoyed the neighbours! -0.20★ Reputation' },
+  { kind: 'reporter',  icon: '📸', label: 'Pose for Town Photographer', where: 'yard', dur: 22, cash: 25, upRep: 0.28, downRep: 0.12,
+    startMsg: '📸 Random Event: A Town Gazette photographer is by the lawn! Walk over to pose (+0.28★) before they leave (-0.12★)!',
+    winMsg:   '📸 Front-page photo in the Town Gazette! +0.28★ Reputation & +$25!',
+    loseMsg:  '📸 The reporter left without getting a photo! -0.12★ Reputation' },
+  { kind: 'pipe',      icon: '💦', label: 'Fix burst lawn sprinkler',   where: 'yard', dur: 18, cash: 12, upRep: 0.20, downRep: 0.22,
+    startMsg: '💦 Random Event: A lawn sprinkler pipe burst! Walk over to shut the valve (+0.20★) before it floods (-0.22★)!',
+    winMsg:   '💦 Fixed the leaky sprinkler in record time! +0.20★ Reputation & +$12!',
+    loseMsg:  '💦 The burst sprinkler flooded the lawn into a muddy mess! -0.22★ Reputation' },
+  { kind: 'neighbour', icon: '🗣️', label: 'Calm grumpy neighbour',      where: 'shop', dur: 20, cash: 10, upRep: 0.22, downRep: 0.25,
+    startMsg: '🗣️ Random Event: A grumpy neighbour is at the front counter! Walk over to smooth things over (+0.22★) before they post a bad review (-0.25★)!',
+    winMsg:   '🗣️ Won over the grumpy neighbour with complimentary pup treats! +0.22★ Reputation!',
+    loseMsg:  '🗣️ The grumpy neighbour left a 1-star noise review online! -0.25★ Reputation' },
+];
+function triggerRandomRepEvent(forcedKind) {
+  if (!S || !S.tutorialDone) return null;
+  var dogsIn = S.dogs.filter(function (d) { return d.checkedIn && d.state !== 'leaving'; });
+  var avgHappy = dogsIn.length ? (dogsIn.reduce(function (acc, d) { return acc + (d.happy || 75); }, 0) / dogsIn.length) : 80;
+  var kind = forcedKind || pick(['spot', 'spot', 'inspector', 'influencer', 'review_up', 'rival_down']);
+
+  if (kind === 'inspector') {
+    var cleanOk = S.poops.length <= 1 && avgHappy >= 62;
+    if (cleanOk) {
+      S.cash += 25; S.stats.earned += 25; S.life.earned += 25;
+      boostRep(0.25, S.player.x, S.player.y - 68);
+      confetti(S.player.x, S.player.y - 50, 28); sfx('perfect');
+      toast('📋 Random Event — Surprise Health Inspection PASSED! Spotless lawn & happy pups! +0.25★ Reputation & +$25', 'good');
+      if (typeof showBanner === 'function') showBanner('📋 Surprise Inspection Passed!', '+0.25★ Reputation · +$25 Clean Award');
+      saveGame();
+      return { kind: 'inspector', delta: 0.25 };
+    } else {
+      dropRep(0.25, '📋 Random Event — Surprise Health Inspector fined your reputation for yard mess!', S.player.x, S.player.y - 68);
+      if (typeof showBanner === 'function') showBanner('📋 Surprise Inspection Failed!', '-0.25★ Reputation — keep poop scooped & pups happy!');
+      saveGame();
+      return { kind: 'inspector', delta: -0.25 };
+    }
+  }
+  if (kind === 'influencer') {
+    var viralGood = S.poops.length === 0 && avgHappy >= 68;
+    if (viralGood) {
+      S.cash += 18; S.stats.earned += 18; S.life.earned += 18;
+      boostRep(0.22, S.player.x, S.player.y - 68);
+      confetti(S.player.x, S.player.y - 50, 24); sfx('coin');
+      toast('📱 Random Event — A customer\'s PupTok video of your happy dogs went viral! +0.22★ Reputation & +$18', 'good');
+      saveGame();
+      return { kind: 'influencer', delta: 0.22 };
+    } else {
+      dropRep(0.18, '📱 Random Event — A passerby posted an embarrassing clip of a messy yard online!', S.player.x, S.player.y - 68);
+      saveGame();
+      return { kind: 'influencer', delta: -0.18 };
+    }
+  }
+  if (kind === 'review_up') {
+    boostRep(0.18, S.player.x, S.player.y - 68);
+    sfx('coin');
+    toast('🌟 Random Event — A local pet blogger published a glowing 5-star review! +0.18★ Reputation', 'good');
+    saveGame();
+    return { kind: 'review_up', delta: 0.18 };
+  }
+  if (kind === 'rival_down') {
+    dropRep(0.15, '📰 Random Event — A rival kennel posted critical flyers in town!', S.player.x, S.player.y - 68);
+    saveGame();
+    return { kind: 'rival_down', delta: -0.15 };
+  }
+  // Interactive timed spot event on the lawn or in the reception shop
+  if (S.repEvent) return S.repEvent;
+  var def = SPOT_REP_EVENTS.filter(function (e) { return e.kind === forcedKind; })[0] || pick(SPOT_REP_EVENTS);
+  var wx = 12.2 * TILE, wy = 24.3 * TILE;
+  if (def.where === 'yard') {
+    var spots = [];
+    for (var ty = 19; ty <= 30; ty++) for (var tx = 19; tx <= 30; tx++) {
+      if (dogWalkable(tx, ty) && !objAt(tx, ty)) {
+        var px = (tx + 0.5) * TILE, py = (ty + 0.5) * TILE;
+        if (dist(px, py, S.player.x, S.player.y) > 75) spots.push([px, py]);
+      }
+    }
+    if (spots.length) { var sp = pick(spots); wx = sp[0]; wy = sp[1]; }
+    else { wx = 22.5 * TILE; wy = 23.5 * TILE; }
+  }
+  S.repEvent = {
+    id: nid(), kind: def.kind, icon: def.icon, label: def.label,
+    x: wx, y: wy, t: def.dur, dur: def.dur, cash: def.cash,
+    upRep: def.upRep, downRep: def.downRep, winMsg: def.winMsg, loseMsg: def.loseMsg
+  };
+  toast(def.startMsg, '');
+  if (typeof showBanner === 'function') showBanner(def.icon + ' Surprise Event!', def.label + ' (+' + def.upRep.toFixed(2) + '★ if handled · -' + def.downRep.toFixed(2) + '★ if ignored)');
+  sfx('bell');
+  return S.repEvent;
+}
+function resolveRepEvent(success) {
+  if (!S || !S.repEvent) return;
+  var ev = S.repEvent;
+  S.repEvent = null;
+  if (success) {
+    if (ev.cash) { S.cash += ev.cash; S.stats.earned += ev.cash; S.life.earned += ev.cash; }
+    boostRep(ev.upRep || 0.2, ev.x, ev.y - 50);
+    gainXP(8);
+    burst(ev.x, ev.y - 16, 'sparkle', 14);
+    confetti(ev.x, ev.y - 30, 24);
+    toast(ev.winMsg, 'good');
+    sfx('perfect');
+  } else {
+    dropRep(ev.downRep || 0.2, ev.loseMsg, ev.x, ev.y - 50);
+    if (ev.kind === 'pipe') {
+      S.dogs.forEach(function (d) {
+        if (d.checkedIn && !d.need && dist(d.x, d.y, ev.x, ev.y) < 220 && hasDone('tub')) {
+          d.need = { type: 'bath', t: 0 };
+        }
+      });
+    }
+  }
+  saveGame();
+}
+function updateRandomRepEvents(dt) {
+  if (!S || !S.tutorialDone || S.closing) return;
+  if (S.repEvent) {
+    S.repEvent.t -= dt;
+    if (S.repEvent.t <= 0) {
+      resolveRepEvent(false);
+    }
+    return;
+  }
+  S.repEventT = (S.repEventT == null ? rand(26, 42) : S.repEventT) - dt;
+  if (S.repEventT <= 0) {
+    S.repEventT = rand(32, 52);
+    triggerRandomRepEvent();
+  }
+}
 function currentDailyEvent() {
   if (!S || !S.dailyEvent || typeof DAILY_EVENTS === 'undefined') return null;
   for (var i = 0; i < DAILY_EVENTS.length; i++) if (DAILY_EVENTS[i].id === S.dailyEvent) return DAILY_EVENTS[i];
@@ -756,6 +904,8 @@ function trainStaff(id) {
   saveGame();
   return true;
 }
+
+
 function hiredStaffCount() {
   if (!S || !S.staff) return 0;
   var n = 0;
@@ -1686,6 +1836,8 @@ function runRepCampaign(kind) {
   saveGame();
   return true;
 }
+
+
 function dropPoop(d) {
   var ptx = tileOf(d.x - d.face * 16), pty = tileOf(d.y + 2), px2 = d.x - d.face * 16, py2 = d.y + 2;
   if (!dogWalkable(ptx, pty)) { px2 = d.x; ptx = tileOf(d.x); pty = tileOf(d.y); }
@@ -2016,6 +2168,17 @@ function currentZone() {
     }
     offer(z);
   });
+  // active random reputation event — walk over in time to boost Star Rating (or lose stars if ignored!)
+  if (S.repEvent && (!car || car.type !== 'dog')) {
+    var evD = dist(p.x, p.y, S.repEvent.x, S.repEvent.y);
+    if (evD <= 48) {
+      offer({
+        key: 'repev' + S.repEvent.id, kind: 'station', repEvent: S.repEvent, prio: 4.6,
+        label: S.repEvent.icon + ' ' + S.repEvent.label + ' (+' + S.repEvent.upRep.toFixed(2) + '★ · +' + fmtMoney(S.repEvent.cash || 0) + ')',
+        run: function () { resolveRepEvent(true); }
+      });
+    }
+  }
   // daytime yard & shop chores — walk over to complete for instant cash & Star Rating recovery!
   if (!car || car.type !== 'dog') (S.chores || []).forEach(function (ch) {
     var cd = dist(p.x, p.y, ch.x, ch.y);
@@ -2428,6 +2591,8 @@ function moveObject(o, nx, ny) {
   saveGame();
   return true;
 }
+
+
 function placeBuild(type, x, y) {
   var c = CAT_BY_ID[type];
   var cost = itemCost(type), reqLvl = itemReqLvl(type);
@@ -2449,6 +2614,8 @@ function placeBuild(type, x, y) {
   saveGame();
   return true;
 }
+
+
 function rushCost(o) {
   var left = Math.max(0, (o.buildEnd - Date.now()) / 1000);
   return Math.max(15, Math.ceil(Math.pow(left, 0.78) * 1.4) + 10);
@@ -2480,6 +2647,8 @@ function upgradeObject(o) {
   saveGame();
   return true;
 }
+
+
 function sellValue(o) {
   var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
   if (!c) return 0;
@@ -2531,6 +2700,8 @@ function buyUpgrade(u) {
   saveGame();
   return true;
 }
+
+
 function checkBuilds() {
   var t = Date.now(), changed = false;
   S.objects.forEach(function (o) {
@@ -2654,6 +2825,7 @@ function update(dt) {
   }
   updateDirector(dt);
   updateChores(dt);
+  updateRandomRepEvents(dt);
   updateAdvisorHints(dt);
   updatePlayer(dt);
   updateDwell(dt);
