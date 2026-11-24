@@ -220,7 +220,7 @@ function newState() {
     objects: [], plots: [{ id: 'base', end: 0 }], dogs: [], owners: [], poops: [], chores: [], choreT: 4, nextId: 1, arrivalTimer: 5,
     stats: newStats(3), streak: 0, bestStreak: 0, totalServed: 0, tutorial: {}, tutorialDone: false,
     upgrades: {}, dex: {}, goals: [], life: { earned: 0, served: 0, perfect: 0, complaints: 0 }, staff: {}, specials: {}, playDays: 0, giftStreak: 0, lastPlayDate: null,
-    player: { x: PLAYER_START[0] * TILE, y: PLAYER_START[1] * TILE, dir: 'up', face: 1, carry: null, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, look: 0, stepT: 0 }, needT: 6, poopT: 30,
+    player: { x: 12.6 * TILE, y: 24.3 * TILE, dir: 'left', face: -1, carry: null, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, look: 0, stepT: 0 }, needT: 6, poopT: 30,
     created: Date.now(),
   };
   S = s; groundDirty = true; NPCS = [];
@@ -1135,19 +1135,19 @@ function advanceTutorialPacing() {
   }
   var d = S.dogs.filter(function (q) { return q.checkedIn && q.state !== 'leaving'; })[0];
   if (!d) return;
-  var inYard = (d.state === 'idle' || d.state === 'wander' || d.state === 'nap') && baseKind(tileOf(d.x), tileOf(d.y)) === 'yard';
+  var inYard = d.state !== 'toYard' && d.state !== 'leashed' && d.state !== 'npcLeashed' && d.state !== 'bath' && d.state !== 'toCounter' && d.state !== 'atDesk' && d.state !== 'toOwner' && baseKind(tileOf(d.x), tileOf(d.y)) === 'yard';
   // Hold off pickup until the player reaches the final tutorial step ('return')
   if (step.id !== 'return' && d.pickupDay === S.day && d.pickupAt < S.dayTime + 45) {
     d.pickupAt = Math.min(dayLen() - 10, S.dayTime + 45);
   }
+  function setTutNeed(nType, animName) {
+    if (d.state === 'romp') endRomp(d);
+    d.need = { type: nType, t: 0 }; d.path = null; d.seekObj = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, animName, 1e9);
+  }
   if (step.id === 'pet') {
-    if (inYard && (!d.need || d.need.type !== 'pet')) {
-      d.need = { type: 'pet', t: 0 }; d.path = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, 'sit', 1e9);
-    }
+    if (inYard && (!d.need || d.need.type !== 'pet')) setTutNeed('pet', 'sit');
   } else if (step.id === 'feed') {
-    if (hasDone('foodbin') && inYard && (!d.need || (d.need.type !== 'food' && d.need.type !== 'treat'))) {
-      d.need = { type: 'food', t: 0 }; d.path = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, 'beg', 1e9);
-    }
+    if (hasDone('foodbin') && inYard && d.state !== 'eat' && (!d.need || (d.need.type !== 'food' && d.need.type !== 'treat'))) setTutNeed('food', 'beg');
   } else if (step.id === 'scoop') {
     if (!S.poops.length && !(S.player.carry && S.player.carry.type === 'poop') && S.stats.scoops === 0 && inYard) {
       dropPoop(d);
@@ -1156,13 +1156,9 @@ function advanceTutorialPacing() {
       tut('scoop');
     }
   } else if (step.id === 'build_toy') {
-    if (hasDone('toybox') && inYard && (!d.need || d.need.type !== 'play')) {
-      d.need = { type: 'play', t: 0 }; d.path = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, 'playbow', 1e9);
-    }
+    if (hasDone('toybox') && inYard && d.state !== 'play' && (!d.need || d.need.type !== 'play')) setTutNeed('play', 'playbow');
   } else if (step.id === 'build_tub') {
-    if (hasDone('tub') && inYard && (!d.need || d.need.type !== 'bath')) {
-      d.need = { type: 'bath', t: 0 }; d.path = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, 'scratch', 1e9);
-    }
+    if (hasDone('tub') && inYard && (!d.need || d.need.type !== 'bath')) setTutNeed('bath', 'scratch');
   } else if (step.id === 'return') {
     if (d.state !== 'bath' && !d.called && !S.owners.some(function (o) { return o.dogId === d.id && (o.state === 'waitPickup' || o.state === 'walkIn' || o.state === 'toHandover' || o.state === 'handover'); })) {
       d.need = null;
@@ -2406,12 +2402,16 @@ function update(dt) {
     if (S.dayTime >= D) { S.dayTime = D; S.closing = true; toast('🌇 Closing time! Finish the last pickups.', ''); sfx('day_end'); }
   }
   if (!S.closing && S.dayTime < D - 55) {
-    S.arrivalTimer -= dt;
-    if (S.arrivalTimer <= 0) {
-      var atCounter = 0;
-      for (i = 0; i < S.owners.length; i++) if (S.owners[i].state !== 'walkOut') atCounter++; // keep the queue at the counter short
-      var canArrive = dayPhase().id !== 'pickup' || activeDogCount() === 0;
-      if (canArrive && atCounter < 3 && activeDogCount() < capacity() && spawnArrival()) scheduleArrival(); else S.arrivalTimer = 4;
+    if (!S.tutorialDone && S.dogs.length >= 1) {
+      S.arrivalTimer = 6;
+    } else {
+      S.arrivalTimer -= dt;
+      if (S.arrivalTimer <= 0) {
+        var atCounter = 0;
+        for (i = 0; i < S.owners.length; i++) if (S.owners[i].state !== 'walkOut') atCounter++; // keep the queue at the counter short
+        var canArrive = dayPhase().id !== 'pickup' || activeDogCount() === 0;
+        if (canArrive && atCounter < 3 && activeDogCount() < capacity() && spawnArrival()) scheduleArrival(); else S.arrivalTimer = 4;
+      }
     }
   }
   for (i = 0; i < S.dogs.length; i++) {
