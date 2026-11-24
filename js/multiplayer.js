@@ -53,8 +53,42 @@ var MP = (function () {
   var lastWorldSent = 0;
   var lastRetainedSent = 0;
   var lastLocalActionAt = 0;
+  var lastResetTs = 0;
+  var pendingRetainedPublish = false;
+  var browserOnline = (typeof navigator === 'undefined' || navigator.onLine !== false);
   var summaryPending = false;
   var summaryShownAtSeq = 0;
+
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('online', function () {
+      browserOnline = true;
+      connectCloudRelay();
+      updateCoopBadge();
+    });
+    window.addEventListener('offline', function () {
+      browserOnline = false;
+      mqttConnected = false;
+      connected = false;
+      if (mqttWs) { try { mqttWs.close(); } catch (e) {} mqttWs = null; }
+      updateCoopBadge();
+    });
+  }
+
+  function isCloudReady() {
+    if (typeof window !== 'undefined' && window.__HEADLESS_TEST__) {
+      return window.__TEST_ONLINE__ !== false;
+    }
+    var navOn = (typeof navigator === 'undefined' || navigator.onLine !== false) && browserOnline;
+    return !!(navOn && mqttConnected && mqttWs && mqttWs.readyState === WebSocket.OPEN);
+  }
+
+  function reconnectNow() {
+    browserOnline = (typeof navigator === 'undefined' || navigator.onLine !== false);
+    if (mqttRetryTimer) { clearTimeout(mqttRetryTimer); mqttRetryTimer = null; }
+    if (mqttWs) { try { mqttWs.close(); } catch (e) {} mqttWs = null; }
+    mqttConnected = false;
+    connectCloudRelay();
+  }
 
   // ---------------- Identity & Multi-Tab / Multi-Device Slot Assignment ----------------
   function initIdentity() {
@@ -297,7 +331,13 @@ var MP = (function () {
           if (mqttWs === sock && sock.readyState === WebSocket.OPEN) {
             try { sock.send(new Uint8Array([0xc0, 0x00])); } catch (e) {}
           }
-        }, 20000);
+        }, 15000);
+        if (pendingRetainedPublish && S) {
+          pendingRetainedPublish = false;
+          roomState = serializeSharedState();
+          sendPacket({ type: 'new_game', rev: rev, ts: lastResetTs || Date.now(), state: roomState }, true);
+          publishRetainedSnapshot();
+        }
         sendJoin();
         updateCoopBadge();
         if (typeof UI !== 'undefined' && UI.mode === 'coop') renderCoopModal();
@@ -561,29 +601,36 @@ var MP = (function () {
 
     if (msg.type === 'new_game') {
       if (msg.playerId && msg.playerId !== playerId && msg.state) {
+        lastResetTs = msg.ts || Date.now();
         roomState = msg.state;
         rev = Math.max(rev, msg.rev || 1);
         seq = 0;
         lastSeenSeq = 0;
         unreadEvents = [];
         recentEvents = [];
-        if (inGame && S) applySharedState(msg.state, true);
+        if (inGame && S) {
+          applySharedState(msg.state, true);
+          toast('🔄 Synced New Game from ' + (msg.name || 'partner phone') + '!', 'good');
+        }
       }
       return;
     }
 
     if (msg.type === 'retained_snapshot' || msg.type === 'joined' || msg.type === 'sync_ack') {
-      // Never overwrite a brand-new local game (during onboarding tutorial with empty lawn) with an old retained snapshot!
-      if (S && !S.tutorialDone && S.objects && S.objects.length === 0) {
+      var snapTs = msg.ts || (msg.state && (msg.state.savedAt || msg.state.created)) || 0;
+      if (lastResetTs > 0 && snapTs > 0 && snapTs < lastResetTs) {
+        // Ignore stale retained snapshot from before our explicit New Game reset, and republish our newer state
+        if (S) publishRetainedSnapshot();
         return;
       }
-      if (msg.state && (!roomState || (msg.rev || 0) >= rev)) {
+      if (msg.state && (!roomState || (msg.rev || 0) >= rev || snapTs > ((S && S.savedAt) || 0))) {
         if (msg.type === 'retained_snapshot' && typeof clearWaitingOwners === 'function') {
           var anyOnline = Object.keys(peers).some(function (pid) { return peers[pid].online; });
           if (!anyOnline) clearWaitingOwners(msg.state);
         }
         roomState = msg.state;
-        if (inGame && S && msg.senderId !== playerId && Date.now() - lastLocalActionAt > 1200) {
+        rev = Math.max(rev, msg.rev || 1);
+        if (inGame && S && msg.senderId !== playerId && Date.now() - lastLocalActionAt > 900) {
           applySharedState(msg.state, false);
         }
       }
@@ -629,10 +676,11 @@ var MP = (function () {
     if (msg.type === 'world_state' || (fromBc && msg.type === 'world_sync')) {
       var sender = msg.senderId || msg.playerId;
       if (sender === playerId) return;
-      if (S && !S.tutorialDone && S.objects && S.objects.length === 0) return;
       if (msg.state) {
+        var wTs = msg.ts || msg.state.savedAt || msg.state.created || 0;
+        if (lastResetTs > 0 && wTs > 0 && wTs < lastResetTs) return;
         roomState = msg.state;
-        if (inGame && S && Date.now() - lastLocalActionAt > 1200) {
+        if (inGame && S && Date.now() - lastLocalActionAt > 900) {
           applySharedState(msg.state, false);
         }
       }
@@ -805,16 +853,25 @@ var MP = (function () {
     S.streak = incoming.streak || 0;
     S.bestStreak = Math.max(S.bestStreak || 0, incoming.bestStreak || 0);
     S.totalServed = Math.max(S.totalServed || 0, incoming.totalServed || 0);
-    if (incoming.tutorial) Object.assign(S.tutorial, incoming.tutorial);
-    if (incoming.tutorialDone) S.tutorialDone = true;
-    if (incoming.upgrades) Object.assign(S.upgrades, incoming.upgrades);
-    if (incoming.builtPads) Object.assign(S.builtPads = S.builtPads || {}, incoming.builtPads);
+    S.tutorial = incoming.tutorial ? JSON.parse(JSON.stringify(incoming.tutorial)) : {};
+    S.tutorialDone = !!incoming.tutorialDone;
+    S.upgrades = incoming.upgrades ? JSON.parse(JSON.stringify(incoming.upgrades)) : {};
+    S.builtPads = incoming.builtPads ? JSON.parse(JSON.stringify(incoming.builtPads)) : {};
     if (incoming.dex) Object.assign(S.dex, incoming.dex);
     if (incoming.specials) Object.assign(S.specials, incoming.specials);
-    if (incoming.staff) S.staff = incoming.staff;
+    S.staff = incoming.staff ? JSON.parse(JSON.stringify(incoming.staff)) : {};
+    S.staffLvl = incoming.staffLvl ? JSON.parse(JSON.stringify(incoming.staffLvl)) : {};
+    S.franchiseTier = typeof incoming.franchiseTier === 'number' ? incoming.franchiseTier : (S.franchiseTier || 0);
+    S.goalWave = typeof incoming.goalWave === 'number' ? incoming.goalWave : (S.goalWave || 1);
+    if (incoming.milestones) S.milestones = JSON.parse(JSON.stringify(incoming.milestones));
+    if ('dailyEvent' in incoming) S.dailyEvent = incoming.dailyEvent;
+    if (Array.isArray(incoming.chores)) S.chores = incoming.chores;
+    if ('repEvent' in incoming) S.repEvent = incoming.repEvent;
     if (incoming.goals && incoming.goals.length) S.goals = incoming.goals;
     if (incoming.life) S.life = incoming.life;
     if (incoming.stats) S.stats = incoming.stats;
+    if (incoming.created) S.created = incoming.created;
+    if (incoming.savedAt) S.savedAt = incoming.savedAt;
 
     // Objects & plots
     if (Array.isArray(incoming.objects)) {
@@ -878,7 +935,14 @@ var MP = (function () {
       if (typeof syncStaff === 'function') syncStaff();
       if (typeof UI !== 'undefined' && UI.mode === 'build' && typeof renderBuildPanel === 'function') renderBuildPanel();
     }
-    if (typeof saveGame === 'function') saveGame();
+    if (typeof saveGame === 'function') {
+      try {
+        window.__APPLYING_REMOTE_SYNC__ = true;
+        saveGame();
+      } finally {
+        window.__APPLYING_REMOTE_SYNC__ = false;
+      }
+    }
   }
 
   function showLivePartnerAction(partnerName, act, partnerId) {
@@ -995,11 +1059,11 @@ var MP = (function () {
       }, false);
     }
 
-    // Periodically sync shared world state (every 380ms if host or alone, plus retained snapshot every 6s)
+    // Periodically sync shared world state (every 380ms if host or alone, plus retained snapshot every 2.5s)
     var isHost = !hostId || hostId === playerId || !peers[hostId] || !peers[hostId].online;
     if (isHost && nowMs - lastWorldSent >= 380) {
       lastWorldSent = nowMs;
-      var saveSnap = (nowMs - lastRetainedSent >= 6000);
+      var saveSnap = (nowMs - lastRetainedSent >= 2500);
       sendWorldSync(saveSnap);
     }
   }
@@ -1355,10 +1419,14 @@ var MP = (function () {
   function onStartGame(fresh) {
     if (fresh) {
       inGame = true;
+      lastResetTs = Date.now();
+      lastLocalActionAt = lastResetTs;
       if (S) {
         S.player.look = playerLook;
         S.objects = [];
         S.chores = [];
+        S.created = lastResetTs;
+        S.savedAt = lastResetTs;
       }
       rev = Math.max(rev, (roomState && roomState.rev) || 0) + 1000;
       seq = 0;
@@ -1368,17 +1436,27 @@ var MP = (function () {
       try { localStorage.removeItem(ROOM_STORAGE_PREFIX + roomCode); } catch (e) {}
       roomState = serializeSharedState();
       saveLocalRoomFallback(null);
-      sendPacket({ type: 'new_game', rev: rev, state: roomState }, true);
+      if (mqttConnected && mqttWs && mqttWs.readyState === WebSocket.OPEN) {
+        pendingRetainedPublish = false;
+        sendPacket({ type: 'new_game', rev: rev, ts: lastResetTs, state: roomState }, true);
+        publishRetainedSnapshot();
+      } else {
+        pendingRetainedPublish = true;
+      }
       updateCoopBadge();
       return false;
     }
 
     loadLocalRoomFallback();
     var appliedShared = false;
-    // Only apply roomState when continuing if the local game has already finished the tutorial or matches the shared session
-    if (roomState && roomState.version === 2 && S && (S.tutorialDone || S.objects.length > 0)) {
-      applySharedState(roomState, true);
-      appliedShared = true;
+    if (roomState && roomState.version === 2) {
+      var rTs = roomState.savedAt || roomState.created || 0;
+      var lTs = (S && (S.savedAt || S.created)) || 0;
+      if (!S) newState();
+      if (rTs >= lTs || (S.objects && S.objects.length === 0 && Array.isArray(roomState.objects) && roomState.objects.length > 0)) {
+        applySharedState(roomState, true);
+        appliedShared = true;
+      }
     }
 
     inGame = true;
@@ -1842,6 +1920,8 @@ var MP = (function () {
     get slot() { return slot; },
     get peers() { return peers; },
     get hasRemoteSave() { return !!(roomState && roomState.version === 2); },
+    isCloudReady: isCloudReady,
+    reconnectNow: reconnectNow,
     getPeer: function (id) { return peers[id] || null; },
     getOnlinePeers: getOnlinePeerList,
     setProfile: setProfile,

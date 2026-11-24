@@ -118,7 +118,29 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Drag anywhere on screen to walk to the SERVE pad behind the counter!', 'good');
   saveGame();
 }
-var CURRENT_ASSET_VER = '18';
+var CURRENT_ASSET_VER = '19';
+function isOnlineAndSynced() {
+  if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
+    return MP.isCloudReady();
+  }
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+function updateNetGate() {
+  var gate = $('netgate');
+  if (!gate) return true;
+  var ok = isOnlineAndSynced();
+  if (gate.hidden !== ok) gate.hidden = ok;
+  if (!ok) {
+    var navOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+    var rCode = (typeof MP !== 'undefined' && MP.roomCode) ? MP.roomCode : 'PAWS';
+    setText('netTitle', navOnline ? '☁️ Syncing Across Phones…' : '📡 No Internet Connection');
+    setText('netMsg', navOnline
+      ? 'Connecting to the Cloud Sync server (Room: ' + rCode + '). The game requires an active connection so your daycare stays synced across phones.'
+      : 'Paws & Play cannot run without internet. Connect to Wi-Fi or 5G so your daycare stays synced across phones.');
+    setText('netStatus', navOnline ? ('🔄 Connecting to Cloud Relay (Room ' + rCode + ')…') : '❌ Offline — Game paused until internet is restored');
+  }
+  return ok;
+}
 function checkAndReloadIfUpdated( startFreshAfterReload ) {
   if (typeof fetch !== 'function' || (location.protocol !== 'http:' && location.protocol !== 'https:')) return false;
   try {
@@ -137,6 +159,11 @@ function checkAndReloadIfUpdated( startFreshAfterReload ) {
   return false;
 }
 function startGame(fresh) {
+  if (!updateNetGate()) {
+    toast('📡 Internet & Cloud Sync required to play!', 'bad');
+    if (typeof MP !== 'undefined' && MP.reconnectNow) MP.reconnectNow();
+    return;
+  }
   checkAndReloadIfUpdated(fresh);
   var tName = $('titleNameInput'), tRoom = $('titleRoomInput');
   if (typeof MP !== 'undefined' && (tName || tRoom)) {
@@ -931,10 +958,11 @@ function makeDemo() {
 function frame(ts) {
   var dt = clamp((ts - lastT) / 1000, 0.001, 0.05); lastT = ts;
   try {
+    var netOk = updateNetGate();
     if (S) {
-      var active = (UI.mode === 'play' || UI.mode === 'build') && !document.hidden;
+      var active = netOk && (UI.mode === 'play' || UI.mode === 'build') && !document.hidden;
       if (active) update(dt);
-      else updateFX(dt * 0.5);
+      else if (netOk) updateFX(dt * 0.5);
       // Portrait iPhone camera centered horizontally on the player!
       var P = S.player, v = DIRV[P.dir] || [0, 0];
       var tx = P.x + (P.moving ? v[0] * 32 : 0);
@@ -994,6 +1022,11 @@ document.addEventListener('visibilitychange', function () {
   else { lastT = performance.now(); try { if (typeof AC !== 'undefined' && AC) audioInit(); } catch (e) {} }
 });
 $('buildBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mode === 'build') { setMode(UI.mode === 'build' ? 'play' : 'build'); sfx('ui_open'); } this.blur(); };
+if ($('netRetryBtn')) $('netRetryBtn').onclick = function () {
+  initAudio(); sfx('click');
+  setText('netStatus', '🔄 Reconnecting to Cloud Sync Server…');
+  if (typeof MP !== 'undefined' && MP.reconnectNow) MP.reconnectNow();
+};
 $('pauseBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mode === 'build') openPause(); this.blur(); };
 $('dexBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mode === 'build') openDex(); this.blur(); };
 if ($('repPill')) $('repPill').onclick = function () {
