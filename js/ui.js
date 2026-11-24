@@ -1,7 +1,7 @@
 'use strict';
 var UI = {
   mode: 'title', prevMode: 'play', actions: null, mouse: { sx: 0, sy: 0, in: false },
-  buildSel: null, buildTool: null, buildTab: 'care', buildRot: 0, moveObj: null, moveRot: 0, actionObj: null,
+  buildSel: null, buildTool: null, buildTab: 'care', buildRot: 0, moveObj: null, moveRot: 0, dragPos: null, actionObj: null,
   summary: null, cashShown: 0, cashPulse: 0, lastRoster: 0, modalStack: [], dexSel: null, dexNew: 0,
   tasksOpen: false, rosterOpen: false,
   camFocus: null, sceneT: 0, miniT: 0, miniDirty: true, cashWorld: null, titleT: 0,
@@ -17,14 +17,17 @@ function setMode(m) {
   UI.mode = m;
   document.body.classList.toggle('building', m === 'build');
   document.body.classList.toggle('title', !!UI.inTitle);
-  if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; UI.moveObj = null; UI.buildRot = 0; UI.moveRot = 0; CAM.panX = 0; CAM.panY = 0; }
+  if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; UI.moveObj = null; UI.dragPos = null; UI.buildRot = 0; UI.moveRot = 0; CAM.panX = 0; CAM.panY = 0; }
   if (m !== 'play') { UI.joy = null; UI.touchTarget = null; }
   if (m === 'build') {
     UI.buildSel = null;
     UI.buildTool = null;
     UI.moveObj = null;
+    UI.dragPos = null;
     UI.buildRot = 0;
     UI.moveRot = 0;
+    CAM.panX = 0;
+    CAM.panY = 0;
     if (S && !S.tutorialDone && typeof tutorialRequiredBuildType === 'function') {
       var reqType = tutorialRequiredBuildType();
       if (reqType && CAT_BY_ID[reqType]) {
@@ -140,7 +143,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Tap 🔨 Shop at the bottom to select and place your first Kennel on the lawn!', 'good');
   if (!isJoiningRoom) saveGame();
 }
-var CURRENT_ASSET_VER = '22';
+var CURRENT_ASSET_VER = '23';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();
@@ -295,8 +298,8 @@ var MODAL_ACTS = {
     var o = UI.actionObj; closeModal();
     if (!o) return;
     if (o.type === 'tub' && o.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
-    setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; UI.moveRot = o.rot || 0; renderBuildPanel();
-    toast('↔️ Tap any open green tile in the yard to move ' + CAT_BY_ID[o.type].name + ' (or tap 🔄 Rotate)', '');
+    setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; UI.moveRot = o.rot || 0; UI.dragPos = { x: o.x, y: o.y }; renderBuildPanel();
+    toast('↔️ Drag ' + CAT_BY_ID[o.type].name + ' anywhere on the lawn (or tap 🔄 Rotate)!', '');
   },
   rotobj: function () {
     var o = UI.actionObj; closeModal();
@@ -306,8 +309,8 @@ var MODAL_ACTS = {
       renderBuildPanel();
       return;
     }
-    setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; UI.moveRot = ((o.rot || 0) + 1) % 4; renderBuildPanel();
-    toast('🔄 Rotated ' + CAT_BY_ID[o.type].name + ' — tap an open green spot on the lawn to place it!', '');
+    setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; UI.moveRot = ((o.rot || 0) + 1) % 4; UI.dragPos = { x: o.x, y: o.y }; renderBuildPanel();
+    toast('🔄 Rotated ' + CAT_BY_ID[o.type].name + ' — drag it to an open green spot on the lawn!', '');
   },
   upgobj: function () {
     var o = UI.actionObj; closeModal();
@@ -560,11 +563,13 @@ function renderBuildPanel() {
       var sUrl = objectIconURL(sDef.id);
       var bRot = ((UI.buildRot || 0) % 4 + 4) % 4;
       var bDims = typeof objDims === 'function' ? objDims(sDef, bRot) : { w: sDef.w, h: sDef.h };
+      if (!UI.dragPos && typeof defaultBuildSpot === 'function') UI.dragPos = defaultBuildSpot(sDef.id, bRot);
       hMin = '<div class="bp-min-bar">' +
         '<div class="ic">' + (sUrl ? '<img src="' + sUrl + '">' : sDef.icon) + '</div>' +
         '<div class="tx"><b>Placing ' + esc(sDef.name) + ' (' + fmtMoney(sCost) + ' · ⏱ ' + fmtDur(effT) + ')</b>' +
-        '<small>Tap green lawn to place (' + bDims.w + '×' + bDims.h + ' · ' + ROT_LABELS[bRot] + ') · Drag to pan</small></div>' +
-        '<button id="bpRotateObj" class="bp-rot-btn" aria-label="Rotate">🔄 Rotate</button>' +
+        '<small>Drag building anywhere on the stagnant lawn (' + bDims.w + '×' + bDims.h + ' · ' + ROT_LABELS[bRot] + ')</small></div>' +
+        '<button id="bpConfirmPlace" class="bp-ok-btn" aria-label="Place">✓ Place</button>' +
+        '<button id="bpRotateObj" class="bp-rot-btn" aria-label="Rotate">🔄</button>' +
         '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
       '</div>';
     } else if (UI.moveObj && CAT_BY_ID[UI.moveObj.type]) {
@@ -572,18 +577,20 @@ function renderBuildPanel() {
       var mUrl = objectIconURL(mDef.id);
       var mRot = ((UI.moveRot != null ? UI.moveRot : (UI.moveObj.rot || 0)) % 4 + 4) % 4;
       var mDims = typeof objDims === 'function' ? objDims(mDef, mRot) : { w: mDef.w, h: mDef.h };
+      if (!UI.dragPos) UI.dragPos = { x: UI.moveObj.x, y: UI.moveObj.y };
       hMin = '<div class="bp-min-bar">' +
         '<div class="ic">' + (mUrl ? '<img src="' + mUrl + '">' : mDef.icon) + '</div>' +
         '<div class="tx"><b>↔️ Moving ' + esc(mDef.name) + ' (' + mDims.w + '×' + mDims.h + ' · ' + ROT_LABELS[mRot] + ')</b>' +
-        '<small>Tap any open green tile on the lawn to relocate or tap Rotate</small></div>' +
-        '<button id="bpRotateObj" class="bp-rot-btn" aria-label="Rotate">🔄 Rotate</button>' +
+        '<small>Drag building anywhere on the stagnant lawn to relocate</small></div>' +
+        '<button id="bpConfirmPlace" class="bp-ok-btn" aria-label="Place">✓ Place</button>' +
+        '<button id="bpRotateObj" class="bp-rot-btn" aria-label="Rotate">🔄</button>' +
         '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
       '</div>';
     } else if (UI.buildTool === 'move') {
       hMin = '<div class="bp-min-bar">' +
         '<div class="ic">↔️</div>' +
         '<div class="tx"><b>↔️ Move &amp; Rotate Mode</b>' +
-        '<small>Tap any building on the lawn to pick it up, rotate it, or relocate it!</small></div>' +
+        '<small>Touch &amp; drag any building on the lawn to move or rotate it!</small></div>' +
         '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
       '</div>';
     } else if (UI.buildTool === 'upgrade') {
@@ -682,18 +689,32 @@ function bpShowDesc(txt) {
   var bp = $('buildpanel');
   bp.addEventListener('pointerdown', function (ev) {
     if (!ev.target.closest) return;
-    var t = ev.target.closest('#bpClose,#bpCancelPlace,#bpRotateObj,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise]'); if (!t) return;
+    var t = ev.target.closest('#bpClose,#bpCancelPlace,#bpConfirmPlace,#bpRotateObj,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise]'); if (!t) return;
     initAudio();
     if (t.id === 'bpClose') { setMode('play'); sfx('ui_close'); return; }
+    if (t.id === 'bpConfirmPlace') {
+      confirmDraggedBuildOrMove();
+      return;
+    }
     if (t.id === 'bpRotateObj') {
       if (UI.buildSel) {
         UI.buildRot = ((UI.buildRot || 0) + 1) % 4;
+        if (UI.dragPos) {
+          var rDims = typeof objDims === 'function' ? objDims(UI.buildSel, UI.buildRot) : { w: 1, h: 1 };
+          UI.dragPos.x = clamp(UI.dragPos.x, MAP.yard.x0, MAP.yard.x1 - rDims.w + 1);
+          UI.dragPos.y = clamp(UI.dragPos.y, MAP.yard.y0, MAP.yard.y1 - rDims.h + 1);
+        }
         sfx('click');
         renderBuildPanel();
       } else if (UI.moveObj) {
         UI.moveRot = (((UI.moveRot != null ? UI.moveRot : (UI.moveObj.rot || 0)) + 1) % 4);
-        if (typeof canMoveObject === 'function' && canMoveObject(UI.moveObj, UI.moveObj.x, UI.moveObj.y, UI.moveRot)) {
-          moveObject(UI.moveObj, UI.moveObj.x, UI.moveObj.y, UI.moveRot);
+        var mPos = UI.dragPos || { x: UI.moveObj.x, y: UI.moveObj.y };
+        var mrDims = typeof objDims === 'function' ? objDims(UI.moveObj.type, UI.moveRot) : { w: UI.moveObj.w, h: UI.moveObj.h };
+        mPos.x = clamp(mPos.x, MAP.yard.x0, MAP.yard.x1 - mrDims.w + 1);
+        mPos.y = clamp(mPos.y, MAP.yard.y0, MAP.yard.y1 - mrDims.h + 1);
+        UI.dragPos = mPos;
+        if (typeof canMoveObject === 'function' && canMoveObject(UI.moveObj, mPos.x, mPos.y, UI.moveRot)) {
+          moveObject(UI.moveObj, mPos.x, mPos.y, UI.moveRot);
         } else {
           sfx('click');
         }
@@ -702,7 +723,7 @@ function bpShowDesc(txt) {
       return;
     }
     if (t.id === 'bpCancelPlace') {
-      UI.buildSel = null; UI.moveObj = null; UI.buildTool = null;
+      UI.buildSel = null; UI.moveObj = null; UI.buildTool = null; UI.dragPos = null;
       UI.buildRot = 0; UI.moveRot = 0;
       CAM.panX = 0; CAM.panY = 0;
       sfx('ui_close');
@@ -711,10 +732,10 @@ function bpShowDesc(txt) {
     }
     if (t.hasAttribute('data-repboost')) { runRepCampaign(t.getAttribute('data-repboost')); renderBuildPanel(); return; }
     if (t.hasAttribute('data-franchise')) { buyFranchiseTier(); renderBuildPanel(); return; }
-    if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
-    if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
-    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
-    if (t.hasAttribute('data-tab')) { UI.buildTab = t.getAttribute('data-tab'); UI.buildSel = null; UI.moveObj = null; sfx('click'); renderBuildPanel(); var it = bp.querySelector('.items'); if (it) it.scrollTop = 0; return; }
+    if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
+    if (t.hasAttribute('data-tab')) { UI.buildTab = t.getAttribute('data-tab'); UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; sfx('click'); renderBuildPanel(); var it = bp.querySelector('.items'); if (it) it.scrollTop = 0; return; }
     if (t.hasAttribute('data-item')) {
       var id = t.getAttribute('data-item'), c = CAT_BY_ID[id];
       var reqL = typeof itemReqLvl === 'function' ? itemReqLvl(id) : c.lvl;
@@ -723,7 +744,9 @@ function bpShowDesc(txt) {
         else toast('🔒 Reach Daycare Level ' + reqL + ' to build another ' + c.name, 'bad');
         sfx('error'); return;
       }
-      UI.buildSel = UI.buildSel === id ? null : id; UI.buildRot = 0; UI.buildTool = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; sfx('click'); renderBuildPanel(); return;
+      UI.buildSel = UI.buildSel === id ? null : id; UI.buildRot = 0; UI.buildTool = null; UI.moveObj = null;
+      UI.dragPos = (UI.buildSel && typeof defaultBuildSpot === 'function') ? defaultBuildSpot(UI.buildSel, 0) : null;
+      CAM.panX = 0; CAM.panY = 0; sfx('click'); renderBuildPanel(); return;
     }
     if (t.hasAttribute('data-staff')) {
       var sid = t.getAttribute('data-staff'), sd = STAFF_BY_ID[sid];
@@ -803,60 +826,92 @@ function promptUpgradeObject(o) {
     upgradeObject(o); renderBuildPanel();
   });
 }
+function updateDragPosFromScreen(clientX, clientY) {
+  if (!S) return;
+  var mw = screenToWorld(clientX, clientY), tx = tileOf(mw.x), ty = tileOf(mw.y);
+  if (UI.buildSel && CAT_BY_ID[UI.buildSel]) {
+    var bDims = typeof objDims === 'function' ? objDims(UI.buildSel, UI.buildRot || 0) : CAT_BY_ID[UI.buildSel];
+    UI.dragPos = {
+      x: clamp(tx - Math.floor((bDims.w - 1) / 2), MAP.yard.x0, MAP.yard.x1 - bDims.w + 1),
+      y: clamp(ty - Math.floor((bDims.h - 1) / 2), MAP.yard.y0, MAP.yard.y1 - bDims.h + 1)
+    };
+  } else if (UI.moveObj && CAT_BY_ID[UI.moveObj.type]) {
+    var mRot = UI.moveRot != null ? UI.moveRot : (UI.moveObj.rot || 0);
+    var mDims = typeof objDims === 'function' ? objDims(UI.moveObj.type, mRot) : UI.moveObj;
+    UI.dragPos = {
+      x: clamp(tx - Math.floor((mDims.w - 1) / 2), MAP.yard.x0, MAP.yard.x1 - mDims.w + 1),
+      y: clamp(ty - Math.floor((mDims.h - 1) / 2), MAP.yard.y0, MAP.yard.y1 - mDims.h + 1)
+    };
+  }
+}
+
+function confirmDraggedBuildOrMove() {
+  if (UI.mode !== 'build' || !S) return false;
+  if (UI.moveObj) {
+    var mo = UI.moveObj, mDef = CAT_BY_ID[mo.type];
+    var mRot = UI.moveRot != null ? UI.moveRot : (mo.rot || 0);
+    var mDims = typeof objDims === 'function' ? objDims(mDef, mRot) : { w: mDef.w, h: mDef.h, rot: mRot };
+    var mx = UI.dragPos ? UI.dragPos.x : mo.x, my = UI.dragPos ? UI.dragPos.y : mo.y;
+    if (canMoveObject(mo, mx, my, mDims.rot)) {
+      moveObject(mo, mx, my, mDims.rot);
+      UI.moveObj = null;
+      UI.moveRot = 0;
+      UI.dragPos = null;
+      renderBuildPanel();
+      return true;
+    }
+    toast('Drag ' + mDef.name + ' onto an open green spot on the lawn', 'bad'); sfx('error');
+    return false;
+  }
+  if (UI.buildSel) {
+    var def = CAT_BY_ID[UI.buildSel];
+    var bRot = UI.buildRot || 0;
+    var bDims = typeof objDims === 'function' ? objDims(def, bRot) : { w: def.w, h: def.h, rot: bRot };
+    if (!UI.dragPos && typeof defaultBuildSpot === 'function') UI.dragPos = defaultBuildSpot(UI.buildSel, bRot);
+    var x = UI.dragPos ? UI.dragPos.x : 24, y = UI.dragPos ? UI.dragPos.y : 24;
+    var bCost = typeof itemCost === 'function' ? itemCost(UI.buildSel) : def.cost;
+    var bReq = typeof itemReqLvl === 'function' ? itemReqLvl(UI.buildSel) : def.lvl;
+    if (S.level < bReq) { toast('🔒 Reach Level ' + bReq + ' to build another ' + def.name, 'bad'); sfx('error'); return false; }
+    if (S.cash < bCost) { toast('Not enough cash for a ' + def.name + ' (' + fmtMoney(bCost) + ')', 'bad'); sfx('error'); return false; }
+    if (!canPlace(UI.buildSel, x, y, bDims.rot)) { toast('Drag ' + def.name + ' onto an open green spot on the lawn', 'bad'); sfx('error'); return false; }
+    placeBuild(UI.buildSel, x, y, bDims.rot);
+    UI.buildSel = null;
+    UI.buildRot = 0;
+    UI.dragPos = null;
+    CAM.panX = 0; CAM.panY = 0;
+    if (!S.tutorialDone) {
+      setMode('play');
+      return true;
+    }
+    renderBuildPanel();
+    return true;
+  }
+  return false;
+}
+
 function handleBuildTap(clientX, clientY) {
   if (UI.mode !== 'build' || !S) return;
   var mw = screenToWorld(clientX, clientY), tx = tileOf(mw.x), ty = tileOf(mw.y);
   var site = objAt(tx, ty);
   if (UI.moveObj) {
-    var mo = UI.moveObj, mDef = CAT_BY_ID[mo.type];
-    var mRot = UI.moveRot != null ? UI.moveRot : (mo.rot || 0);
-    var mDims = typeof objDims === 'function' ? objDims(mDef, mRot) : { w: mDef.w, h: mDef.h, rot: mRot };
-    var mx = tx - Math.floor((mDims.w - 1) / 2), my = ty - Math.floor((mDims.h - 1) / 2);
-    if (canMoveObject(mo, mx, my, mDims.rot)) {
-      moveObject(mo, mx, my, mDims.rot);
-      UI.moveObj = null;
-      UI.moveRot = 0;
-      renderBuildPanel();
-      return;
-    }
-    if (site && site !== mo) {
-      if (site.type === 'tub' && site.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
-      UI.moveObj = site; UI.moveRot = site.rot || 0; sfx('click'); renderBuildPanel();
-      toast('↔️ Picked up ' + CAT_BY_ID[site.type].name + ' — tap an open green spot in the yard!', '');
-      return;
-    }
-    toast('Tap an open green tile in the yard to place ' + mDef.name, 'bad'); sfx('error');
+    updateDragPosFromScreen(clientX, clientY);
+    confirmDraggedBuildOrMove();
     return;
   }
   if (UI.buildTool === 'move') {
     if (site) {
       if (site.type === 'tub' && site.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
-      UI.moveObj = site; UI.moveRot = site.rot || 0; sfx('click'); renderBuildPanel();
-      toast('↔️ Picked up ' + CAT_BY_ID[site.type].name + ' — tap any open green spot to move it (or tap 🔄 Rotate)!', '');
+      UI.moveObj = site; UI.moveRot = site.rot || 0; UI.dragPos = { x: site.x, y: site.y }; sfx('click'); renderBuildPanel();
+      toast('↔️ Drag ' + CAT_BY_ID[site.type].name + ' anywhere on the lawn (or tap 🔄 Rotate)!', '');
     } else {
-      toast('Tap any building or item in the yard that you want to move or rotate', '');
+      toast('Touch & drag any building on the lawn to move or rotate it', '');
     }
     return;
   }
   if (UI.buildSel && !(site && !site.done) && UI.buildTool !== 'upgrade' && UI.buildTool !== 'sell') {
-    var def = CAT_BY_ID[UI.buildSel];
-    var bRot = UI.buildRot || 0;
-    var bDims = typeof objDims === 'function' ? objDims(def, bRot) : { w: def.w, h: def.h, rot: bRot };
-    var x = tx - Math.floor((bDims.w - 1) / 2), y = ty - Math.floor((bDims.h - 1) / 2);
-    var bCost = typeof itemCost === 'function' ? itemCost(UI.buildSel) : def.cost;
-    var bReq = typeof itemReqLvl === 'function' ? itemReqLvl(UI.buildSel) : def.lvl;
-    if (S.level < bReq) { toast('🔒 Reach Level ' + bReq + ' to build another ' + def.name, 'bad'); sfx('error'); return; }
-    if (S.cash < bCost) { toast('Not enough cash for a ' + def.name + ' (' + fmtMoney(bCost) + ')', 'bad'); sfx('error'); return; }
-    if (!canPlace(UI.buildSel, x, y, bDims.rot)) { toast('Tap an open green tile on the lawn', 'bad'); sfx('error'); return; }
-    placeBuild(UI.buildSel, x, y, bDims.rot);
-    UI.buildSel = null;
-    UI.buildRot = 0;
-    CAM.panX = 0; CAM.panY = 0;
-    if (!S.tutorialDone) {
-      setMode('play');
-      return;
-    }
-    renderBuildPanel(); return;
+    updateDragPosFromScreen(clientX, clientY);
+    confirmDraggedBuildOrMove();
+    return;
   }
   var o = site;
   if (o && UI.buildTool === 'sell') {
@@ -886,7 +941,24 @@ function _startPointerOrTouch(id, clientX, clientY) {
     UI.joy = { id: id, ox: clientX, oy: clientY, cx: clientX, cy: clientY, dx: 0, dy: 0, active: false, moved: false, t0: performance.now() };
   } else if (UI.mode === 'build') {
     UI.mouse.sx = clientX; UI.mouse.sy = clientY; UI.mouse.in = true;
-    UI.touchBuild = { id: id, ox: clientX, oy: clientY, lx: clientX, ly: clientY, moved: false };
+    var startSite = null;
+    if (S) {
+      var mw0 = screenToWorld(clientX, clientY);
+      startSite = objAt(tileOf(mw0.x), tileOf(mw0.y));
+    }
+    // In Move mode, touching a building immediately grabs it so you can drag it in one continuous motion across the stagnant background!
+    if (UI.buildTool === 'move' && !UI.moveObj && startSite) {
+      if (startSite.type === 'tub' && startSite.dogId) {
+        toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error');
+      } else {
+        UI.moveObj = startSite; UI.moveRot = startSite.rot || 0; UI.dragPos = { x: startSite.x, y: startSite.y };
+        sfx('click'); renderBuildPanel();
+      }
+    }
+    if (UI.buildSel || UI.moveObj) {
+      updateDragPosFromScreen(clientX, clientY);
+    }
+    UI.touchBuild = { id: id, ox: clientX, oy: clientY, lx: clientX, ly: clientY, moved: false, grabbedSite: startSite };
   }
 }
 
@@ -912,10 +984,21 @@ function _movePointerOrTouch(id, clientX, clientY) {
   } else if (UI.mode === 'build' && UI.touchBuild && UI.touchBuild.id === id) {
     UI.mouse.sx = clientX; UI.mouse.sy = clientY; UI.mouse.in = true;
     var bdx = clientX - UI.touchBuild.ox, bdy = clientY - UI.touchBuild.oy;
-    if (Math.sqrt(bdx * bdx + bdy * bdy) > 10) UI.touchBuild.moved = true;
-    if (UI.touchBuild.moved) {
-      CAM.panX -= (clientX - UI.touchBuild.lx) / CAM.zoom;
-      CAM.panY -= (clientY - UI.touchBuild.ly) / CAM.zoom;
+    if (Math.sqrt(bdx * bdx + bdy * bdy) > 8) UI.touchBuild.moved = true;
+    // If dragging an existing building on the lawn while no tool/item is selected, automatically grab and drag that building!
+    if (UI.touchBuild.moved && !UI.buildSel && !UI.moveObj && !UI.buildTool && UI.touchBuild.grabbedSite) {
+      var gs = UI.touchBuild.grabbedSite;
+      if (!(gs.type === 'tub' && gs.dogId)) {
+        UI.buildTool = 'move';
+        UI.moveObj = gs;
+        UI.moveRot = gs.rot || 0;
+        UI.dragPos = { x: gs.x, y: gs.y };
+        renderBuildPanel();
+      }
+    }
+    // Keep the background 100% STAGNANT and drag the building directly to wherever the finger moves!
+    if (UI.buildSel || UI.moveObj) {
+      updateDragPosFromScreen(clientX, clientY);
     }
     UI.touchBuild.lx = clientX; UI.touchBuild.ly = clientY;
   }
@@ -935,9 +1018,14 @@ function _endPointerOrTouch(id, clientX, clientY) {
     UI.joy = null;
   }
   if (UI.touchBuild && UI.touchBuild.id === id) {
-    if (!UI.touchBuild.moved && UI.mode === 'build') {
+    if (UI.mode === 'build') {
       UI.mouse.sx = clientX; UI.mouse.sy = clientY; UI.mouse.in = true;
-      handleBuildTap(clientX, clientY);
+      if (UI.buildSel || UI.moveObj) {
+        updateDragPosFromScreen(clientX, clientY);
+        confirmDraggedBuildOrMove();
+      } else if (!UI.touchBuild.moved) {
+        handleBuildTap(clientX, clientY);
+      }
     }
     UI.touchBuild = null;
   }
@@ -1153,20 +1241,15 @@ function frame(ts) {
       if (UI.camFocusPeer && typeof MP !== 'undefined') { UI.camFocusPeer.t -= dt; var fp = MP.getPeer(UI.camFocusPeer.id); if (fp && fp.online && UI.camFocusPeer.t > 0 && !P.moving) { tx = fp.x; ty = fp.y - 24; } else UI.camFocusPeer = null; }
       var building = UI.mode === 'build' || (UI.mode === 'confirm' && UI.prevMode === 'build');
       if (building) {
-        var zoomSection = !!(UI.buildSel || UI.moveObj || UI.buildTool === 'move' || UI.buildTool === 'upgrade' || UI.buildTool === 'sell');
-        if (zoomSection && typeof ownedYardView === 'function') {
+        if (typeof ownedYardView === 'function') {
+          // Keep the background 100% stagnant in build mode so players can drag buildings cleanly without the lawn moving!
           var yv = ownedYardView();
           tx = yv.cx;
           ty = yv.cy;
           zm = yv.zoomMul;
-        } else {
-          if (P.moving) { CAM.panX *= 0.9; CAM.panY *= 0.9; }
-          ty += 70 / CAM.zoom;
+          CAM.panX = 0;
+          CAM.panY = 0;
         }
-        CAM.panX = clamp(CAM.panX, -W * TILE, W * TILE); CAM.panY = clamp(CAM.panY, -H * TILE, H * TILE);
-        tx += CAM.panX; ty += CAM.panY;
-        var hw = VIEW.w / 2 / CAM.zoom, hh = VIEW.h / 2 / CAM.zoom;
-        CAM.panX += clamp(tx, hw, Math.max(hw, W * TILE - hw)) - tx; CAM.panY += clamp(ty, hh, Math.max(hh, H * TILE - hh)) - ty;
       }
       UI.bakeAll = !CAM.ready; updateCamera(dt, tx, ty, zm, !CAM.ready); CAM.ready = true;
       render(dt); updateHUD(dt);

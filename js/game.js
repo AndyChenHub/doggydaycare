@@ -361,6 +361,24 @@ function objDims(typeOrDef, rot) {
   return { w: swap ? c.h : c.w, h: swap ? c.w : c.h, rot: r };
 }
 
+function defaultBuildSpot(type, rot) {
+  var dims = objDims(type, rot), w = dims.w, h = dims.h;
+  var yv = ownedYardView();
+  var cx = clamp(tileOf(yv.cx) - Math.floor(w / 2), MAP.yard.x0, MAP.yard.x1 - w + 1);
+  var cy = clamp(tileOf(yv.cy) - Math.floor(h / 2), MAP.yard.y0, MAP.yard.y1 - h + 1);
+  if (typeof canPlace === 'function' && canPlace(type, cx, cy, dims.rot)) return { x: cx, y: cy };
+  var best = null, bestD = 1e9;
+  for (var y = MAP.yard.y0; y <= MAP.yard.y1 - h + 1; y++) {
+    for (var x = MAP.yard.x0; x <= MAP.yard.x1 - w + 1; x++) {
+      if (typeof canPlace === 'function' && canPlace(type, x, y, dims.rot)) {
+        var d = Math.abs(x - cx) + Math.abs(y - cy);
+        if (d < bestD) { bestD = d; best = { x: x, y: y }; }
+      }
+    }
+  }
+  return best || { x: cx, y: cy };
+}
+
 function addObject(type, x, y, instant, paidCost, rot) {
   var c = CAT_BY_ID[type];
   var dims = objDims(c, rot);

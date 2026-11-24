@@ -50,12 +50,16 @@ var MP = (function () {
   var recentEvents = [];   // recent activity events in the room
   var serverInfo = { port: 8000, ips: ['192.168.15.107'], primaryIp: (location.hostname && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') ? location.hostname : '192.168.15.107', urls: [] };
   var lastMoveSent = 0;
+  var lastTickSent = 0;
   var lastWorldSent = 0;
   var lastRetainedSent = 0;
   var lastLocalActionAt = 0;
   var lastResetTs = 0;
   var joiningWaitUntil = 0;
   var lastKnownCash = null;
+  var prevSentX = null, prevSentY = null, prevSentAt = 0;
+  var lastSentMoving = false, lastSentDir = 'down', lastSentCarrySig = '';
+  var lastPingSentAt = 0, peerLatencyMs = 0;
   var pendingRetainedPublish = false;
   var browserOnline = (typeof navigator === 'undefined' || navigator.onLine !== false);
   var summaryPending = false;
@@ -686,6 +690,30 @@ var MP = (function () {
       return;
     }
 
+    if (msg.type === 'ping') {
+      if (msg.playerId && msg.playerId !== playerId) {
+        sendPacket({ type: 'pong', t0: msg.t0, targetId: msg.playerId }, false);
+      }
+      return;
+    }
+
+    if (msg.type === 'pong') {
+      if (msg.targetId === playerId && typeof msg.t0 === 'number') {
+        var rtt = Math.max(1, Date.now() - msg.t0);
+        peerLatencyMs = peerLatencyMs ? Math.round(peerLatencyMs * 0.6 + rtt * 0.4) : rtt;
+        updateCoopBadge();
+      }
+      return;
+    }
+
+    if (msg.type === 'live_tick') {
+      if (msg.playerId === playerId) return;
+      if (inGame && S && Date.now() - lastLocalActionAt > 900) {
+        applyLiveTick(msg);
+      }
+      return;
+    }
+
     if (msg.type === 'peer_update' || (fromBc && msg.type === 'player_update')) {
       var p = msg.player || msg;
       if (p && p.id !== playerId && p.playerId !== playerId) {
@@ -695,6 +723,8 @@ var MP = (function () {
           look: p.look,
           x: p.x,
           y: p.y,
+          vx: p.vx,
+          vy: p.vy,
           dir: p.dir,
           face: p.face,
           moving: p.moving,
@@ -822,6 +852,8 @@ var MP = (function () {
         y: typeof p.y === 'number' ? p.y : PLAYER_START[1] * TILE,
         tx: typeof p.x === 'number' ? p.x : PLAYER_START[0] * TILE + 36,
         ty: typeof p.y === 'number' ? p.y : PLAYER_START[1] * TILE,
+        vx: typeof p.vx === 'number' ? p.vx : 0,
+        vy: typeof p.vy === 'number' ? p.vy : 0,
         dir: p.dir || 'down',
         face: p.face || 1,
         moving: !!p.moving,
@@ -837,22 +869,34 @@ var MP = (function () {
         lastPacketAt: Date.now(),
       };
     } else {
+      var nowP = Date.now(), dtP = Math.max(0.016, (nowP - (cur.lastPacketAt || nowP)) / 1000);
       cur.name = p.name || cur.name;
       if (typeof p.look === 'number') cur.look = p.look;
-      if (typeof p.x === 'number') {
+      if (typeof p.x === 'number' && typeof p.y === 'number') {
+        if (typeof p.vx === 'number' && typeof p.vy === 'number') {
+          cur.vx = p.vx;
+          cur.vy = p.vy;
+        } else if (dtP < 0.35 && p.moving) {
+          cur.vx = (p.x - (cur.tx || cur.x)) / dtP;
+          cur.vy = (p.y - (cur.ty || cur.y)) / dtP;
+        } else {
+          cur.vx = 0;
+          cur.vy = 0;
+        }
         if (dist(cur.x, cur.y, p.x, p.y) > 220) { cur.x = p.x; cur.y = p.y; }
         cur.tx = p.x;
+        cur.ty = p.y;
       }
-      if (typeof p.y === 'number') cur.ty = p.y;
       if (p.dir) cur.dir = p.dir;
       if (typeof p.face === 'number') cur.face = p.face;
       cur.moving = !!p.moving;
+      if (!cur.moving) { cur.vx = 0; cur.vy = 0; }
       if (typeof p.walkDist === 'number') cur.walkDist = p.walkDist;
       if ('carry' in p) cur.carry = p.carry;
       if (p.emote) { cur.emote = p.emote; cur.emoteT = 0; }
       cur.online = p.online !== false;
       cur.inGame = p.inGame !== false;
-      cur.lastPacketAt = Date.now();
+      cur.lastPacketAt = nowP;
     }
     if (newlyOnline && inGame && p.inGame) {
       toast('🐾 ' + cur.name + ' joined the daycare!', 'good');
@@ -1092,10 +1136,92 @@ var MP = (function () {
     }
   }
 
+  // Compact 5 Hz entity position & economy tick (~600 bytes instead of 25 KB) to eliminate WebSocket head-of-line blocking!
+  function sendLiveTick() {
+    if (!S) return;
+    sendPacket({
+      type: 'live_tick',
+      rev: rev,
+      cash: S.cash,
+      rep: Math.round(S.rep * 100) / 100,
+      level: S.level,
+      xp: S.xp,
+      day: S.day,
+      dayTime: Math.round(S.dayTime * 10) / 10,
+      closing: !!S.closing,
+      dogs: (S.dogs || []).map(function (d) {
+        return {
+          id: d.id, x: Math.round(d.x), y: Math.round(d.y), face: d.face, state: d.state,
+          happy: Math.round(d.happy || 75), need: d.need, called: !!d.called,
+          leashedBy: d.leashedBy || null, objId: d.objId || null, anim: d.anim || null
+        };
+      }),
+      owners: (S.owners || []).map(function (o) {
+        return {
+          id: o.id, dogId: o.dogId, x: Math.round(o.x), y: Math.round(o.y), dir: o.dir,
+          state: o.state, patience: Math.round(o.patience), hoT: Math.round((o.hoT || 0) * 100) / 100
+        };
+      })
+    }, false);
+  }
+
+  function applyLiveTick(tick) {
+    if (!tick || !S) return;
+    if (typeof tick.cash === 'number' && isFinite(tick.cash)) { S.cash = clamp(Math.floor(tick.cash), 0, 1e9); lastKnownCash = S.cash; }
+    if (typeof tick.rep === 'number' && isFinite(tick.rep)) S.rep = clamp(tick.rep, 0.5, 5.0);
+    if (typeof tick.level === 'number' && isFinite(tick.level)) S.level = Math.max(S.level || 1, clamp(Math.floor(tick.level), 1, 999));
+    if (typeof tick.xp === 'number' && isFinite(tick.xp)) S.xp = clamp(Math.floor(tick.xp), 0, 1e9);
+    if (typeof tick.dayTime === 'number' && isFinite(tick.dayTime) && tick.day === S.day) {
+      if (Math.abs(tick.dayTime - S.dayTime) > 2.5) S.dayTime = tick.dayTime;
+      else S.dayTime = lerp(S.dayTime, tick.dayTime, 0.35);
+    }
+    var myLeashedId = (S.player && S.player.carry && S.player.carry.type === 'dog') ? S.player.carry.id : null;
+    if (Array.isArray(tick.dogs) && Array.isArray(S.dogs)) {
+      var dMap = {};
+      S.dogs.forEach(function (d) { dMap[d.id] = d; });
+      tick.dogs.forEach(function (td) {
+        var ld = dMap[td.id];
+        if (!ld || myLeashedId === ld.id) return;
+        if (dist(ld.x, ld.y, td.x, td.y) < 120) {
+          ld.x = lerp(ld.x, td.x, 0.55);
+          ld.y = lerp(ld.y, td.y, 0.55);
+        } else {
+          ld.x = td.x;
+          ld.y = td.y;
+        }
+        ld.face = td.face || ld.face;
+        ld.state = td.state || ld.state;
+        ld.happy = typeof td.happy === 'number' ? td.happy : ld.happy;
+        if ('need' in td) ld.need = td.need;
+        ld.called = !!td.called;
+        ld.leashedBy = td.leashedBy || null;
+      });
+    }
+    if (Array.isArray(tick.owners) && Array.isArray(S.owners)) {
+      var oMap = {};
+      S.owners.forEach(function (o) { oMap[o.id] = o; });
+      tick.owners.forEach(function (to) {
+        var lo = oMap[to.id];
+        if (!lo) return;
+        if (dist(lo.x, lo.y, to.x, to.y) < 120) {
+          lo.x = lerp(lo.x, to.x, 0.55);
+          lo.y = lerp(lo.y, to.y, 0.55);
+        } else {
+          lo.x = to.x;
+          lo.y = to.y;
+        }
+        lo.dir = to.dir || lo.dir;
+        lo.state = to.state || lo.state;
+        if (typeof to.patience === 'number') lo.patience = to.patience;
+      });
+    }
+  }
+
   // ---------------- Outgoing Updates & Actions ----------------
   function update(dt) {
     var nowMs = Date.now();
-    // Interpolate remote peers at 60 FPS
+    // Interpolate remote peers at 60 FPS with velocity dead-reckoning (client-side prediction)
+    var anyPartnerOnline = false;
     for (var pid in peers) {
       var rp = peers[pid];
       if (!rp.online) continue;
@@ -1104,16 +1230,27 @@ var MP = (function () {
         updateCoopBadge();
         continue;
       }
+      anyPartnerOnline = true;
       rp.sayT = Math.max(0, (rp.sayT || 0) - dt);
       if (rp.emote) {
         rp.emoteT = (rp.emoteT || 0) + dt;
         if (rp.emoteT > 1.3) rp.emote = null;
       }
+      // Dead-reckoning: while moving and within 165ms of last packet, extrapolate target position by (vx, vy) so partner never pauses between packets!
+      var ageSec = (nowMs - (rp.lastPacketAt || nowMs)) / 1000;
+      if (rp.moving && ageSec < 0.165 && (rp.vx || rp.vy)) {
+        var predX = (rp.tx || rp.x) + rp.vx * dt;
+        var predY = (rp.ty || rp.y) + rp.vy * dt;
+        if (typeof canStand === 'function' ? canStand(predX, predY) : true) {
+          rp.tx = predX;
+          rp.ty = predY;
+        }
+      }
       var dx = (rp.tx || rp.x) - rp.x;
       var dy = (rp.ty || rp.y) - rp.y;
       var d = Math.sqrt(dx * dx + dy * dy);
-      if (d > 0.5) {
-        var step = Math.min(d, Math.max(240, d * 10) * dt);
+      if (d > 0.4) {
+        var step = Math.min(d, Math.max(265, d * 14) * dt);
         rp.x += (dx / d) * step;
         rp.y += (dy / d) * step;
         rp.walkDist = (rp.walkDist || 0) + step;
@@ -1128,15 +1265,24 @@ var MP = (function () {
 
     if (!inGame || !S || !S.player) return;
 
-    // Broadcast local player movement ~15 times/sec when moving, or every 800ms when standing
+    // Broadcast local player movement at 30 Hz (33ms) while moving, or immediately (0ms) on start/stop/direction/carry change!
     var p = S.player;
-    var moveInterval = p.moving ? 65 : 750;
-    if (nowMs - lastMoveSent >= moveInterval) {
+    var carrySig = p.carry ? (p.carry.type + ':' + (p.carry.id || p.carry.n || 1)) : '';
+    var stateChanged = (!!p.moving !== lastSentMoving) || (p.dir !== lastSentDir) || (carrySig !== lastSentCarrySig);
+    var moveInterval = p.moving ? 33 : 650;
+    if (stateChanged || nowMs - lastMoveSent >= moveInterval) {
+      var dtSent = Math.max(0.016, (nowMs - (prevSentAt || nowMs)) / 1000);
+      var vx = (p.moving && prevSentX != null) ? Math.round((p.x - prevSentX) / dtSent) : 0;
+      var vy = (p.moving && prevSentY != null) ? Math.round((p.y - prevSentY) / dtSent) : 0;
+      prevSentX = p.x; prevSentY = p.y; prevSentAt = nowMs;
+      lastSentMoving = !!p.moving; lastSentDir = p.dir; lastSentCarrySig = carrySig;
       lastMoveSent = nowMs;
       sendPacket({
         type: 'player_update',
         x: Math.round(p.x * 10) / 10,
         y: Math.round(p.y * 10) / 10,
+        vx: clamp(vx, -450, 450),
+        vy: clamp(vy, -450, 450),
         dir: p.dir,
         face: p.face,
         moving: !!p.moving,
@@ -1148,13 +1294,22 @@ var MP = (function () {
       }, false);
     }
 
-    // Periodically sync shared world state (every 380ms if host or alone, plus retained snapshot every 2.5s)
+    // Measure peer ping every 4 seconds when a partner is online
+    if (anyPartnerOnline && nowMs - lastPingSentAt >= 4000) {
+      lastPingSentAt = nowMs;
+      sendPacket({ type: 'ping', t0: nowMs }, false);
+    }
+
+    // Fast lightweight 5 Hz entity tick when a partner is online, plus full retained snapshot every 3.5s
     var isHost = !hostId || hostId === playerId || !peers[hostId] || !peers[hostId].online;
     var waitRemoteSnap = joiningWaitUntil > nowMs && !roomState;
-    if (isHost && !waitRemoteSnap && nowMs - lastWorldSent >= 380) {
+    if (isHost && !waitRemoteSnap && anyPartnerOnline && nowMs - lastTickSent >= 200) {
+      lastTickSent = nowMs;
+      sendLiveTick();
+    }
+    if (isHost && !waitRemoteSnap && nowMs - lastWorldSent >= 3500) {
       lastWorldSent = nowMs;
-      var saveSnap = (nowMs - lastRetainedSent >= 2500);
-      sendWorldSync(saveSnap);
+      sendWorldSync(true);
     }
   }
 
@@ -1643,9 +1798,10 @@ var MP = (function () {
     var joinUrl = getJoinUrl();
     var onlinePeers = getOnlinePeerList();
     var looks = (typeof PLAYER_LOOKS !== 'undefined') ? PLAYER_LOOKS : [];
+    var pingTxt = peerLatencyMs > 0 ? (' · ⚡ ' + peerLatencyMs + 'ms') : '';
     var netBadge = mqttConnected
-      ? '🟢 Cloud Co-op Connected · Room ' + esc(roomCode)
-      : '🟡 Local / LAN Sync · Room ' + esc(roomCode);
+      ? '🟢 Low-Latency Cloud Sync · Room ' + esc(roomCode) + pingTxt
+      : '🟡 Local / LAN Sync · Room ' + esc(roomCode) + pingTxt;
 
     var peersHtml = '<div class="mp-player-list">' +
       '<div class="mp-p-row me"><img src="' + (typeof lookPortrait === 'function' ? lookPortrait(playerLook, 44) : '') + '">' +

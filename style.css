@@ -223,6 +223,12 @@ body.building #bottom-context { display: none !important; }
 .bp-min-bar .tx { flex: 1; min-width: 0; line-height: 1.15; }
 .bp-min-bar .tx b { font: 400 15px var(--head); display: block; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bp-min-bar .tx small { display: block; font-size: 11px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bp-ok-btn {
+  flex: none; height: 34px; border-radius: 9px !important;
+  padding: 0 10px !important; font: 400 15px/1 var(--head) !important;
+  background: linear-gradient(#78d362, #4d9e3c) !important; color: #fff !important;
+  display: flex; align-items: center; justify-content: center; white-space: nowrap;
+}
 .bp-rot-btn {
   flex: none; height: 34px; border-radius: 9px !important;
   padding: 0 9px !important; font: 400 14.5px/1 var(--head) !important;

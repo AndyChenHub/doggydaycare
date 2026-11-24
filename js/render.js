@@ -924,43 +924,46 @@ function drawBuildGhost(c, t) {
   if (UI.moveObj) {
     var mo = UI.moveObj, mc = CAT_BY_ID[mo.type];
     c.save();
-    c.strokeStyle = '#80d8ff'; c.lineWidth = 3; c.setLineDash([7, 5]);
+    c.strokeStyle = 'rgba(128,216,255,0.65)'; c.lineWidth = 2.5; c.setLineDash([6, 5]);
     rr(c, mo.x * TILE + 1, mo.y * TILE + 1, mo.w * TILE - 2, mo.h * TILE - 2, 8); c.stroke();
     c.setLineDash([]);
-    bubble(c, (mo.x + mo.w / 2) * TILE, mo.y * TILE - 10, '↔️ Moving ' + (mc ? mc.name : 'item') + ' — tap new green spot', { size: 11.5, bg: '#1b4d6e', fg: '#e1f5fe', stroke: '#0d2b40' });
     c.restore();
   }
-  var m = UI.mouse; if (!m.in) return;
-  var mw = mouseWorld(), tx = tileOf(mw.x), ty = tileOf(mw.y);
+  var hasDragTarget = !!(UI.dragPos && (UI.buildSel || UI.moveObj));
+  var m = UI.mouse;
+  if (!m.in && !hasDragTarget) return;
+  var mw = m.in ? mouseWorld() : { x: 0, y: 0 }, tx = tileOf(mw.x), ty = tileOf(mw.y);
   if (UI.moveObj) {
     var mo2 = UI.moveObj, mRot = UI.moveRot != null ? UI.moveRot : (mo2.rot || 0);
     var mDims = typeof objDims === 'function' ? objDims(mo2.type, mRot) : { w: mo2.w, h: mo2.h, rot: mRot };
-    var mx = tx - Math.floor((mDims.w - 1) / 2), my = ty - Math.floor((mDims.h - 1) / 2);
+    var mx = UI.dragPos ? UI.dragPos.x : (tx - Math.floor((mDims.w - 1) / 2));
+    var my = UI.dragPos ? UI.dragPos.y : (ty - Math.floor((mDims.h - 1) / 2));
     var mOk = canMoveObject(mo2, mx, my, mDims.rot);
-    c.fillStyle = mOk ? 'rgba(128,216,255,0.34)' : 'rgba(255,90,80,0.32)';
+    c.fillStyle = mOk ? 'rgba(128,216,255,0.38)' : 'rgba(255,90,80,0.36)';
     rr(c, mx * TILE + 1, my * TILE + 1, mDims.w * TILE - 2, mDims.h * TILE - 2, 8); c.fill();
-    c.strokeStyle = mOk ? '#80d8ff' : '#ff6b5a'; c.lineWidth = 2.5; c.stroke();
-    c.globalAlpha = mOk ? 0.85 : 0.5;
+    c.strokeStyle = mOk ? '#80d8ff' : '#ff6b5a'; c.lineWidth = 3; c.stroke();
+    c.globalAlpha = mOk ? 0.9 : 0.55;
     var mArt = artOf(mo2.type);
     if (mArt) { try { drawRotatedArt(c, mArt, { type: mo2.type, x: mx, y: my, w: mDims.w, h: mDims.h, rot: mDims.rot, id: mo2.id, occupied: false, useT: 99, label: null }, t, ENV, 'draw'); } catch (e) {} }
     c.globalAlpha = 1;
+    bubble(c, (mx + mDims.w / 2) * TILE, my * TILE - 12, mOk ? '↔️ Drag anywhere · Release or tap ✓ Place' : '❌ Blocked tile — drag to open green lawn', { size: 11.5, bg: mOk ? '#1b4d6e' : '#6e1b1b', fg: '#fff', stroke: '#0d2b40' });
     return;
   }
   if (UI.buildSel) {
     var def = CAT_BY_ID[UI.buildSel], bRot = UI.buildRot || 0;
     var bDims = typeof objDims === 'function' ? objDims(def, bRot) : { w: def.w, h: def.h, rot: bRot };
-    var x = tx - Math.floor((bDims.w - 1) / 2), y = ty - Math.floor((bDims.h - 1) / 2);
-    var site = objAt(tx, ty);
-    if (site && !site.done) { siteHint(c, site); return; }
+    var x = UI.dragPos ? UI.dragPos.x : (tx - Math.floor((bDims.w - 1) / 2));
+    var y = UI.dragPos ? UI.dragPos.y : (ty - Math.floor((bDims.h - 1) / 2));
     var bCost = typeof itemCost === 'function' ? itemCost(UI.buildSel) : def.cost;
     var bReq = typeof itemReqLvl === 'function' ? itemReqLvl(UI.buildSel) : def.lvl;
     var ok = canPlace(UI.buildSel, x, y, bDims.rot) && S.cash >= bCost && S.level >= bReq;
-    c.fillStyle = ok ? 'rgba(120,240,150,0.32)' : 'rgba(255,90,80,0.32)'; rr(c, x * TILE + 1, y * TILE + 1, bDims.w * TILE - 2, bDims.h * TILE - 2, 8); c.fill();
-    c.strokeStyle = ok ? '#8bf0a4' : '#ff6b5a'; c.lineWidth = 2.5; c.stroke();
-    c.globalAlpha = ok ? 0.85 : 0.5;
+    c.fillStyle = ok ? 'rgba(120,240,150,0.38)' : 'rgba(255,90,80,0.36)'; rr(c, x * TILE + 1, y * TILE + 1, bDims.w * TILE - 2, bDims.h * TILE - 2, 8); c.fill();
+    c.strokeStyle = ok ? '#8bf0a4' : '#ff6b5a'; c.lineWidth = 3; c.stroke();
+    c.globalAlpha = ok ? 0.9 : 0.55;
     var art = artOf(UI.buildSel);
     if (art) { try { drawRotatedArt(c, art, { type: UI.buildSel, x: x, y: y, w: bDims.w, h: bDims.h, rot: bDims.rot, id: 7, occupied: false, useT: 99, label: null }, t, ENV, 'draw'); } catch (e) {} }
     c.globalAlpha = 1;
+    bubble(c, (x + bDims.w / 2) * TILE, y * TILE - 12, ok ? ('↔️ Drag ' + def.name + ' · Release or tap ✓ Place') : '❌ Blocked tile — drag to open green lawn', { size: 11.5, bg: ok ? '#1e5e2f' : '#6e1b1b', fg: '#fff', stroke: '#10361a' });
   } else {
     var o = objAt(tx, ty);
     if (o) {
