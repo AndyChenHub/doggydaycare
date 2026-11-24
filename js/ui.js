@@ -1,7 +1,7 @@
 'use strict';
 var UI = {
   mode: 'title', prevMode: 'play', actions: null, mouse: { sx: 0, sy: 0, in: false },
-  buildSel: null, buildTool: null, buildTab: 'care', moveObj: null, actionObj: null,
+  buildSel: null, buildTool: null, buildTab: 'care', buildRot: 0, moveObj: null, moveRot: 0, actionObj: null,
   summary: null, cashShown: 0, cashPulse: 0, lastRoster: 0, modalStack: [], dexSel: null, dexNew: 0,
   tasksOpen: false, rosterOpen: false,
   camFocus: null, sceneT: 0, miniT: 0, miniDirty: true, cashWorld: null, titleT: 0,
@@ -17,12 +17,14 @@ function setMode(m) {
   UI.mode = m;
   document.body.classList.toggle('building', m === 'build');
   document.body.classList.toggle('title', !!UI.inTitle);
-  if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; }
+  if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; UI.moveObj = null; UI.buildRot = 0; UI.moveRot = 0; CAM.panX = 0; CAM.panY = 0; }
   if (m !== 'play') { UI.joy = null; UI.touchTarget = null; }
   if (m === 'build') {
     UI.buildSel = null;
     UI.buildTool = null;
     UI.moveObj = null;
+    UI.buildRot = 0;
+    UI.moveRot = 0;
     if (S && !S.tutorialDone && typeof tutorialRequiredBuildType === 'function') {
       var reqType = tutorialRequiredBuildType();
       if (reqType && CAT_BY_ID[reqType]) {
@@ -138,7 +140,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Tap 🔨 Shop at the bottom to select and place your first Kennel on the lawn!', 'good');
   if (!isJoiningRoom) saveGame();
 }
-var CURRENT_ASSET_VER = '21';
+var CURRENT_ASSET_VER = '22';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();
@@ -171,6 +173,8 @@ function checkAndReloadIfUpdated( startFreshAfterReload ) {
         if (m && m[1] && m[1] !== CURRENT_ASSET_VER) {
           if (startFreshAfterReload) {
             try { if (typeof clearSavedGame === 'function') clearSavedGame(); sessionStorage.setItem('paws_autostart_fresh', '1'); } catch (e) {}
+          } else if (S && !UI.inTitle && typeof saveGame === 'function') {
+            try { saveGame(); } catch (e) {}
           }
           location.reload();
         }
@@ -291,8 +295,19 @@ var MODAL_ACTS = {
     var o = UI.actionObj; closeModal();
     if (!o) return;
     if (o.type === 'tub' && o.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
-    setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; renderBuildPanel();
-    toast('↔️ Tap any open green tile in the yard to move ' + CAT_BY_ID[o.type].name, '');
+    setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; UI.moveRot = o.rot || 0; renderBuildPanel();
+    toast('↔️ Tap any open green tile in the yard to move ' + CAT_BY_ID[o.type].name + ' (or tap 🔄 Rotate)', '');
+  },
+  rotobj: function () {
+    var o = UI.actionObj; closeModal();
+    if (!o) return;
+    if (o.type === 'tub' && o.dogId) { toast('Wait for the bath to finish before rotating the Bath Tub', 'bad'); sfx('error'); return; }
+    if (typeof rotateObjectInPlace === 'function' && rotateObjectInPlace(o)) {
+      renderBuildPanel();
+      return;
+    }
+    setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; UI.moveRot = ((o.rot || 0) + 1) % 4; renderBuildPanel();
+    toast('🔄 Rotated ' + CAT_BY_ID[o.type].name + ' — tap an open green spot on the lawn to place it!', '');
   },
   upgobj: function () {
     var o = UI.actionObj; closeModal();
@@ -531,10 +546,11 @@ function objectIconURL(type) {
   } catch (e) { iconCache[type] = ''; }
   return iconCache[type];
 }
+var ROT_LABELS = ['South ↓', 'East →', 'North ↑', 'West ←'];
 function renderBuildPanel() {
-  var isPlacing = !!(UI.buildSel || UI.moveObj);
-  $('buildpanel').classList.toggle('minimized', isPlacing);
-  if (isPlacing) {
+  var isMinimized = !!(UI.buildSel || UI.moveObj || UI.buildTool === 'move' || UI.buildTool === 'upgrade' || UI.buildTool === 'sell');
+  $('buildpanel').classList.toggle('minimized', isMinimized);
+  if (isMinimized) {
     var hMin = '';
     if (UI.buildSel && CAT_BY_ID[UI.buildSel]) {
       var sDef = CAT_BY_ID[UI.buildSel];
@@ -542,19 +558,46 @@ function renderBuildPanel() {
       var sTime = typeof itemBuildTime === 'function' ? itemBuildTime(sDef.id) : sDef.time;
       var effT = !S.tutorialDone ? Math.min(sTime, 2.5) : sTime;
       var sUrl = objectIconURL(sDef.id);
+      var bRot = ((UI.buildRot || 0) % 4 + 4) % 4;
+      var bDims = typeof objDims === 'function' ? objDims(sDef, bRot) : { w: sDef.w, h: sDef.h };
       hMin = '<div class="bp-min-bar">' +
         '<div class="ic">' + (sUrl ? '<img src="' + sUrl + '">' : sDef.icon) + '</div>' +
         '<div class="tx"><b>Placing ' + esc(sDef.name) + ' (' + fmtMoney(sCost) + ' · ⏱ ' + fmtDur(effT) + ')</b>' +
-        '<small>Tap any open green tile on the lawn to place · Drag to pan</small></div>' +
+        '<small>Tap green lawn to place (' + bDims.w + '×' + bDims.h + ' · ' + ROT_LABELS[bRot] + ') · Drag to pan</small></div>' +
+        '<button id="bpRotateObj" class="bp-rot-btn" aria-label="Rotate">🔄 Rotate</button>' +
         '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
       '</div>';
     } else if (UI.moveObj && CAT_BY_ID[UI.moveObj.type]) {
       var mDef = CAT_BY_ID[UI.moveObj.type];
       var mUrl = objectIconURL(mDef.id);
+      var mRot = ((UI.moveRot != null ? UI.moveRot : (UI.moveObj.rot || 0)) % 4 + 4) % 4;
+      var mDims = typeof objDims === 'function' ? objDims(mDef, mRot) : { w: mDef.w, h: mDef.h };
       hMin = '<div class="bp-min-bar">' +
         '<div class="ic">' + (mUrl ? '<img src="' + mUrl + '">' : mDef.icon) + '</div>' +
-        '<div class="tx"><b>↔️ Moving ' + esc(mDef.name) + '</b>' +
-        '<small>Tap any open green tile on the lawn to relocate</small></div>' +
+        '<div class="tx"><b>↔️ Moving ' + esc(mDef.name) + ' (' + mDims.w + '×' + mDims.h + ' · ' + ROT_LABELS[mRot] + ')</b>' +
+        '<small>Tap any open green tile on the lawn to relocate or tap Rotate</small></div>' +
+        '<button id="bpRotateObj" class="bp-rot-btn" aria-label="Rotate">🔄 Rotate</button>' +
+        '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
+      '</div>';
+    } else if (UI.buildTool === 'move') {
+      hMin = '<div class="bp-min-bar">' +
+        '<div class="ic">↔️</div>' +
+        '<div class="tx"><b>↔️ Move &amp; Rotate Mode</b>' +
+        '<small>Tap any building on the lawn to pick it up, rotate it, or relocate it!</small></div>' +
+        '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
+      '</div>';
+    } else if (UI.buildTool === 'upgrade') {
+      hMin = '<div class="bp-min-bar">' +
+        '<div class="ic">⬆️</div>' +
+        '<div class="tx"><b>⬆️ Upgrade Mode</b>' +
+        '<small>Tap any building on the lawn to upgrade its Level!</small></div>' +
+        '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
+      '</div>';
+    } else if (UI.buildTool === 'sell') {
+      hMin = '<div class="bp-min-bar">' +
+        '<div class="ic">💸</div>' +
+        '<div class="tx"><b>💸 Sell Mode</b>' +
+        '<small>Tap any building on the lawn to sell it for cash!</small></div>' +
         '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
       '</div>';
     }
@@ -639,12 +682,28 @@ function bpShowDesc(txt) {
   var bp = $('buildpanel');
   bp.addEventListener('pointerdown', function (ev) {
     if (!ev.target.closest) return;
-    var t = ev.target.closest('#bpClose,#bpCancelPlace,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise]'); if (!t) return;
+    var t = ev.target.closest('#bpClose,#bpCancelPlace,#bpRotateObj,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise]'); if (!t) return;
     initAudio();
     if (t.id === 'bpClose') { setMode('play'); sfx('ui_close'); return; }
+    if (t.id === 'bpRotateObj') {
+      if (UI.buildSel) {
+        UI.buildRot = ((UI.buildRot || 0) + 1) % 4;
+        sfx('click');
+        renderBuildPanel();
+      } else if (UI.moveObj) {
+        UI.moveRot = (((UI.moveRot != null ? UI.moveRot : (UI.moveObj.rot || 0)) + 1) % 4);
+        if (typeof canMoveObject === 'function' && canMoveObject(UI.moveObj, UI.moveObj.x, UI.moveObj.y, UI.moveRot)) {
+          moveObject(UI.moveObj, UI.moveObj.x, UI.moveObj.y, UI.moveRot);
+        } else {
+          sfx('click');
+        }
+        renderBuildPanel();
+      }
+      return;
+    }
     if (t.id === 'bpCancelPlace') {
-      UI.buildSel = null; UI.moveObj = null;
-      if (UI.buildTool === 'move') UI.buildTool = null;
+      UI.buildSel = null; UI.moveObj = null; UI.buildTool = null;
+      UI.buildRot = 0; UI.moveRot = 0;
       CAM.panX = 0; CAM.panY = 0;
       sfx('ui_close');
       renderBuildPanel();
@@ -652,9 +711,9 @@ function bpShowDesc(txt) {
     }
     if (t.hasAttribute('data-repboost')) { runRepCampaign(t.getAttribute('data-repboost')); renderBuildPanel(); return; }
     if (t.hasAttribute('data-franchise')) { buyFranchiseTier(); renderBuildPanel(); return; }
-    if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
-    if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
-    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
     if (t.hasAttribute('data-tab')) { UI.buildTab = t.getAttribute('data-tab'); UI.buildSel = null; UI.moveObj = null; sfx('click'); renderBuildPanel(); var it = bp.querySelector('.items'); if (it) it.scrollTop = 0; return; }
     if (t.hasAttribute('data-item')) {
       var id = t.getAttribute('data-item'), c = CAT_BY_ID[id];
@@ -664,7 +723,7 @@ function bpShowDesc(txt) {
         else toast('🔒 Reach Daycare Level ' + reqL + ' to build another ' + c.name, 'bad');
         sfx('error'); return;
       }
-      UI.buildSel = UI.buildSel === id ? null : id; UI.buildTool = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; sfx('click'); renderBuildPanel(); return;
+      UI.buildSel = UI.buildSel === id ? null : id; UI.buildRot = 0; UI.buildTool = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; sfx('click'); renderBuildPanel(); return;
     }
     if (t.hasAttribute('data-staff')) {
       var sid = t.getAttribute('data-staff'), sd = STAFF_BY_ID[sid];
@@ -716,6 +775,7 @@ function promptObjectActions(o) {
     '<p style="text-align:center">' + esc(c.desc) + '</p>' +
     '<div class="row col">' +
     '<button data-act="moveobj" class="primary">↔️ Move to Another Spot</button>' +
+    '<button data-act="rotobj" class="wood">🔄 Rotate 90° (' + ROT_LABELS[((o.rot || 0) + 1) % 4] + ')</button>' +
     '<button data-act="upgobj">' + upgLabel + '</button>' +
     sellBtn +
     '<button data-act="back" class="flat">Cancel</button>' +
@@ -748,16 +808,20 @@ function handleBuildTap(clientX, clientY) {
   var mw = screenToWorld(clientX, clientY), tx = tileOf(mw.x), ty = tileOf(mw.y);
   var site = objAt(tx, ty);
   if (UI.moveObj) {
-    var mo = UI.moveObj, mDef = CAT_BY_ID[mo.type], mx = tx - Math.floor((mDef.w - 1) / 2), my = ty - Math.floor((mDef.h - 1) / 2);
-    if (canMoveObject(mo, mx, my)) {
-      moveObject(mo, mx, my);
+    var mo = UI.moveObj, mDef = CAT_BY_ID[mo.type];
+    var mRot = UI.moveRot != null ? UI.moveRot : (mo.rot || 0);
+    var mDims = typeof objDims === 'function' ? objDims(mDef, mRot) : { w: mDef.w, h: mDef.h, rot: mRot };
+    var mx = tx - Math.floor((mDims.w - 1) / 2), my = ty - Math.floor((mDims.h - 1) / 2);
+    if (canMoveObject(mo, mx, my, mDims.rot)) {
+      moveObject(mo, mx, my, mDims.rot);
       UI.moveObj = null;
+      UI.moveRot = 0;
       renderBuildPanel();
       return;
     }
     if (site && site !== mo) {
       if (site.type === 'tub' && site.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
-      UI.moveObj = site; sfx('click'); renderBuildPanel();
+      UI.moveObj = site; UI.moveRot = site.rot || 0; sfx('click'); renderBuildPanel();
       toast('↔️ Picked up ' + CAT_BY_ID[site.type].name + ' — tap an open green spot in the yard!', '');
       return;
     }
@@ -767,22 +831,26 @@ function handleBuildTap(clientX, clientY) {
   if (UI.buildTool === 'move') {
     if (site) {
       if (site.type === 'tub' && site.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
-      UI.moveObj = site; sfx('click'); renderBuildPanel();
-      toast('↔️ Picked up ' + CAT_BY_ID[site.type].name + ' — tap any open green spot to move it!', '');
+      UI.moveObj = site; UI.moveRot = site.rot || 0; sfx('click'); renderBuildPanel();
+      toast('↔️ Picked up ' + CAT_BY_ID[site.type].name + ' — tap any open green spot to move it (or tap 🔄 Rotate)!', '');
     } else {
-      toast('Tap any building or item in the yard that you want to move', '');
+      toast('Tap any building or item in the yard that you want to move or rotate', '');
     }
     return;
   }
   if (UI.buildSel && !(site && !site.done) && UI.buildTool !== 'upgrade' && UI.buildTool !== 'sell') {
-    var def = CAT_BY_ID[UI.buildSel], x = tx - Math.floor((def.w - 1) / 2), y = ty - Math.floor((def.h - 1) / 2);
+    var def = CAT_BY_ID[UI.buildSel];
+    var bRot = UI.buildRot || 0;
+    var bDims = typeof objDims === 'function' ? objDims(def, bRot) : { w: def.w, h: def.h, rot: bRot };
+    var x = tx - Math.floor((bDims.w - 1) / 2), y = ty - Math.floor((bDims.h - 1) / 2);
     var bCost = typeof itemCost === 'function' ? itemCost(UI.buildSel) : def.cost;
     var bReq = typeof itemReqLvl === 'function' ? itemReqLvl(UI.buildSel) : def.lvl;
     if (S.level < bReq) { toast('🔒 Reach Level ' + bReq + ' to build another ' + def.name, 'bad'); sfx('error'); return; }
     if (S.cash < bCost) { toast('Not enough cash for a ' + def.name + ' (' + fmtMoney(bCost) + ')', 'bad'); sfx('error'); return; }
-    if (!canPlace(UI.buildSel, x, y)) { toast('Tap an open green tile on the lawn', 'bad'); sfx('error'); return; }
-    placeBuild(UI.buildSel, x, y);
+    if (!canPlace(UI.buildSel, x, y, bDims.rot)) { toast('Tap an open green tile on the lawn', 'bad'); sfx('error'); return; }
+    placeBuild(UI.buildSel, x, y, bDims.rot);
     UI.buildSel = null;
+    UI.buildRot = 0;
     CAM.panX = 0; CAM.panY = 0;
     if (!S.tutorialDone) {
       setMode('play');
@@ -1085,7 +1153,7 @@ function frame(ts) {
       if (UI.camFocusPeer && typeof MP !== 'undefined') { UI.camFocusPeer.t -= dt; var fp = MP.getPeer(UI.camFocusPeer.id); if (fp && fp.online && UI.camFocusPeer.t > 0 && !P.moving) { tx = fp.x; ty = fp.y - 24; } else UI.camFocusPeer = null; }
       var building = UI.mode === 'build' || (UI.mode === 'confirm' && UI.prevMode === 'build');
       if (building) {
-        var zoomSection = !!(UI.buildSel || UI.moveObj || UI.buildTool === 'move');
+        var zoomSection = !!(UI.buildSel || UI.moveObj || UI.buildTool === 'move' || UI.buildTool === 'upgrade' || UI.buildTool === 'sell');
         if (zoomSection && typeof ownedYardView === 'function') {
           var yv = ownedYardView();
           tx = yv.cx;

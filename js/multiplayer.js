@@ -55,6 +55,7 @@ var MP = (function () {
   var lastLocalActionAt = 0;
   var lastResetTs = 0;
   var joiningWaitUntil = 0;
+  var lastKnownCash = null;
   var pendingRetainedPublish = false;
   var browserOnline = (typeof navigator === 'undefined' || navigator.onLine !== false);
   var summaryPending = false;
@@ -768,7 +769,7 @@ var MP = (function () {
       if (msg.state) {
         roomState = msg.state;
         if (inGame && S) {
-          applySharedState(msg.state, true);
+          applySharedState(msg.state, true, act);
         }
       }
       if (inGame && S && act) {
@@ -867,17 +868,28 @@ var MP = (function () {
     return copy;
   }
 
-  function applySharedState(incoming, isAction) {
+  function applySharedState(incoming, isAction, remoteAct) {
     if (!incoming || !S) return;
     var localP = S.player;
     var oldObjCount = S.objects ? S.objects.length : 0;
     var oldPlotCount = S.plots ? S.plots.length : 0;
     var oldDoneCount = S.objects ? S.objects.filter(function (o) { return o.done; }).length : 0;
     var newDoneCount = incoming.objects ? incoming.objects.filter(function (o) { return o.done; }).length : 0;
+    var concurrentLocalEdit = isAction && (Date.now() - lastLocalActionAt < 1500);
 
-    if (typeof incoming.cash === 'number' && isFinite(incoming.cash)) S.cash = clamp(Math.floor(incoming.cash), 0, 1e9);
-    if (typeof incoming.xp === 'number' && isFinite(incoming.xp)) S.xp = clamp(Math.floor(incoming.xp), 0, 1e9);
-    if (typeof incoming.level === 'number' && isFinite(incoming.level)) S.level = clamp(Math.floor(incoming.level), 1, 999);
+    // Shared Economy: if two players spend or earn simultaneously within 1.5s, apply the remote cash delta to local S.cash so neither transaction is lost!
+    if (concurrentLocalEdit && remoteAct && typeof remoteAct.cashDelta === 'number' && isFinite(remoteAct.cashDelta) && remoteAct.cashDelta !== 0) {
+      S.cash = clamp(Math.floor(S.cash + remoteAct.cashDelta), 0, 1e9);
+    } else if (concurrentLocalEdit && remoteAct && ((remoteAct.cost || 0) > 0 || (remoteAct.earned || 0) > 0)) {
+      var delta = (remoteAct.earned || 0) - (remoteAct.cost || 0);
+      S.cash = clamp(Math.floor(S.cash + delta), 0, 1e9);
+    } else if (typeof incoming.cash === 'number' && isFinite(incoming.cash)) {
+      S.cash = clamp(Math.floor(incoming.cash), 0, 1e9);
+    }
+    lastKnownCash = S.cash;
+
+    if (typeof incoming.xp === 'number' && isFinite(incoming.xp)) S.xp = concurrentLocalEdit ? Math.max(S.xp || 0, clamp(Math.floor(incoming.xp), 0, 1e9)) : clamp(Math.floor(incoming.xp), 0, 1e9);
+    if (typeof incoming.level === 'number' && isFinite(incoming.level)) S.level = Math.max(concurrentLocalEdit ? (S.level || 1) : 1, clamp(Math.floor(incoming.level), 1, 999));
     if (typeof incoming.rep === 'number' && isFinite(incoming.rep)) S.rep = clamp(incoming.rep, 0.5, 5.0);
     if (typeof incoming.day === 'number' && isFinite(incoming.day)) S.day = clamp(Math.floor(incoming.day), 1, 99999);
     if (typeof incoming.dayTime === 'number' && isFinite(incoming.dayTime)) {
@@ -889,17 +901,34 @@ var MP = (function () {
     S.streak = incoming.streak || 0;
     S.bestStreak = Math.max(S.bestStreak || 0, incoming.bestStreak || 0);
     S.totalServed = Math.max(S.totalServed || 0, incoming.totalServed || 0);
-    S.tutorial = incoming.tutorial ? JSON.parse(JSON.stringify(incoming.tutorial)) : {};
-    S.tutorialDone = !!incoming.tutorialDone;
-    S.upgrades = incoming.upgrades ? JSON.parse(JSON.stringify(incoming.upgrades)) : {};
-    S.builtPads = incoming.builtPads ? JSON.parse(JSON.stringify(incoming.builtPads)) : {};
+    S.tutorial = Object.assign({}, S.tutorial || {}, incoming.tutorial || {});
+    S.tutorialDone = !!(S.tutorialDone || incoming.tutorialDone);
+    if (incoming.upgrades && typeof incoming.upgrades === 'object') {
+      S.upgrades = S.upgrades || {};
+      for (var uk in incoming.upgrades) {
+        S.upgrades[uk] = Math.max(S.upgrades[uk] || 0, incoming.upgrades[uk] || 0);
+      }
+    }
+    S.builtPads = Object.assign({}, S.builtPads || {}, incoming.builtPads || {});
     if (incoming.dex) Object.assign(S.dex, incoming.dex);
     if (incoming.specials) Object.assign(S.specials, incoming.specials);
-    S.staff = incoming.staff ? JSON.parse(JSON.stringify(incoming.staff)) : {};
-    S.staffLvl = incoming.staffLvl ? JSON.parse(JSON.stringify(incoming.staffLvl)) : {};
-    S.franchiseTier = typeof incoming.franchiseTier === 'number' ? incoming.franchiseTier : (S.franchiseTier || 0);
-    S.goalWave = typeof incoming.goalWave === 'number' ? incoming.goalWave : (S.goalWave || 1);
-    if (incoming.milestones) S.milestones = JSON.parse(JSON.stringify(incoming.milestones));
+    if (incoming.staff && typeof incoming.staff === 'object') {
+      S.staff = concurrentLocalEdit ? Object.assign({}, S.staff || {}, incoming.staff) : JSON.parse(JSON.stringify(incoming.staff));
+    }
+    if (incoming.staffLvl && typeof incoming.staffLvl === 'object') {
+      S.staffLvl = S.staffLvl || {};
+      for (var slk in incoming.staffLvl) {
+        S.staffLvl[slk] = Math.max(S.staffLvl[slk] || 1, incoming.staffLvl[slk] || 1);
+      }
+    }
+    S.franchiseTier = typeof incoming.franchiseTier === 'number' ? Math.max(concurrentLocalEdit ? (S.franchiseTier || 0) : 0, incoming.franchiseTier) : (S.franchiseTier || 0);
+    S.goalWave = typeof incoming.goalWave === 'number' ? Math.max(concurrentLocalEdit ? (S.goalWave || 1) : 1, incoming.goalWave) : (S.goalWave || 1);
+    if (incoming.milestones && typeof incoming.milestones === 'object') {
+      S.milestones = S.milestones || {};
+      for (var mk in incoming.milestones) {
+        S.milestones[mk] = Math.max(S.milestones[mk] || 0, incoming.milestones[mk] || 0);
+      }
+    }
     if ('dailyEvent' in incoming) S.dailyEvent = incoming.dailyEvent;
     if (Array.isArray(incoming.chores)) S.chores = incoming.chores;
     if ('repEvent' in incoming) S.repEvent = incoming.repEvent;
@@ -909,9 +938,19 @@ var MP = (function () {
     if (incoming.created) S.created = incoming.created;
     if (incoming.savedAt) S.savedAt = incoming.savedAt;
 
-    // Objects & plots
+    // Objects & plots: if concurrentLocalEdit (excluding sell), merge local and incoming objects by id so simultaneous builds both stay
     if (Array.isArray(incoming.objects)) {
-      S.objects = incoming.objects;
+      if (concurrentLocalEdit && (!remoteAct || remoteAct.kind !== 'sell')) {
+        var mergedObjs = incoming.objects.slice();
+        var incomingIds = {};
+        mergedObjs.forEach(function (o) { if (o && o.id != null) incomingIds[o.id] = true; });
+        (S.objects || []).forEach(function (lo) {
+          if (lo && lo.id != null && !incomingIds[lo.id]) mergedObjs.push(lo);
+        });
+        S.objects = mergedObjs;
+      } else {
+        S.objects = incoming.objects;
+      }
     }
     if (Array.isArray(incoming.plots)) {
       S.plots = incoming.plots;
@@ -1008,11 +1047,25 @@ var MP = (function () {
     } else if (act.kind === 'rush') {
       toast('⚡ ' + partnerName + ' finished building ' + (act.name || 'a structure') + ' early!', 'good');
       if (typeof sfx === 'function') sfx('built');
-    } else if (act.kind === 'move') {
+    } else if (act.kind === 'move' || act.kind === 'rotate') {
       var mx = typeof act.x === 'number' ? (act.x + 1) * TILE : px;
       var my = typeof act.y === 'number' ? (act.y + 1) * TILE : py;
       burst(mx, my, 'dust', 12);
-      toast('↔️ ' + partnerName + ' moved ' + (act.name || 'an item') + '!', '');
+      toast((act.kind === 'rotate' ? '🔄 ' : '↔️ ') + partnerName + (act.kind === 'rotate' ? ' rotated ' : ' moved ') + (act.name || 'an item') + '!', '');
+    } else if (act.kind === 'upgrade_obj') {
+      toast('⬆️ ' + partnerName + ' started upgrading ' + (act.name || 'a building') + ' (-' + fmtMoney(act.cost || 0) + ')!', 'good');
+      if (typeof sfx === 'function') sfx('place');
+    } else if (act.kind === 'staff_train') {
+      toast('⬆️ ' + partnerName + ' trained ' + (act.name || 'staff') + ' (-' + fmtMoney(act.cost || 0) + ')!', 'good');
+      if (typeof sfx === 'function') sfx('level');
+    } else if (act.kind === 'franchise') {
+      toast('🏆 ' + partnerName + ' promoted daycare to ' + (act.name || 'new tier') + ' (-' + fmtMoney(act.cost || 0) + ')!', 'good');
+      if (typeof sfx === 'function') sfx('level');
+    } else if (act.kind === 'repboost') {
+      toast((act.icon || '⭐') + ' ' + partnerName + ' ran ' + (act.name || 'a promotion') + ' (-' + fmtMoney(act.cost || 0) + ')!', 'good');
+      if (typeof sfx === 'function') sfx('perfect');
+    } else if (act.kind === 'chore' || act.kind === 'repevent') {
+      if (act.earned > 0) toast((act.icon || '✨') + ' ' + partnerName + ': ' + (act.name || 'completed task') + ' (+' + fmtMoney(act.earned) + ')', 'good');
     } else if (act.kind === 'sell') {
       toast('💸 ' + partnerName + ' sold ' + (act.name || 'an item') + ' (+' + fmtMoney(act.earned || 0) + ')', '');
     } else if (act.kind === 'plot') {
@@ -1128,7 +1181,9 @@ var MP = (function () {
     if (!S) return;
     lastLocalActionAt = Date.now();
     rev++;
-    var act = Object.assign({ kind: kind, day: S.day }, details || {});
+    var cashDelta = (typeof lastKnownCash === 'number' && isFinite(lastKnownCash)) ? (S.cash - lastKnownCash) : 0;
+    lastKnownCash = S.cash;
+    var act = Object.assign({ kind: kind, day: S.day, cashDelta: cashDelta }, details || {});
     var st = serializeSharedState();
     roomState = st;
 
@@ -1257,11 +1312,20 @@ var MP = (function () {
           cashSpent += e.cost || 0;
           break;
         case 'upgrade':
+        case 'upgrade_obj':
+        case 'franchise':
+        case 'repboost':
           if (e.name && upgradesBought.indexOf(e.name) < 0) upgradesBought.push((e.icon ? e.icon + ' ' : '') + e.name);
           cashSpent += e.cost || 0;
           break;
         case 'staff':
+        case 'staff_train':
           if (e.name) staffChanges.push((e.icon ? e.icon + ' ' : '') + e.name);
+          cashSpent += e.cost || 0;
+          break;
+        case 'chore':
+        case 'repevent':
+          cashEarned += e.earned || 0;
           break;
         case 'checkin':
           if (e.dogName && dogsCheckedIn.indexOf(e.dogName) < 0) dogsCheckedIn.push(e.dogName);
@@ -1497,7 +1561,10 @@ var MP = (function () {
     }
 
     inGame = true;
-    if (S) S.player.look = playerLook;
+    if (S) {
+      S.player.look = playerLook;
+      lastKnownCash = S.cash;
+    }
     // Offset second player slightly so they don't stand on the exact same pixel at start
     if (S && slot === 2 && dist(S.player.x, S.player.y, PLAYER_START[0] * TILE, PLAYER_START[1] * TILE) < 5) {
       S.player.x = (PLAYER_START[0] + 1.2) * TILE;

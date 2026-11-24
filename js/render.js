@@ -336,26 +336,58 @@ function drawLeash(c) {
 function artOf(type) { return (typeof OBJECT_ART !== 'undefined' && OBJECT_ART[type]) || null; }
 function artObj(o) {
   var occ = o.dogId ? dogById(o.dogId) : null, res = o.reservedFor ? dogById(o.reservedFor) : null;
-  return { type: o.type, x: o.x, y: o.y, w: o.w, h: o.h, id: o.id, occupied: !!occ, useT: now - (o.useAt == null ? -99 : o.useAt), label: occ ? occ.name : res ? res.name : null };
+  var def = CAT_BY_ID[o.type] || { w: o.w || 1, h: o.h || 1 };
+  return { type: o.type, x: o.x, y: o.y, w: o.w, h: o.h, defW: def.w, defH: def.h, rot: ((o.rot || 0) % 4 + 4) % 4, id: o.id, occupied: !!occ, useT: now - (o.useAt == null ? -99 : o.useAt), label: occ ? occ.name : res ? res.name : null };
+}
+function drawRotatedArt(c, art, ao, t, env, fnName) {
+  var fn = art && art[fnName || 'draw'];
+  if (!fn) return;
+  var rot = ((ao.rot || 0) % 4 + 4) % 4;
+  var def = CAT_BY_ID[ao.type] || { w: ao.w, h: ao.h };
+  var defW = def.w, defH = def.h;
+  if (rot === 0) {
+    fn(c, { type: ao.type, x: ao.x, y: ao.y, w: defW, h: defH, id: ao.id, occupied: ao.occupied, useT: ao.useT, label: ao.label }, t, env);
+    return;
+  }
+  var cx = (ao.x + ao.w / 2) * TILE, cy = (ao.y + ao.h / 2) * TILE;
+  var isFloor = !!(def.floor || ao.type === 'pond');
+  c.save();
+  if (isFloor) {
+    c.translate(cx, cy);
+    c.rotate(rot * Math.PI / 2);
+    fn(c, { type: ao.type, x: -defW / 2, y: -defH / 2, w: defW, h: defH, id: ao.id, occupied: ao.occupied, useT: ao.useT, label: ao.label }, t, env);
+  } else {
+    // Keep 2.5D upright buildings right-side up (roof at top, shadow on ground), mirror horizontally for rot 1 & 2, and fit rotated tile footprint
+    var flipX = (rot === 1 || rot === 2) ? -1 : 1;
+    var sx = (ao.w / defW) * flipX, sy = (ao.h / defH);
+    c.translate(cx, cy);
+    c.scale(sx, sy);
+    fn(c, { type: ao.type, x: -defW / 2, y: -defH / 2, w: defW, h: defH, id: ao.id, occupied: ao.occupied, useT: ao.useT, label: ao.label }, t, env);
+  }
+  c.restore();
 }
 function drawObjectBase(c, o, t) {
   var px = o.x * TILE, py = o.y * TILE, w = o.w * TILE, h = o.h * TILE;
   if (!o.done) { drawSite(c, o, t); return; }
   var art = artOf(o.type), ao = artObj(o);
-  if (art) { try { art.draw(c, ao, t, ENV); } catch (e) { if (!art.err) { art.err = 1; console.error('object art ' + o.type, e); } } }
+  if (art) { try { drawRotatedArt(c, art, ao, t, ENV, 'draw'); } catch (e) { if (!art.err) { art.err = 1; console.error('object art ' + o.type, e); } } }
   else { c.fillStyle = CAT_BY_ID[o.type].floor ? 'rgba(243,210,122,0.9)' : '#b9824d'; rr(c, px + 3, py + 3, w - 6, h - 6, 8); c.fill(); emoji(c, CAT_BY_ID[o.type].icon, px + w / 2, py + h / 2, Math.min(w, h) * 0.5); }
   // occupant face (kennel doorway / bath tub)
   var occ = o.dogId ? dogById(o.dogId) : null;
   if (occ) {
-    var an = (art && art.anchor) || { headX: w / 2, headY: h * 0.6, headR: 13 };
+    var def = CAT_BY_ID[o.type] || { w: o.w, h: o.h };
+    var an = (art && art.anchor) || { headX: (def.w * TILE) / 2, headY: (def.h * TILE) * 0.6, headR: 13 };
+    var rot = ao.rot, flip = (rot === 1 || rot === 2);
+    var hx = (flip ? (def.w * TILE - an.headX) : an.headX) * (o.w / def.w);
+    var hy = an.headY * (o.h / def.h);
     var bathing = occ.state === 'bath';
     try {
-      if (typeof drawDogFace === 'function') drawDogFace(c, occ.breed, occ.coat, px + an.headX, py + an.headY + (bathing ? Math.sin(t * 5) * 1.2 : 0), an.headR, { mood: bathing ? (hasTrait(occ, 'water') ? 'happy' : 'neutral') : 'sleepy', t: t, seed: Math.floor(occ.seed), collar: occ.collar });
-      else { c.fillStyle = breedOf(occ).coats[occ.coat || 0].base; ell(c, px + an.headX, py + an.headY, an.headR, an.headR); c.fill(); }
+      if (typeof drawDogFace === 'function') drawDogFace(c, occ.breed, occ.coat, px + hx, py + hy + (bathing ? Math.sin(t * 5) * 1.2 : 0), an.headR, { mood: bathing ? (hasTrait(occ, 'water') ? 'happy' : 'neutral') : 'sleepy', t: t, seed: Math.floor(occ.seed), collar: occ.collar });
+      else { c.fillStyle = breedOf(occ).coats[occ.coat || 0].base; ell(c, px + hx, py + hy, an.headR, an.headR); c.fill(); }
     } catch (e) {}
-    if (!bathing && Math.random() < 0.012) FX.parts.push({ x: px + an.headX + 10, y: py + an.headY - 14, vx: 6, vy: -12, life: 1.5, max: 1.5, kind: 'z', size: 12 });
+    if (!bathing && Math.random() < 0.012) FX.parts.push({ x: px + hx + 10, y: py + hy - 14, vx: 6, vy: -12, life: 1.5, max: 1.5, kind: 'z', size: 12 });
   }
-  if (art && art.drawFront) { try { art.drawFront(c, ao, t, ENV); } catch (e) {} }
+  if (art && art.drawFront) { try { drawRotatedArt(c, art, ao, t, ENV, 'drawFront'); } catch (e) {} }
   if (occ && occ.state === 'bath') {
     var left = clamp(occ.actT / 4, 0, 1), bx = px + w / 2;
     c.fillStyle = 'rgba(40,26,16,0.7)'; rr(c, bx - 26, py - 16, 52, 9, 4.5); c.fill(); c.fillStyle = '#66bde3'; rr(c, bx - 24.5, py - 14.5, 49 * (1 - left), 6, 3); c.fill();
@@ -374,10 +406,10 @@ function drawObjectBase(c, o, t) {
 function drawSite(c, o, t) {
   var px = o.x * TILE, py = o.y * TILE, w = o.w * TILE, left = Math.max(0, (o.buildEnd - Date.now()) / 1000), prog = clamp(1 - left / Math.max(1, o.buildDur), 0, 1);
   if (o.upgrading) {
-    var artU = artOf(o.type);
+    var artU = artOf(o.type), aoU = artObj(o);
     if (artU) {
       c.save(); c.globalAlpha = 0.72;
-      try { artU.draw(c, artObj(o), t, ENV); if (artU.drawFront) artU.drawFront(c, artObj(o), t, ENV); } catch (e) {}
+      try { drawRotatedArt(c, artU, aoU, t, ENV, 'draw'); if (artU.drawFront) drawRotatedArt(c, artU, aoU, t, ENV, 'drawFront'); } catch (e) {}
       c.restore();
     }
   }
@@ -770,7 +802,7 @@ function render(dt) {
     else if (k === 7) drawRemotePeer(c, r, t);
     else { drawLeash(c); drawPlayer(c, t); }
   }
-  for (i = 0; i < S.objects.length; i++) { var o2 = S.objects[i], art = artOf(o2.type); if (o2.done && art && art.drawOver && CAT_BY_ID[o2.type].floor && inView(v, o2.x * TILE, o2.y * TILE, o2.w * TILE, o2.h * TILE)) { try { art.drawOver(c, artObj(o2), t, ENV); } catch (err) {} } }
+  for (i = 0; i < S.objects.length; i++) { var o2 = S.objects[i], art = artOf(o2.type); if (o2.done && art && art.drawOver && CAT_BY_ID[o2.type].floor && inView(v, o2.x * TILE, o2.y * TILE, o2.w * TILE, o2.h * TILE)) { try { drawRotatedArt(c, art, artObj(o2), t, ENV, 'drawOver'); } catch (err) {} } }
   drawAmbientAir(c, t, v);
   if (UI.mode === 'play') drawDwellProgress(c, t);
   if (!UI.inTitle) {
@@ -901,29 +933,33 @@ function drawBuildGhost(c, t) {
   var m = UI.mouse; if (!m.in) return;
   var mw = mouseWorld(), tx = tileOf(mw.x), ty = tileOf(mw.y);
   if (UI.moveObj) {
-    var mo2 = UI.moveObj, mDef = CAT_BY_ID[mo2.type], mx = tx - Math.floor((mDef.w - 1) / 2), my = ty - Math.floor((mDef.h - 1) / 2);
-    var mOk = canMoveObject(mo2, mx, my);
+    var mo2 = UI.moveObj, mRot = UI.moveRot != null ? UI.moveRot : (mo2.rot || 0);
+    var mDims = typeof objDims === 'function' ? objDims(mo2.type, mRot) : { w: mo2.w, h: mo2.h, rot: mRot };
+    var mx = tx - Math.floor((mDims.w - 1) / 2), my = ty - Math.floor((mDims.h - 1) / 2);
+    var mOk = canMoveObject(mo2, mx, my, mDims.rot);
     c.fillStyle = mOk ? 'rgba(128,216,255,0.34)' : 'rgba(255,90,80,0.32)';
-    rr(c, mx * TILE + 1, my * TILE + 1, mDef.w * TILE - 2, mDef.h * TILE - 2, 8); c.fill();
+    rr(c, mx * TILE + 1, my * TILE + 1, mDims.w * TILE - 2, mDims.h * TILE - 2, 8); c.fill();
     c.strokeStyle = mOk ? '#80d8ff' : '#ff6b5a'; c.lineWidth = 2.5; c.stroke();
     c.globalAlpha = mOk ? 0.85 : 0.5;
     var mArt = artOf(mo2.type);
-    if (mArt) { try { mArt.draw(c, { type: mo2.type, x: mx, y: my, w: mDef.w, h: mDef.h, id: mo2.id, occupied: false, useT: 99, label: null }, t, ENV); } catch (e) {} }
+    if (mArt) { try { drawRotatedArt(c, mArt, { type: mo2.type, x: mx, y: my, w: mDims.w, h: mDims.h, rot: mDims.rot, id: mo2.id, occupied: false, useT: 99, label: null }, t, ENV, 'draw'); } catch (e) {} }
     c.globalAlpha = 1;
     return;
   }
   if (UI.buildSel) {
-    var def = CAT_BY_ID[UI.buildSel], x = tx - Math.floor((def.w - 1) / 2), y = ty - Math.floor((def.h - 1) / 2);
+    var def = CAT_BY_ID[UI.buildSel], bRot = UI.buildRot || 0;
+    var bDims = typeof objDims === 'function' ? objDims(def, bRot) : { w: def.w, h: def.h, rot: bRot };
+    var x = tx - Math.floor((bDims.w - 1) / 2), y = ty - Math.floor((bDims.h - 1) / 2);
     var site = objAt(tx, ty);
     if (site && !site.done) { siteHint(c, site); return; }
     var bCost = typeof itemCost === 'function' ? itemCost(UI.buildSel) : def.cost;
     var bReq = typeof itemReqLvl === 'function' ? itemReqLvl(UI.buildSel) : def.lvl;
-    var ok = canPlace(UI.buildSel, x, y) && S.cash >= bCost && S.level >= bReq;
-    c.fillStyle = ok ? 'rgba(120,240,150,0.32)' : 'rgba(255,90,80,0.32)'; rr(c, x * TILE + 1, y * TILE + 1, def.w * TILE - 2, def.h * TILE - 2, 8); c.fill();
+    var ok = canPlace(UI.buildSel, x, y, bDims.rot) && S.cash >= bCost && S.level >= bReq;
+    c.fillStyle = ok ? 'rgba(120,240,150,0.32)' : 'rgba(255,90,80,0.32)'; rr(c, x * TILE + 1, y * TILE + 1, bDims.w * TILE - 2, bDims.h * TILE - 2, 8); c.fill();
     c.strokeStyle = ok ? '#8bf0a4' : '#ff6b5a'; c.lineWidth = 2.5; c.stroke();
     c.globalAlpha = ok ? 0.85 : 0.5;
     var art = artOf(UI.buildSel);
-    if (art) { try { art.draw(c, { type: UI.buildSel, x: x, y: y, w: def.w, h: def.h, id: 7, occupied: false, useT: 99, label: null }, t, ENV); } catch (e) {} }
+    if (art) { try { drawRotatedArt(c, art, { type: UI.buildSel, x: x, y: y, w: bDims.w, h: bDims.h, rot: bDims.rot, id: 7, occupied: false, useT: 99, label: null }, t, ENV, 'draw'); } catch (e) {} }
     c.globalAlpha = 1;
   } else {
     var o = objAt(tx, ty);
