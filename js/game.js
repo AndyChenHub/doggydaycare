@@ -1566,7 +1566,7 @@ function moveObject(o, nx, ny) {
   burst(cx, cy, 'dust', 14);
   float(cx, o.y * TILE - 10, '↔️ Moved ' + (c ? c.name : 'item'), '#80d8ff', 1.15);
   sfx('place');
-  if (typeof MP !== 'undefined') MP.sendWorldSync(true);
+  if (typeof MP !== 'undefined') MP.recordAction('move', { item: o.type, name: c ? c.name : o.type, icon: c ? c.icon : '↔️', x: nx, y: ny });
   saveGame();
   return true;
 }
