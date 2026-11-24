@@ -94,6 +94,10 @@ function enterPlayFromState(fresh) {
   CAM.ready = false; sfx('day_start'); setTimeout(dayBanner, 650);
   var gift = dailyGift();
   if (gift) setTimeout(function () { if (UI.mode === 'play' || UI.mode === 'build') showGift(gift); }, 3000);
+  if (S.offlineReport) {
+    var rep = S.offlineReport; delete S.offlineReport; saveGame();
+    toast('🧑‍💼 Staff ran the shop for ' + fmtDur(rep.sec) + ' while closed: cared for ' + rep.dogs + ' dogs and netted +' + fmtMoney(rep.earned) + ' (after supplies & staff cut)!', 'good');
+  }
   if (S.migrated) { var r = S.migrated.refund; delete S.migrated; saveGame(); openModal('<h2>Welcome back!</h2><p>Paws &amp; Play has moved into a bigger, prettier home. Your level, reputation and cash came along' + (r ? ', and everything you had built was refunded: <b class="good">+' + fmtMoney(r) + '</b>' : '') + '. The yard is a fresh start — time to decorate!</p><div class="row"><button data-act="back" class="primary">Let\'s go</button></div>', 'note'); bindModalButtons(); }
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Drag anywhere on screen to walk to the SERVE pad behind the counter!', 'good');
   saveGame();
@@ -723,19 +727,19 @@ function renderTasks() {
 function moodBar(v) { var col = v > 70 ? '#6fbf5a' : v > 40 ? '#f2c14e' : '#d9574a'; return '<div class="mood"><u><s style="width:' + Math.round(v / 4) * 4 + '%;background:' + col + '"></s></u></div>'; }
 function renderRoster() {
   var dogs = S.dogs.filter(function (d) { return d.checkedIn && d.state !== 'leaving'; });
-  var waiting = S.owners.filter(function (o) { return o.state === 'waitCheckin' || (o.state === 'walkIn' && o.kind === 'dropoff'); }).length;
+  var waiting = S.owners.filter(function (o) { return o.state === 'waitCheckin' || o.state === 'waitPickup' || o.state === 'walkIn'; }).length;
   var needy = dogs.filter(function (d) { return d.need && !d.need.self; }).length;
-  var pickupN = dogs.filter(function (d) { return d.called && S.owners.some(function (o) { return o.dogId === d.id && o.state === 'waitPickup'; }); }).length;
-  var badges = (pickupN ? ' 🏠' + pickupN : '') + (needy ? ' 🙋' + needy : '') + (waiting ? ' 🔔' + waiting : '');
+  var badges = (needy ? ' 🙋' + needy : '') + (waiting ? ' 🔔' + waiting : '');
   var h = '<div class="ph" id="rosterHead"><span>🐕 Pups</span><span class="ph-sub">' + activeDogCount() + '/' + capacity() + badges + '</span><span class="chev">' + (UI.rosterOpen ? '▲' : '▼') + '</span></div>';
   if (UI.rosterOpen) {
     if (!dogs.length) h += '<div class="empty">No pups yet — welcome customers at the counter!</div>';
-    function rank(d) { var w = d.called && S.owners.some(function (o) { return o.dogId === d.id && o.state === 'waitPickup'; }); return w ? 0 : d.need && !d.need.self ? 1 : 2; }
+    function rank(d) { return d.need && !d.need.self ? 0 : 1; }
     dogs.sort(function (a, b) { return rank(a) - rank(b) || a.happy - b.happy; });
     dogs.forEach(function (d) {
-      var hp = d.happy, wanted = rank(d) === 0, need = d.need && !d.need.self ? d.need : null;
-      var ico = wanted ? '🏠' : need ? NEED_INFO[need.type].icon : d.state === 'kennel' || d.state === 'nap' ? '💤' : d.state === 'bath' ? '🛁' : d.state === 'leashed' ? '🦮' : d.overnight && d.pickupDay > S.day ? '🌙' : '🐾';
-      var cls = 'dog c' + (wanted ? ' wanted' : '') + (need && need.t > NEED_GRACE ? ' sad' : need ? ' asks' : '');
+      var hp = d.happy, need = d.need && !d.need.self ? d.need : null;
+      // Do not mark pickup dogs in the roster — player checks the owner at the counter and finds the dog in the yard!
+      var ico = need ? NEED_INFO[need.type].icon : d.state === 'kennel' || d.state === 'nap' ? '💤' : d.state === 'bath' ? '🛁' : d.state === 'leashed' ? '🦮' : d.overnight && d.pickupDay > S.day ? '🌙' : '🐾';
+      var cls = 'dog' + (need && need.t > NEED_GRACE ? ' sad' : need ? ' asks' : '');
       var pct = '<span class="hp" style="color:' + (hp > 70 ? '#3f7d3a' : hp > 40 ? '#b87514' : '#c2483c') + '">' + Math.round(hp / 2) * 2 + '%</span>';
       h += '<div class="' + cls + '" data-dog="' + d.id + '"><img src="' + dogPortraitSrc(d, 44) + '"><b>' + esc(d.name) + '</b><span class="ico">' + ico + '</span>' + moodBar(hp) + pct + '</div>';
     });
@@ -744,18 +748,6 @@ function renderRoster() {
   if (UI.rosterHTML !== h) {
     UI.rosterHTML = h; var sc = el.scrollTop; el.innerHTML = h; el.scrollTop = sc;
     $('rosterHead').onclick = function () { UI.rosterOpen = !UI.rosterOpen; if (UI.rosterOpen) UI.tasksOpen = false; sfx('click'); renderRoster(); renderTasks(); };
-    el.querySelectorAll('[data-dog]').forEach(function (c) {
-      c.onclick = function () {
-        var d = dogById(+c.getAttribute('data-dog'));
-        if (d) {
-          UI.rosterOpen = false; renderRoster();
-          UI.camFocus = { id: d.id, t: 1.8 };
-          UI.touchTarget = { x: d.x, y: d.y, stuck: 0 };
-          float(d.x, d.y - 80, '▼ ' + d.name, '#ffe082', 1.2);
-          burst(d.x, d.y - 30, 'star', 6); sfx('click');
-        }
-      };
-    });
   }
 }
 

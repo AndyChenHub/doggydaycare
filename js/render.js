@@ -441,18 +441,30 @@ function keyCap(c, x, y, label) {
 }
 function drawOwnerUI(c, o, t) {
   var d = dogById(o.dogId), top = -82;
-  if (o.sayT > 0 && o.say) { bubble(c, o.x, o.y + top, o.say, { size: 11 }); return; }
+  if (o.sayT > 0 && o.say && o.state !== 'waitPickup') { bubble(c, o.x, o.y + top, o.say, { size: 11 }); return; }
   if (o.state !== 'waitCheckin' && o.state !== 'waitPickup') return;
   var f = clamp(o.patience / o.patienceMax, 0, 1), col = f > 0.5 ? '#6fbf5a' : f > 0.25 ? '#f2c14e' : '#d9574a';
   var bx = o.x, by = o.y + top - 6, pickup = o.state === 'waitPickup';
+  var cardW = pickup ? 86 : 56;
   c.fillStyle = pickup ? '#fff1c9' : '#fffaf0'; c.strokeStyle = f < 0.25 ? '#d9574a' : OUTLINE; c.lineWidth = 1.8;
   c.beginPath(); c.moveTo(bx - 5, by + 14); c.lineTo(bx, by + 21); c.lineTo(bx + 5, by + 14); c.closePath(); c.fill(); c.stroke();
-  rr(c, bx - 28, by - 30, 56, 45, 9); c.fill(); c.stroke();
-  if (d) { if (typeof drawDogPortrait === 'function') { try { drawDogPortrait(c, d.breed, d.coat, bx - 27, by - 30, 34, { collar: d.collar }); } catch (e) {} } else c.drawImage(portraitCanvas(d.breed, d.coat, 36), bx - 27, by - 30, 34, 34); }
-  emoji(c, pickup ? '🏠' : (d && d.overnight ? '🌙' : '📋'), bx + 17, by - 14, 13);
-  c.fillStyle = 'rgba(74,52,38,0.25)'; rr(c, bx - 23, by + 6, 46, 5, 2.5); c.fill();
-  c.fillStyle = col; rr(c, bx - 23, by + 6, Math.max(3, 46 * f), 5, 2.5); c.fill();
-  if (f < 0.25) { c.font = '23px ' + HEAD_FONT; c.textAlign = 'center'; outlined(c, '!', bx, by - 40 + Math.sin(t * 12) * 2, '#ff6b5a'); }
+  rr(c, bx - cardW / 2, by - 32, cardW, 47, 9); c.fill(); c.stroke();
+  if (d) {
+    var px0 = bx - cardW / 2 + 2;
+    if (typeof drawDogPortrait === 'function') { try { drawDogPortrait(c, d.breed, d.coat, px0, by - 31, 34, { collar: d.collar }); } catch (e) {} }
+    else c.drawImage(portraitCanvas(d.breed, d.coat, 36), px0, by - 31, 34, 34);
+  }
+  if (pickup && d) {
+    c.font = '10px ' + HEAD_FONT; c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillStyle = '#7a4e2a'; c.fillText('PICKUP:', bx - cardW / 2 + 37, by - 21);
+    c.font = '12px ' + HEAD_FONT; c.fillStyle = '#3b2a20';
+    c.fillText(d.name.slice(0, 7), bx - cardW / 2 + 37, by - 8);
+  } else {
+    emoji(c, d && d.overnight ? '🌙' : '📋', bx + 17, by - 14, 13);
+  }
+  c.fillStyle = 'rgba(74,52,38,0.25)'; rr(c, bx - cardW / 2 + 5, by + 7, cardW - 10, 5, 2.5); c.fill();
+  c.fillStyle = col; rr(c, bx - cardW / 2 + 5, by + 7, Math.max(3, (cardW - 10) * f), 5, 2.5); c.fill();
+  if (f < 0.25) { c.font = '23px ' + HEAD_FONT; c.textAlign = 'center'; outlined(c, '!', bx, by - 42 + Math.sin(t * 12) * 2, '#ff6b5a'); }
   c.font = '14px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle'; outlined(c, o.name, o.x, o.y + 12, '#fff');
 }
 function drawDogUI(c, d, t) {
@@ -461,9 +473,8 @@ function drawDogUI(c, d, t) {
   if (inK || inB) { var k = objById(d.objId); if (k) { x = (k.x + k.w / 2) * TILE; y = k.y * TILE - (inB ? 22 : 4); } }
   c.font = '14px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
   if (!inK && !inB) { outlined(c, d.name, d.x, d.y + 11, d.special ? '#ffd54a' : '#fff'); if (d.special) { c.font = '11px ' + HEAD_FONT; outlined(c, '⭐ ' + (d.title || 'special guest'), d.x, d.y + 24, '#ffe9a0'); if (Math.random() < 0.08) burst(d.x + rand(-18, 18), d.y - rand(4, 36), 'sparkle', 1); } }
-  var wanted = d.called && S.owners.some(function (o) { return o.dogId === d.id && o.state === 'waitPickup'; });
   var leashed = S.player.carry && S.player.carry.id === d.id;
-  if (wanted && !leashed) { iconBubble(c, x, y - 2 + Math.sin(t * 6) * 4, '🏠', false, true); return; }
+  // No pickup notification on the dog! The owner at the counter shows which dog they want, and the player finds the dog in the yard.
   if (inB) return;
   if (d.need && !leashed) {
     var urgent = d.need.t > NEED_GRACE;
@@ -513,9 +524,7 @@ function drawPlayerGuide(c, t) {
     if (wantDog) { tx = wantDog.x; ty = wantDog.y; col = '#8bf06e'; }
   } else {
     var wc = S.owners.filter(function (o) { return o.state === 'waitCheckin'; })[0];
-    var wp = S.owners.filter(function (o) { return o.state === 'waitPickup'; })[0];
     if (wc) { tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2; col = '#ffd54a'; }
-    else if (wp) { var pd = dogById(wp.dogId); if (pd) { tx = pd.x; ty = pd.y; col = '#ffd54a'; } }
     else {
       var nd = S.dogs.filter(function (d) { return d.checkedIn && d.need && !d.need.self && (d.state === 'idle' || d.state === 'wander' || d.state === 'nap'); })
         .sort(function (a, b) { return b.need.t - a.need.t; })[0];
@@ -618,15 +627,14 @@ function drawZones(c, t, v) {
       outlined(c, '+' + fmtMoney(ch.cash) + ' ★', ch.x, ch.y + 11, '#ffe66d', 'rgba(30,18,10,0.9)', 2.4);
     });
   }
-  // 5. Rings round the dogs that need you
+  // 5. Rings round the dogs that have an active care need (never highlight pickup dogs — player must find them!)
   S.dogs.forEach(function (d) {
     if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'eat' || d.state === 'play')) return;
-    var wanted = d.called && S.owners.some(function (o) { return o.dogId === d.id && o.state === 'waitPickup'; });
-    if (!wanted && (!d.need || d.need.self)) return;
+    if (!d.need || d.need.self) return;
     if (!inView(v, d.x - 50, d.y - 30, 100, 60)) return;
     var act = z && z.key === 'dog' + d.id, urgent = d.need && d.need.t > NEED_GRACE, pu = 0.5 + Math.sin(t * 5 + d.seed) * 0.5;
     c.fillStyle = act ? 'rgba(255,244,200,0.35)' : 'rgba(255,250,230,0.14)'; ell(c, d.x, d.y, 40, 16); c.fill();
-    c.strokeStyle = wanted ? 'rgba(255,214,0,' + (0.6 + pu * 0.4) + ')' : urgent ? 'rgba(255,120,100,' + (0.6 + pu * 0.4) + ')' : 'rgba(255,240,190,' + (0.55 + pu * 0.35) + ')';
+    c.strokeStyle = urgent ? 'rgba(255,120,100,' + (0.6 + pu * 0.4) + ')' : 'rgba(255,240,190,' + (0.55 + pu * 0.35) + ')';
     c.lineWidth = act ? 3.2 : 2.4; c.setLineDash(act ? [] : [7, 5]); c.lineDashOffset = -t * 16; ell(c, d.x, d.y, 40, 16); c.stroke(); c.setLineDash([]);
   });
   // 5. My Mini Mart directional pointer around player's feet
@@ -795,7 +803,11 @@ function drawLighting(c, t, v) {
 // ---------------- off-screen indicators (full-width vertical iPhone viewport) ----------------
 function drawEdgeIndicators(c, t) {
   var items = [];
-  S.owners.forEach(function (o) { if (o.state === 'waitCheckin') items.push({ x: o.x, y: o.y - 40, icon: '🔔', col: '#fff1c9', urgent: o.patience / o.patienceMax < 0.3 }); else if (o.state === 'waitPickup' && !(S.player.carry && S.player.carry.id === o.dogId)) { var d = dogById(o.dogId); if (d) items.push({ x: d.x, y: d.y - 20, icon: '🏠', col: '#ffe082', urgent: o.patience / o.patienceMax < 0.3 }); } else if (o.state === 'waitPickup') items.push({ x: o.x, y: o.y - 40, icon: '💰', col: '#c8f7b0', urgent: false }); });
+  // Point to owners waiting at the counter (never point to pickup dogs in the yard — player must find the dog!)
+  S.owners.forEach(function (o) {
+    if (o.state === 'waitCheckin') items.push({ x: o.x, y: o.y - 40, icon: '🔔', col: '#fff1c9', urgent: o.patience / o.patienceMax < 0.3 });
+    else if (o.state === 'waitPickup') items.push({ x: o.x, y: o.y - 40, icon: (S.player.carry && S.player.carry.id === o.dogId) ? '💰' : '🔔', col: (S.player.carry && S.player.carry.id === o.dogId) ? '#c8f7b0' : '#ffe082', urgent: o.patience / o.patienceMax < 0.3 });
+  });
   S.dogs.forEach(function (d) { if (!d.checkedIn || !d.need || d.need.self || d.state === 'leaving' || d.state === 'leashed' || d.state === 'kennel' || d.need.t < 2) return; items.push({ x: d.x, y: d.y - 20, icon: NEED_INFO[d.need.type].icon, col: d.need.t > NEED_GRACE ? '#ffd9d4' : '#fffaf0', urgent: d.need.t > NEED_GRACE, small: true }); });
   var padX = 32, topY = 114, botY = VIEW.h - 88;
   items.forEach(function (it) {

@@ -91,10 +91,10 @@ var OWNER_NAMES = ['Alex','Sam','Priya','Jordan','Maria','Chen','Taylor','Omar',
 var CATALOG = [
   { id: 'kennel',     cat: 'care',  name: 'Kennel',          icon: '🏠', w: 2, h: 2, cost: 360,  time: 120,  lvl: 2,  cap: 1, solid: true,
     desc: 'Unlocks overnight stays. +1 dog capacity (+1 more every 2 upgrade levels).' },
-  { id: 'foodbin',    cat: 'care',  name: 'Food Bin',        icon: '🍖', w: 1, h: 1, cost: 140,  time: 45,   lvl: 1,  solid: true, desc: 'Stack bowls of kibble. Upgrade for +care bonus & charm.' },
-  { id: 'toybox',     cat: 'care',  name: 'Toy Box',         icon: '🎾', w: 1, h: 1, cost: 140,  time: 45,   lvl: 1,  solid: true, desc: 'Stack balls for fetch. Upgrade for +care bonus & charm.' },
-  { id: 'trash',      cat: 'care',  name: 'Poop Bin',        icon: '🗑️', w: 1, h: 1, cost: 90,   time: 30,   lvl: 1,  solid: true, desc: 'Toss scooped poop away. Upgrade for +XP & charm.' },
-  { id: 'tub',        cat: 'care',  name: 'Bath Tub',        icon: '🛁', w: 2, h: 1, cost: 340,  time: 90,   lvl: 2,  solid: true, desc: 'Wash muddy dogs. Upgrade for faster baths & +charm.' },
+  { id: 'foodbin',    cat: 'care',  name: 'Food Bin',        icon: '🍖', w: 1, h: 1, cost: 60,   time: 8,    lvl: 1,  solid: true, desc: 'Stack bowls of kibble. Upgrade for +care bonus & charm.' },
+  { id: 'toybox',     cat: 'care',  name: 'Toy Box',         icon: '🎾', w: 1, h: 1, cost: 65,   time: 8,    lvl: 1,  solid: true, desc: 'Stack balls for fetch. Upgrade for +care bonus & charm.' },
+  { id: 'trash',      cat: 'care',  name: 'Poop Bin',        icon: '🗑️', w: 1, h: 1, cost: 40,   time: 6,    lvl: 1,  solid: true, desc: 'Toss scooped poop away. Upgrade for +XP & charm.' },
+  { id: 'tub',        cat: 'care',  name: 'Bath Tub',        icon: '🛁', w: 2, h: 1, cost: 110,  time: 12,   lvl: 1,  solid: true, desc: 'Wash muddy dogs. Upgrade for faster baths & +charm.' },
   { id: 'waterbowl',  cat: 'care',  name: 'Water Station',   icon: '💧', w: 1, h: 1, cost: 220,  time: 60,   lvl: 2,  solid: true, desc: 'Dogs wander over for a drink and +happiness.' },
   { id: 'treatjar',   cat: 'care',  name: 'Treat Jar',       icon: '🍪', w: 1, h: 1, cost: 420,  time: 150,  lvl: 3,  solid: true, desc: 'Stack gourmet dog treats. Upgrade for bigger mood boosts.' },
   { id: 'autofeeder', cat: 'care',  name: 'Auto-Feeder',     icon: '🤖', w: 1, h: 1, cost: 3200, time: 1500, lvl: 10, solid: true, desc: 'Hungry dogs walk over and feed themselves automatically.' },
@@ -121,7 +121,12 @@ var CATALOG = [
 
 // In-world floor unlock pads (shown progressively across starter yard and newly expanded land plots!)
 var UNLOCK_PADS = [
-  // Starter Yard ('base')
+  // Starter Essential Stations ('base' — empty yard at startup, player builds these first!)
+  { id: 'pad_foodbin',   plot: 'base',      kind: 'obj',   type: 'foodbin',    x: 20, y: 18, uniqueType: true },
+  { id: 'pad_trash',     plot: 'base',      kind: 'obj',   type: 'trash',      x: 19, y: 28, uniqueType: true },
+  { id: 'pad_toybox',    plot: 'base',      kind: 'obj',   type: 'toybox',     x: 24, y: 18, uniqueType: true },
+  { id: 'pad_tub',       plot: 'base',      kind: 'obj',   type: 'tub',        x: 28, y: 18, uniqueType: true },
+  // Additional Starter Yard ('base') Unlocks
   { id: 'pad_water',     plot: 'base',      kind: 'obj',   type: 'waterbowl',  x: 29, y: 21, uniqueType: true },
   { id: 'pad_kennel',    plot: 'base',      kind: 'obj',   type: 'kennel',     x: 28, y: 28 },
   { id: 'pad_play',      plot: 'base',      kind: 'obj',   type: 'playzone',   x: 23, y: 24 },
@@ -206,13 +211,15 @@ var DIFFICULTY = {
 };
 
 var TUTORIAL = [
-  { id: 'checkin', text: 'Drag to walk onto the SERVE pad behind the counter to welcome your first pup' },
-  { id: 'pet',     text: 'Walk near a dog asking for ❤️ cuddles' },
-  { id: 'feed',    text: 'Walk to the Food Bin to stack bowls, then walk past a hungry dog' },
-  { id: 'scoop',   text: 'Walk over poop to scoop it up, then pass the Poop Bin' },
-  { id: 'wash',    text: 'Walk to a muddy dog to leash it, then step onto the Bath Tub pad' },
-  { id: 'return',  text: 'When an owner returns (🏠), walk to their dog and bring it to the SERVE pad' },
-  { id: 'build',   text: 'Step onto a green $ Pad in the yard or tap Shop to build' },
+  { id: 'checkin',     reward: 15, text: 'Step onto the SERVE pad behind the counter to welcome your first dog' },
+  { id: 'pet',         reward: 15, text: 'Walk up to a dog in the yard to ❤️ cuddle it' },
+  { id: 'build_food',  reward: 20, text: 'Build a 🍖 Food Bin ($60 green box in yard or via 🔨 Shop)' },
+  { id: 'feed',        reward: 15, text: 'Grab a kibble bowl from the Food Bin and feed a dog' },
+  { id: 'build_trash', reward: 15, text: 'Build a 🗑️ Poop Bin ($40) to keep the yard clean' },
+  { id: 'scoop',       reward: 15, text: 'Walk over poop to scoop it, then toss it in the Poop Bin' },
+  { id: 'build_toy',   reward: 20, text: 'Build a 🎾 Toy Box ($65) and play fetch with a dog' },
+  { id: 'build_tub',   reward: 25, text: 'Build a 🛁 Bath Tub ($110) and wash a dog' },
+  { id: 'return',      reward: 25, text: 'When an owner asks for pickup at the counter, find their dog in the yard & return it' },
 ];
 
 // Steep Clash of Clans XP curve for long-term endless play
