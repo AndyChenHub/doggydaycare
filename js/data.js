@@ -213,6 +213,26 @@ var GOALS = [
   { id: 'earn',     text: 'Earn ${n} today',                 stat: 'earned',  n: [200, 400, 700], reward: 80 },
 ];
 
+// ---------- rotating daily events (keeps every day feeling fresh in endless play) ----------
+var DAILY_EVENTS = [
+  { id: 'sunny',   icon: '☀️', name: 'Sunny Fetch Festival',   short: 'Fetch Day',   desc: '+25% pickup tips & extra fetch happiness all day!' },
+  { id: 'muddy',   icon: '🌧️', name: 'Muddy Paws Rush',        short: 'Muddy Rush',  desc: 'Every bath pays +$6 bonus cash & +50% bath XP!' },
+  { id: 'gala',    icon: '👑', name: 'VIP & Celebrity Gala',   short: 'VIP Gala',    desc: '2× Special Guest chance & +30% boarding pay all day!' },
+  { id: 'feast',   icon: '🍖', name: 'Gourmet Feast Day',      short: 'Feast Day',   desc: 'Every meal & treat pays +$4 bonus tip & extra happiness!' },
+  { id: 'cuddle',  icon: '💕', name: 'Cuddle & Care Fest',     short: 'Cuddle Fest', desc: '2× cash from cuddles & yard chores, plus 1.5× Star Rating gain!' },
+  { id: 'zoomies', icon: '⚡', name: 'Agility & Zoomies Cup',  short: 'Zoomies Cup', desc: 'Goal Waves pay +35% bonus rewards & dogs play faster!' },
+];
+
+// ---------- endless lifetime empire milestones (scale Tier 1 -> Tier ∞ forever!) ----------
+var MILESTONES = [
+  { id: 'served',   icon: '🐕', name: 'Pack Leader',      base: 8,   scale: 1.65, reward: 75,  text: 'Serve {n} dogs lifetime' },
+  { id: 'perfect',  icon: '⭐', name: 'Five-Star Legend', base: 5,   scale: 1.65, reward: 90,  text: 'Earn {n} PAWSOME pickups' },
+  { id: 'earned',   icon: '💰', name: 'Daycare Tycoon',   base: 500, scale: 1.85, reward: 100, text: 'Earn ${n} total revenue' },
+  { id: 'care',     icon: '❤️', name: 'Master Caretaker', base: 20,  scale: 1.70, reward: 65,  text: 'Complete {n} dog care actions' },
+  { id: 'mastery',  icon: '📖', name: 'Breed Scholar',    base: 3,   scale: 1.55, reward: 110, text: 'Reach {n} total Breed & Mastery stars' },
+  { id: 'empire',   icon: '🏗️', name: 'Empire Architect', base: 5,   scale: 1.55, reward: 95,  text: 'Reach {n} total Building, Staff & Research levels' },
+];
+
 var DIFFICULTY = {
   relaxed: { decay: 0.65, patience: 1.5, label: 'Relaxed' },
   normal:  { decay: 1.0,  patience: 1.0, label: 'Normal' },

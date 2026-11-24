@@ -300,8 +300,9 @@ function drawNpc(c, n, t) {
   drawPersonEntity(c, p, t, look);
   if (n.carry && !holdingDog && p.dir !== 'up') drawCarry(c, n.carry.type, n.x + a.handX, n.y + a.handY, t, n.carry);
   var sDef = STAFF_BY_ID[n.id];
+  var sLv = typeof staffLvl === 'function' ? staffLvl(n.id) : 1;
   c.font = '12px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
-  outlined(c, sDef ? (sDef.icon + ' ' + sDef.name) : n.id, n.x, n.y + 11, '#ffe9b0');
+  outlined(c, sDef ? (sDef.icon + ' ' + sDef.name + (sLv > 1 ? ' Lv' + sLv : '')) : n.id, n.x, n.y + 11, sLv > 1 ? '#ffd54a' : '#ffe9b0');
   if (n.sayT > 0 && n.say) bubble(c, n.x, n.y - 82, n.say, { size: 11 });
 }
 function drawCarry(c, kind, x, y, t, car) {

@@ -219,7 +219,8 @@ function newState() {
     version: 2, cash: window.GAME_CONFIG.startingCash, xp: 0, level: 1, rep: 3.0, day: 1, dayTime: 0, closing: false,
     objects: [], plots: [{ id: 'base', end: 0 }], dogs: [], owners: [], poops: [], chores: [], choreT: 4, nextId: 1, arrivalTimer: 5,
     stats: newStats(3), streak: 0, bestStreak: 0, totalServed: 0, tutorial: {}, tutorialDone: false,
-    upgrades: {}, dex: {}, goals: [], life: { earned: 0, served: 0, perfect: 0, complaints: 0 }, staff: {}, specials: {}, playDays: 0, giftStreak: 0, lastPlayDate: null,
+    upgrades: {}, dex: {}, goals: [], goalWave: 1, milestones: {}, staff: {}, staffLvl: {}, franchiseTier: 0, dailyEvent: null,
+    life: { earned: 0, served: 0, perfect: 0, complaints: 0, care: 0 }, specials: {}, playDays: 0, giftStreak: 0, lastPlayDate: null,
     player: { x: 12.6 * TILE, y: 24.3 * TILE, dir: 'left', face: -1, carry: null, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, look: 0, stepT: 0 }, needT: 6, poopT: 30,
     created: Date.now(),
   };
@@ -304,6 +305,7 @@ function boostRep(amt, px, py) {
   var oldCap = capacity();
   // Comeback boost: when star rating is below 3.0★, every positive care/chore action gives 1.75x star recovery!
   var mul = S.rep < 2.2 ? 2.0 : S.rep < 3.0 ? 1.65 : 1.0;
+  if (S.dailyEvent === 'cuddle') mul *= 1.5;
   var gain = amt * mul;
   var prev = S.rep;
   S.rep = clamp(S.rep + gain, 0.5, 5.0);
@@ -325,7 +327,8 @@ function buildWalk() {
   for (var i = 0; i < N; i++) objGrid[i] = null;
   var dNum = S ? (S.day || 1) : 1, repVal = S && typeof S.rep === 'number' ? S.rep : 3.0;
   var baseCap = starBaseCap(repVal, dNum);
-  var bonusCap = 0, ch = 0, objs = S ? S.objects : [];
+  var fTier = S && typeof S.franchiseTier === 'number' ? S.franchiseTier : 0;
+  var bonusCap = fTier * 2, ch = fTier * 10, objs = S ? S.objects : [];
   for (var oi = 0; oi < objs.length; oi++) {
     var o = objs[oi], def = CAT_BY_ID[o.type], olv = o.lvl || 1;
     if (o.done && def) {
@@ -524,9 +527,70 @@ function scheduleArrival() {
   S.arrivalTimer = base / (repMul * charmMul * (1 + upLvl('flyers') * 0.1));
 }
 function dogPrice(d) {
-  // Earning cash is tougher and more realistic — every dollar counts!
+  // Earning cash is tougher and more realistic — every dollar counts! Scales with Breed Mastery, Franchise Tier & VIP Gala event.
   var base = (d.overnight ? 16 * (1 + upLvl('nightstaff') * 0.12) : 0) + breedOf(d).price * 0.24 + Math.min(S.day, 120) * 0.18;
-  return Math.max(8, Math.round(base * (1 + upLvl('webcam') * 0.10) * (d.special ? 2.5 : 1)));
+  var masteryMul = 1 + breedMasteryLvl(d.breed) * 0.08;
+  var franMul = 1 + franchiseTier() * 0.12;
+  var evMul = (S && S.dailyEvent === 'gala') ? 1.30 : 1;
+  return Math.max(8, Math.round(base * (1 + upLvl('webcam') * 0.10) * masteryMul * franMul * evMul * (d.special ? 2.5 : 1)));
+}
+function franchiseTier() { return (S && typeof S.franchiseTier === 'number') ? S.franchiseTier : 0; }
+function franchiseName(tier) {
+  var t = tier == null ? franchiseTier() : tier;
+  var titles = ['Starter Daycare', '⭐ Boutique Daycare', '🏅 Premier Canine Resort', '👑 Royal Dog Sanctuary', '💎 Diamond Paws Estate', '🌍 Global Canine Empire'];
+  return titles[Math.min(t, titles.length - 1)] + (t >= titles.length ? ' Tier ' + (t + 1) : '');
+}
+function franchiseCost() { return Math.round(750 * Math.pow(1.72, franchiseTier())); }
+function franchiseReqLvl() { return 2 + franchiseTier() * 2; }
+function buyFranchiseTier() {
+  if (!S) return false;
+  var cost = franchiseCost(), req = franchiseReqLvl(), nextT = franchiseTier() + 1;
+  if (S.level < req) { toast('🔒 Reach Daycare Level ' + req + ' for ' + franchiseName(nextT), 'bad'); sfx('error'); return false; }
+  if (S.cash < cost) { toast('Need ' + fmtMoney(cost) + ' for ' + franchiseName(nextT), 'bad'); sfx('error'); return false; }
+  S.cash -= cost; S.stats.spent += cost;
+  S.franchiseTier = nextT;
+  markDirty();
+  gainXP(20 + nextT * 10);
+  confetti(S.player.x, S.player.y - 50, 50);
+  sfx('level');
+  toast('🏆 Promoted to ' + franchiseName(nextT) + '! (+2 Max Dog Capacity, +12% All Boarding Pay, +10 Charm!)', 'good');
+  if (typeof showBanner === 'function') showBanner('🏆 ' + franchiseName(nextT), '+2 Max Dogs · +12% Boarding Pay · +10 Yard Charm');
+  saveGame();
+  return true;
+}
+function currentDailyEvent() {
+  if (!S || !S.dailyEvent || typeof DAILY_EVENTS === 'undefined') return null;
+  for (var i = 0; i < DAILY_EVENTS.length; i++) if (DAILY_EVENTS[i].id === S.dailyEvent) return DAILY_EVENTS[i];
+  return null;
+}
+function rollDailyEvent() {
+  if (!S || typeof DAILY_EVENTS === 'undefined' || !DAILY_EVENTS.length) return null;
+  var pool = DAILY_EVENTS.filter(function (e) { return e.id !== S.dailyEvent; });
+  var ev = pick(pool.length ? pool : DAILY_EVENTS);
+  S.dailyEvent = ev.id;
+  return ev;
+}
+function breedMasteryLvl(breedId) {
+  var e = S && S.dex && S.dex[breedId];
+  return e ? Math.floor(Math.sqrt((e.n || 0) / 2)) : 0;
+}
+function breedMasteryNextAt(lvl) {
+  var next = (lvl || 0) + 1;
+  return 2 * next * next;
+}
+function totalBreedMasteryStars() {
+  if (!S || !S.dex) return 0;
+  var tot = 0;
+  for (var k in S.dex) tot += 1 + breedMasteryLvl(k);
+  return tot;
+}
+function totalEmpireLevels() {
+  if (!S) return 0;
+  var tot = (S.franchiseTier || 0) * 2;
+  (S.objects || []).forEach(function (o) { if (o.done) tot += (o.lvl || 1); });
+  for (var u in (S.upgrades || {})) tot += (S.upgrades[u] || 0);
+  for (var st in (S.staff || {})) if (S.staff[st]) tot += staffLvl(st);
+  return tot;
 }
 // real dogs go once or twice a day, and soon after a meal
 function nextPoopDelay(d, afterMeal) { var D = dayLen(); return afterMeal ? rand(0.08, 0.16) * D : rand(0.25, 0.55) * D * (hasTrait(d, 'pooper') ? 0.55 : 1); }
@@ -549,13 +613,14 @@ function pickSpecial() {
   // Teddy & Alfie (moraleBoost): genuinely rare special occurrences (~6% if not met yet, ~3.5% repeat)
   var moraleFresh = cands.filter(function (sp) { return sp.moraleBoost && !S.specials[sp.id]; });
   var moraleSeen = cands.filter(function (sp) { return sp.moraleBoost && S.specials[sp.id]; });
-  if (moraleFresh.length && Math.random() < 0.06) chosen = pick(moraleFresh);
-  else if (moraleSeen.length && Math.random() < 0.035) chosen = pick(moraleSeen);
+  var galaMul = (S && S.dailyEvent === 'gala') ? 2.0 : 1.0;
+  if (moraleFresh.length && Math.random() < 0.06 * galaMul) chosen = pick(moraleFresh);
+  else if (moraleSeen.length && Math.random() < 0.035 * galaMul) chosen = pick(moraleSeen);
   else {
     var fresh = cands.filter(function (sp) { return !sp.moraleBoost && !S.specials[sp.id]; });
     var seen = cands.filter(function (sp) { return !sp.moraleBoost && S.specials[sp.id]; });
-    if (fresh.length && Math.random() < 0.08) chosen = pick(fresh);
-    else if (seen.length && Math.random() < 0.03) chosen = pick(seen);
+    if (fresh.length && Math.random() < 0.08 * galaMul) chosen = pick(fresh);
+    else if (seen.length && Math.random() < 0.03 * galaMul) chosen = pick(seen);
   }
   if (chosen) S.lastSpecialDay = S.day;
   return chosen;
@@ -634,11 +699,43 @@ function specialsFound() { return S.specials ? Object.keys(S.specials).length : 
 var NPCS = [];
 function npcById(id) { for (var i = 0; i < NPCS.length; i++) if (NPCS[i].id === id) return NPCS[i]; return null; }
 function staffHired(id) { return !!(S && S.staff && S.staff[id]); }
+function staffLvl(id) {
+  if (!staffHired(id)) return 0;
+  if (!S.staffLvl) S.staffLvl = {};
+  return Math.max(1, S.staffLvl[id] || 1);
+}
+function staffTrainCost(id) {
+  var s = STAFF_BY_ID[id], lv = staffLvl(id) || 1;
+  return Math.round((s ? s.wage : 60) * 3.0 * Math.pow(1.55, lv - 1));
+}
+function trainStaff(id) {
+  var s = STAFF_BY_ID[id];
+  if (!s || !staffHired(id)) return false;
+  var cost = staffTrainCost(id), nextLv = staffLvl(id) + 1;
+  if (S.cash < cost) { toast('Need ' + fmtMoney(cost) + ' to train ' + s.name + ' to Lv ' + nextLv, 'bad'); sfx('error'); return false; }
+  S.cash -= cost; S.stats.spent += cost;
+  if (!S.staffLvl) S.staffLvl = {};
+  S.staffLvl[id] = nextLv;
+  var npc = npcById(id);
+  var cx = npc ? npc.x : S.player.x, cy = npc ? npc.y - 40 : S.player.y - 40;
+  confetti(cx, cy, 28);
+  float(cx, cy - 16, s.icon + ' ' + s.name + ' Lv ' + nextLv + '!', '#ffe66d', 1.25);
+  toast('⬆️ Trained ' + s.icon + ' ' + s.name + ' to Lv ' + nextLv + '! (+12% walk speed, +care bonus & +15% offline earnings!)', 'good');
+  sfx('level'); gainXP(8 + nextLv * 4);
+  saveGame();
+  return true;
+}
 function hiredStaffCount() {
   if (!S || !S.staff) return 0;
   var n = 0;
   STAFF.forEach(function (s) { if (S.staff[s.id]) n++; });
   return n;
+}
+function totalStaffPower() {
+  if (!S || !S.staff) return 0;
+  var p = 0;
+  STAFF.forEach(function (s) { if (S.staff[s.id]) p += 1 + (staffLvl(s.id) - 1) * 0.25; });
+  return p;
 }
 function staffWages() { var w = 0; STAFF.forEach(function (s) { if (staffHired(s.id)) w += s.wage; }); return w; }
 function makeNpc(id) {
@@ -1000,15 +1097,20 @@ function helperWalk(n, dt) {
   if (!n.path || !n.path.length) { n.moving = false; return; }
   n.pathT -= dt;
   var nx = n.path[0];
-  if (moveTo(n, (nx[0] + 0.5) * TILE, (nx[1] + 0.5) * TILE, 165, dt)) n.path.shift();
+  var lv = staffLvl(n.id) || 1;
+  var sp = 165 * Math.min(2.4, 1 + (lv - 1) * 0.12);
+  if (moveTo(n, (nx[0] + 0.5) * TILE, (nx[1] + 0.5) * TILE, sp, dt)) n.path.shift();
   if (n.moving) n.walkT += dt;
 }
 function helperServe(n, d, type) {
   n.face = d.x > n.x ? 1 : -1; n.dir = d.x > n.x ? 'right' : 'left';
-  if (type === 'pet') { burst(d.x, d.y - 34, 'heart', 5); sfx('pet', d); if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.2; d.path = null; } fulfillNeed(d); setAnim(d, 'wiggle', 1.0); n.emote = 'pet'; n.emoteT = 0; }
-  else if (type === 'food') { n.carry = null; fulfillNeed(d); d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true)); burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); float(d.x, d.y - 48, 'Nom nom!', '#fff'); n.emote = 'pet'; n.emoteT = 0; }
-  else if (type === 'treat') { n.carry = null; fulfillNeed(d); burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; } setAnim(d, 'beg', 1.2); float(d.x, d.y - 48, 'Yum!', '#fff'); n.emote = 'pet'; n.emoteT = 0; }
-  else if (type === 'play') { n.carry = null; fulfillNeed(d); d.state = 'play'; d.actT = 3.5; d.path = null; d.playA = Math.random() * 6.28; d.anim = null; sfx('bark', d); sfx('whoosh'); burst(d.x, d.y - 24, 'star', 6); FX.parts.push({ x: n.x, y: n.y - 50, vx: (d.x - n.x) * 1.2 + rand(-40, 40), vy: -220, life: 1.1, max: 1.1, kind: 'ball', size: 7, grav: 520 }); float(d.x, d.y - 48, 'Fetch!!', '#fff'); n.emote = 'happy'; n.emoteT = 0; }
+  var lv = staffLvl(n.id) || 1, bonusH = (lv - 1) * 4, bonusCash = lv > 1 ? (lv - 1) : 0;
+  if (bonusCash > 0) { S.cash += bonusCash; S.stats.earned += bonusCash; S.life.earned += bonusCash; }
+  if (S.life) S.life.care = (S.life.care || 0) + 1;
+  if (type === 'pet') { burst(d.x, d.y - 34, 'heart', 5); sfx('pet', d); if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.2; d.path = null; } fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); setAnim(d, 'wiggle', 1.0); n.emote = 'pet'; n.emoteT = 0; }
+  else if (type === 'food') { n.carry = null; fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true)); burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); float(d.x, d.y - 48, 'Nom nom!', '#fff'); n.emote = 'pet'; n.emoteT = 0; }
+  else if (type === 'treat') { n.carry = null; fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; } setAnim(d, 'beg', 1.2); float(d.x, d.y - 48, 'Yum!', '#fff'); n.emote = 'pet'; n.emoteT = 0; }
+  else if (type === 'play') { n.carry = null; fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); d.state = 'play'; d.actT = 3.5; d.path = null; d.playA = Math.random() * 6.28; d.anim = null; sfx('bark', d); sfx('whoosh'); burst(d.x, d.y - 24, 'star', 6); FX.parts.push({ x: n.x, y: n.y - 50, vx: (d.x - n.x) * 1.2 + rand(-40, 40), vy: -220, life: 1.1, max: 1.1, kind: 'ball', size: 7, grav: 520 }); float(d.x, d.y - 48, 'Fetch!!', '#fff'); n.emote = 'happy'; n.emoteT = 0; }
 }
 // the open end of the reception counter: a dog on the other side of it from its target trots round instead of cutting through
 function counterDetour(d, tx, ty) {
@@ -1028,36 +1130,98 @@ function endRomp(d) {
   if (p && p.state === 'romp') { p.state = 'idle'; p.idleT = p.need || p.called ? 1e9 : rand(1, 2.5); p.partner = null; p.moving = false; setAnim(p, 'sit', 1.5); }
 }
 
-// ================= glossary =================
+// ================= glossary & infinite breed mastery =================
 function dexSeen(d) {
   var e = S.dex[d.breed], fresh = !e;
+  var oldMastery = breedMasteryLvl(d.breed);
   if (!e) e = S.dex[d.breed] = { n: 0, first: S.day, coats: [], best: 0, names: [] };
   e.n++;
   if (e.coats.indexOf(d.coat) < 0) e.coats.push(d.coat);
   if (e.names.indexOf(d.name) < 0) { e.names.push(d.name); if (e.names.length > 6) e.names.shift(); }
+  var newMastery = breedMasteryLvl(d.breed);
   if (fresh) {
     var b = breedOf(d), n = dexCount();
     toast('📖 New breed in your glossary: ' + b.name + '!', 'good'); sfx('new_breed'); gainXP(12);
     if (typeof UI !== 'undefined') UI.dexNew = (UI.dexNew || 0) + 1;
     if (n % 5 === 0) { var bonus = n * 20; S.cash += bonus; toast('🏅 ' + n + ' breeds met  +' + fmtMoney(bonus), 'good'); confetti(S.player.x, S.player.y - 50, 40); }
+  } else if (newMastery > oldMastery) {
+    var b2 = breedOf(d), mBonus = newMastery * 30;
+    S.cash += mBonus; S.stats.earned += mBonus; S.life.earned += mBonus;
+    gainXP(10 * newMastery);
+    toast('⭐ Breed Mastery! ' + b2.name + ' reached Mastery Lv ' + newMastery + ' (+' + (newMastery * 8) + '% boarding pay)  +' + fmtMoney(mBonus), 'good');
+    confetti(d.x, d.y - 40, 32); sfx('perfect');
   }
 }
 function dexCount() { return Object.keys(S.dex).length; }
 
-// ================= daily goals (endless scaling with Daycare Level) =================
-function rollGoals() {
-  var tier = Math.max(0, Math.floor((S.level - 1) / 2)), pool = GOALS.slice(), out = [];
+// ================= endless daily goal waves & lifetime empire milestones =================
+function rollGoals(advanceWave) {
+  if (advanceWave) S.goalWave = (S.goalWave || 1) + 1;
+  else if (!S.goalWave) S.goalWave = 1;
+  var wave = S.goalWave || 1;
+  var tier = Math.max(0, Math.floor((S.level - 1) / 2)) + (wave - 1);
+  var pool = GOALS.slice(), out = [];
   for (var i = 0; i < 3 && pool.length; i++) {
     var g = pool.splice(randi(0, pool.length - 1), 1)[0];
     var baseN = g.n[Math.min(2, tier)];
     var extra = tier > 2 ? Math.round(baseN * (tier - 2) * 0.35) : 0;
-    out.push({ id: g.id, n: baseN + extra, reward: Math.round(g.reward * (0.45 + tier * 0.25)), done: false });
+    var targetN = Math.max(1, baseN + extra);
+    var curStat = S && S.stats ? Math.floor(S.stats[g.stat] || 0) : 0;
+    var rewMul = (0.45 + tier * 0.25) * (S && S.dailyEvent === 'zoomies' ? 1.35 : 1);
+    out.push({ id: g.id, n: targetN, baseVal: curStat, reward: Math.round(g.reward * rewMul), done: false });
   }
   S.goals = out;
 }
 function goalDef(id) { for (var i = 0; i < GOALS.length; i++) if (GOALS[i].id === id) return GOALS[i]; return null; }
 function goalText(g) { var def = goalDef(g.id); return def ? def.text.replace('{n}', g.n) : ''; }
-function goalProgress(g) { var def = goalDef(g.id); return def ? Math.min(g.n, Math.floor(S.stats[def.stat] || 0)) : 0; }
+function goalProgress(g) {
+  var def = goalDef(g.id);
+  if (!def) return 0;
+  var raw = Math.floor(S.stats[def.stat] || 0) - (g.baseVal || 0);
+  return clamp(raw, 0, g.n);
+}
+function milestoneValue(m) {
+  if (!S || !m) return 0;
+  if (m.id === 'served') return S.life ? (S.life.served || 0) : (S.totalServed || 0);
+  if (m.id === 'perfect') return S.life ? (S.life.perfect || 0) : 0;
+  if (m.id === 'earned') return S.life ? Math.floor(S.life.earned || 0) : 0;
+  if (m.id === 'care') return (S.life && S.life.care) ? S.life.care : ((S.stats.pets || 0) + (S.stats.feeds || 0) + (S.stats.baths || 0) + (S.stats.fetches || 0) + (S.stats.scoops || 0));
+  if (m.id === 'mastery') return totalBreedMasteryStars();
+  if (m.id === 'empire') return totalEmpireLevels();
+  return 0;
+}
+function milestoneTier(id) {
+  if (!S) return 0;
+  if (!S.milestones) S.milestones = {};
+  return S.milestones[id] || 0;
+}
+function milestoneTarget(m, tier) {
+  var t = tier == null ? milestoneTier(m.id) : tier;
+  return Math.max(1, Math.round(m.base * Math.pow(m.scale || 1.65, t)));
+}
+function milestoneReward(m, tier) {
+  var t = tier == null ? milestoneTier(m.id) : tier;
+  return Math.round(m.reward * Math.pow(1.38, t));
+}
+function checkMilestones() {
+  if (!S || !S.tutorialDone || typeof MILESTONES === 'undefined') return false;
+  if (!S.milestones) S.milestones = {};
+  var changed = false;
+  for (var i = 0; i < MILESTONES.length; i++) {
+    var m = MILESTONES[i], curVal = milestoneValue(m), tier = S.milestones[m.id] || 0;
+    var target = milestoneTarget(m, tier);
+    if (curVal >= target) {
+      var rew = milestoneReward(m, tier);
+      S.milestones[m.id] = tier + 1;
+      S.cash += rew; S.stats.goalCash += rew; S.life.earned += rew;
+      gainXP(15 + (tier + 1) * 5);
+      toast('🏆 Empire Milestone: ' + m.name + ' Tier ' + (tier + 1) + ' (' + m.text.replace('{n}', target) + ')  +' + fmtMoney(rew), 'good');
+      confetti(S.player.x, S.player.y - 50, 38); sfx('perfect');
+      changed = true;
+    }
+  }
+  return changed;
+}
 function checkGoals() {
   if (!S.tutorialDone) return;
   var completed = false;
@@ -1067,6 +1231,18 @@ function checkGoals() {
     toast('🎯 Goal complete: ' + goalText(g) + '  +' + fmtMoney(g.reward), 'good'); sfx('goal'); gainXP(10);
     confetti(S.player.x, S.player.y - 50, 30);
   });
+  // Endless Goal Waves: completing all 3 goals immediately awards a Wave Jackpot and rolls the next wave!
+  if (S.goals.length && S.goals.every(function (g) { return g.done; })) {
+    var wNum = S.goalWave || 1;
+    var wBonus = Math.round(45 * wNum * (S.dailyEvent === 'zoomies' ? 1.35 : 1));
+    S.cash += wBonus; S.stats.goalCash += wBonus; S.life.earned += wBonus;
+    gainXP(15 * wNum);
+    rollGoals(true);
+    toast('🌊 Goal Wave ' + wNum + ' Complete! +' + fmtMoney(wBonus) + ' Wave Bonus — Wave ' + S.goalWave + ' unlocked!', 'good');
+    confetti(S.player.x, S.player.y - 60, 48);
+    completed = true;
+  }
+  if (checkMilestones()) completed = true;
   if (completed) saveGame();
 }
 
@@ -1424,12 +1600,14 @@ function doChore(ch) {
   if (!S || !ch) return;
   var idx = S.chores ? S.chores.indexOf(ch) : -1;
   if (idx >= 0) S.chores.splice(idx, 1);
-  S.cash += ch.cash; S.stats.earned += ch.cash; S.life.earned += ch.cash;
+  var cashGain = ch.cash * (S.dailyEvent === 'cuddle' ? 2 : 1);
+  S.cash += cashGain; S.stats.earned += cashGain; S.life.earned += cashGain;
+  if (S.life) S.life.care = (S.life.care || 0) + 1;
   gainXP(ch.xp || 3);
   boostRep(ch.rep || 0.05, ch.x, ch.y - 54);
   burst(ch.x, ch.y - 10, 'sparkle', 10);
   coinFly(ch.x, ch.y - 20, 3);
-  float(ch.x, ch.y - 34, '+' + fmtMoney(ch.cash) + ' · ' + ch.icon + ' Done!', '#b9f6ca', 1.15);
+  float(ch.x, ch.y - 34, '+' + fmtMoney(cashGain) + ' · ' + ch.icon + ' Done!', '#b9f6ca', 1.15);
   pEmote('happy', 0.45);
   sfx('coin');
   // Bonus interaction: if it was a surprise bone or fresh water, nearby dogs cheer up!
@@ -1921,10 +2099,11 @@ function doPet(d, isBonus) {
   if (!d || d.petCd > 0) return;
   d.petCd = 0.35;
   d.careCd = (S.clock || 0) + 10;
-  burst(d.x, d.y - 34, 'heart', 5); sfx('pet', d); S.stats.pets++;
+  burst(d.x, d.y - 34, 'heart', 5); sfx('pet', d); S.stats.pets++; if (S.life) S.life.care = (S.life.care || 0) + 1;
   if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.2; d.path = null; }
   if (d.need && d.need.type === 'pet') fulfillNeed(d); else d.happy = Math.min(100, d.happy + 6);
-  if (isBonus) { S.cash += 1; S.stats.earned += 1; S.life.earned += 1; float(d.x, d.y - 52, '+$1 Cuddle!', '#ffe66d'); }
+  var cPay = (isBonus ? 1 : 0) * (S.dailyEvent === 'cuddle' ? 2 : 1) + (!isBonus && S.dailyEvent === 'cuddle' ? 2 : 0);
+  if (cPay > 0) { S.cash += cPay; S.stats.earned += cPay; S.life.earned += cPay; float(d.x, d.y - 52, '+$' + cPay + ' Cuddle!', '#ffe66d'); }
   boostRep(0.02, d.x, d.y - 70);
   if (d.state !== 'kennel' && d.state !== 'leashed') setAnim(d, 'wiggle', 1.0);
   pEmote('pet', 0.4); tut('pet');
@@ -1938,13 +2117,14 @@ function doFeed(d, isBonus) {
   if (hasTrait(d, 'picky')) float(d.x, d.y - 62, 'Hmph. Kibble again?', '#ffe0b2');
   if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) { fulfillNeed(d); if (hasTrait(d, 'picky') && d.need == null) d.happy -= 8; }
   else d.happy = Math.min(100, d.happy + 7);
-  var bonus = upLvl('kibble') * 5 + (stationLvl('foodbin') - 1) * 3;
+  var bonus = upLvl('kibble') * 5 + (stationLvl('foodbin') - 1) * 3 + (S.dailyEvent === 'feast' ? 6 : 0);
   if (bonus > 0) d.happy = Math.min(100, d.happy + bonus);
-  if (isBonus) { S.cash += 2; S.stats.earned += 2; S.life.earned += 2; }
+  var fPay = (isBonus ? 2 : 0) + (S.dailyEvent === 'feast' ? 4 : 0);
+  if (fPay > 0) { S.cash += fPay; S.stats.earned += fPay; S.life.earned += fPay; }
   boostRep(0.025, d.x, d.y - 68);
   d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true));
-  burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); gainXP(2); tut('build_food'); tut('feed'); S.stats.feeds++;
-  float(d.x, d.y - 48, isBonus ? '+$2 Snack!' : 'Nom nom!', '#fff'); pEmote('pet', 0.35);
+  burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); gainXP(S.dailyEvent === 'feast' ? 4 : 2); tut('build_food'); tut('feed'); S.stats.feeds++; if (S.life) S.life.care = (S.life.care || 0) + 1;
+  float(d.x, d.y - 48, fPay ? ('+$' + fPay + ' Feast!') : 'Nom nom!', '#fff'); pEmote('pet', 0.35);
   if (typeof MP !== 'undefined') MP.recordAction('feed', { dogName: d.name });
   saveGame();
 }
@@ -1952,15 +2132,16 @@ function doTreat(d, isBonus) {
   if (!d) return;
   consumeCarryItem();
   d.careCd = (S.clock || 0) + 10;
-  var tBonus = (stationLvl('treatjar') - 1) * 4;
+  var tBonus = (stationLvl('treatjar') - 1) * 4 + (S.dailyEvent === 'feast' ? 6 : 0);
   if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) fulfillNeed(d); else d.happy = Math.min(100, d.happy + 10 + tBonus);
   if (tBonus > 0) d.happy = Math.min(100, d.happy + tBonus);
-  if (isBonus) { S.cash += 2; S.stats.earned += 2; S.life.earned += 2; }
+  var trPay = (isBonus ? 2 : 0) + (S.dailyEvent === 'feast' ? 4 : 0);
+  if (trPay > 0) { S.cash += trPay; S.stats.earned += trPay; S.life.earned += trPay; }
   boostRep(0.03, d.x, d.y - 68);
-  burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); gainXP(2); tut('feed'); S.stats.feeds++;
+  burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); gainXP(S.dailyEvent === 'feast' ? 4 : 2); tut('feed'); S.stats.feeds++; if (S.life) S.life.care = (S.life.care || 0) + 1;
   if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; }
   setAnim(d, 'beg', 1.2);
-  float(d.x, d.y - 48, isBonus ? '+$2 Good trick!' : 'Yum!', '#fff'); pEmote('pet', 0.35);
+  float(d.x, d.y - 48, trPay ? ('+$' + trPay + ' Good trick!') : 'Yum!', '#fff'); pEmote('pet', 0.35);
   if (typeof MP !== 'undefined') MP.recordAction('treat', { dogName: d.name });
   saveGame();
 }
@@ -1969,12 +2150,12 @@ function doPlay(d, isBonus) {
   consumeCarryItem();
   d.careCd = (S.clock || 0) + 10;
   if (d.need && d.need.type === 'play') fulfillNeed(d); else d.happy = Math.min(100, d.happy + 9);
-  var pBonus = (stationLvl('toybox') - 1) * 3;
+  var pBonus = (stationLvl('toybox') - 1) * 3 + (S.dailyEvent === 'sunny' ? 8 : 0);
   if (pBonus > 0) d.happy = Math.min(100, d.happy + pBonus);
   if (isBonus) { S.cash += 2; S.stats.earned += 2; S.life.earned += 2; }
   boostRep(0.03, d.x, d.y - 68);
   d.state = 'play'; d.actT = 3.5; d.path = null; d.playA = Math.random() * 6.28; d.anim = null;
-  sfx('bark', d); sfx('whoosh'); burst(d.x, d.y - 24, 'star', 6); gainXP(2); S.stats.fetches++;
+  sfx('bark', d); sfx('whoosh'); burst(d.x, d.y - 24, 'star', 6); gainXP(2); S.stats.fetches++; if (S.life) S.life.care = (S.life.care || 0) + 1;
   tut('build_toy');
   FX.parts.push({ x: S.player.x, y: S.player.y - 50, vx: (d.x - S.player.x) * 1.2 + rand(-40, 40), vy: -220, life: 1.1, max: 1.1, kind: 'ball', size: 7, grav: 520 });
   float(d.x, d.y - 48, isBonus ? '+$2 Fetch!!' : 'Fetch!!', '#fff'); pEmote('happy', 0.45);
@@ -1983,7 +2164,7 @@ function doPlay(d, isBonus) {
 }
 function doScoop(pp) {
   var idx = S.poops.indexOf(pp); if (idx >= 0) S.poops.splice(idx, 1);
-  sfx('scoop'); burst(pp.x, pp.y, 'dust', 6); pEmote('scoop', 0.35); S.stats.scoops++;
+  sfx('scoop'); burst(pp.x, pp.y, 'dust', 6); pEmote('scoop', 0.35); S.stats.scoops++; if (S.life) S.life.care = (S.life.care || 0) + 1;
   var car = S.player.carry;
   if (car && car.type === 'poop') { car.n = (car.n || 1) + 1; float(pp.x, pp.y - 30, car.n + ' / ' + poopCap(), '#d7ccc8'); }
   else { S.player.carry = { type: 'poop', age: pp.age, n: 1 }; float(pp.x, pp.y - 30, '1 / ' + poopCap(), '#d7ccc8'); }
@@ -2004,8 +2185,9 @@ function doWash(ob) {
   var tLv = (ob && ob.lvl) || 1;
   d.state = 'bath'; d.actT = Math.max(1.6, 4.2 - (tLv - 1) * 0.35); d.objId = ob.id; ob.dogId = d.id; ob.useAt = now; d.anim = null; d.autoRelease = false; d.leashedBy = null;
   d.x = (ob.x + ob.w / 2) * TILE; d.y = (ob.y + 0.75) * TILE;
+  if (S.dailyEvent === 'muddy') { S.cash += 6; S.stats.earned += 6; S.life.earned += 6; float(d.x, d.y - 62, '+$6 Muddy Bath Bonus!', '#80d8ff'); }
   boostRep(0.035, d.x, d.y - 45);
-  sfx('splash'); gainXP(2 + tLv); S.stats.baths++; tut('build_tub');
+  sfx('splash'); gainXP(Math.round((2 + tLv) * (S.dailyEvent === 'muddy' ? 1.5 : 1))); S.stats.baths++; if (S.life) S.life.care = (S.life.care || 0) + 1; tut('build_tub');
   if (typeof MP !== 'undefined') MP.recordAction('wash', { dogName: d.name });
   saveGame();
 }
@@ -2029,7 +2211,7 @@ function doReturn(o) {
   var complaint = h < complaintLine(d);
   if (!complaint && h >= 75) { S.streak++; S.bestStreak = Math.max(S.bestStreak, S.streak); } else S.streak = 0;
   var streakMul = 1 + Math.min(S.streak, 10) * 0.06;
-  var tip = o.angry ? 0 : Math.round(price * tipRate * (1 + charm() * 0.008) * streakMul * (1 + upLvl('loyalty') * 0.15));
+  var tip = o.angry ? 0 : Math.round(price * tipRate * (1 + charm() * 0.008) * streakMul * (1 + upLvl('loyalty') * 0.15) * (S.dailyEvent === 'sunny' ? 1.25 : 1));
   var total = price + tip;
   S.cash += total; S.stats.earned += total; S.stats.tips += tip; S.stats.served++; S.totalServed++; S.life.earned += total; S.life.served++;
   if (d.overnight) S.life.overnights = (S.life.overnights || 0) + 1;
@@ -2890,9 +3072,9 @@ function endDay() {
   if (leftover >= 3) { S.rep = Math.max(0, S.rep - 0.1 * Math.min(leftover, 6)); }
   UI.summary = JSON.parse(JSON.stringify(S.stats)); UI.summary.day = S.day; UI.summary.repEnd = S.rep;
   UI.summary.goals = S.goals.map(function (g) { return { text: goalText(g), done: g.done, reward: g.reward }; });
-  S.day++; S.dayTime = 0; S.closing = false; S._lastPhase = 'morning'; S.stats = newStats(S.rep); S.arrivalTimer = 5; S.needT = 10; markDirty();
+  S.day++; S.dayTime = 0; S.closing = false; S._lastPhase = 'morning'; S.stats = newStats(S.rep); S.arrivalTimer = 5; S.needT = 10; S.goalWave = 1; markDirty();
   S.dogs.forEach(function (d) { d.called = false; });
-  if (S.tutorialDone) rollGoals();
+  if (S.tutorialDone) { rollDailyEvent(); rollGoals(false); }
   saveGame();
   if (typeof MP !== 'undefined') MP.recordAction('dayend', { day: UI.summary.day, earned: UI.summary.earned, served: UI.summary.served });
   showSummary();
@@ -2984,15 +3166,20 @@ function sanitizeAndMigrateState(s) {
     }
   }
 
-  var defLife = { earned: 0, served: 0, perfect: 0, complaints: 0, overnights: 0, bestPerfectDay: 0 };
+  var defLife = { earned: 0, served: 0, perfect: 0, complaints: 0, overnights: 0, bestPerfectDay: 0, care: 0 };
   if (!s.life || typeof s.life !== 'object') s.life = defLife;
   else {
     for (var lk in defLife) s.life[lk] = _isnum(s.life[lk]) ? s.life[lk] : defLife[lk];
   }
 
-  // Tutorial, upgrades, staff, specials
+  // Tutorial, upgrades, staff, staffLvl, franchiseTier, milestones, dailyEvent, specials
   if (!s.tutorial || typeof s.tutorial !== 'object' || Array.isArray(s.tutorial)) s.tutorial = {};
   s.tutorialDone = !!s.tutorialDone || TUTORIAL.every(function (t) { return !!s.tutorial[t.id]; });
+  s.goalWave = (_isnum(s.goalWave) && s.goalWave >= 1) ? Math.floor(s.goalWave) : 1;
+  s.franchiseTier = (_isnum(s.franchiseTier) && s.franchiseTier >= 0) ? Math.floor(s.franchiseTier) : 0;
+  if (!s.milestones || typeof s.milestones !== 'object' || Array.isArray(s.milestones)) s.milestones = {};
+  if (!s.staffLvl || typeof s.staffLvl !== 'object' || Array.isArray(s.staffLvl)) s.staffLvl = {};
+  if (typeof s.dailyEvent !== 'string') s.dailyEvent = null;
 
   if (!s.upgrades || typeof s.upgrades !== 'object' || Array.isArray(s.upgrades)) s.upgrades = {};
   if (!s.staff || typeof s.staff !== 'object' || Array.isArray(s.staff)) s.staff = {};
@@ -3498,15 +3685,16 @@ function clearWaitingOwners(s, simulateOfflineShift) {
     s.owners = [];
     s.arrivalTimer = Math.max(s.arrivalTimer || 0, 5);
 
-    // If workers are hired and the app was closed for a while, workers run the shop offline (at much lower net profit)
+    // If workers are hired and the app was closed for a while, workers run the shop offline (at much lower net profit, boosted by staff promotions!)
     if (simulateOfflineShift && hasWorkers && _isnum(s.savedAt)) {
       var elapsedSec = Math.floor((Date.now() - s.savedAt) / 1000);
       if (elapsedSec >= 45) {
         var cappedSec = Math.min(elapsedSec, 6 * 3600);
-        var teamFactor = Math.min(1.2, 0.25 + wCount * 0.14);
+        var wPower = totalStaffPower();
+        var teamFactor = Math.min(1.6, 0.25 + wPower * 0.14);
         var capNow = Math.max(1, starBaseCap(s.rep || 3, s.day || 1));
         var dogsHandled = Math.max(1, Math.floor((cappedSec / 180) * teamFactor * Math.min(capNow, 6)));
-        var netPerDog = Math.max(2, Math.round((2.5 + (s.level || 1) * 0.35) * Math.min(1.1, 0.5 + wCount * 0.12)));
+        var netPerDog = Math.max(2, Math.round((2.5 + (s.level || 1) * 0.35 + (s.franchiseTier || 0) * 1.2) * Math.min(1.5, 0.5 + wPower * 0.12)));
         var totalNet = dogsHandled * netPerDog;
         s.cash = (s.cash || 0) + totalNet;
         s.totalServed = (s.totalServed || 0) + dogsHandled;

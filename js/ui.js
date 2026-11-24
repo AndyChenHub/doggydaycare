@@ -156,6 +156,14 @@ var MODAL_ACTS = {
     var o = UI.actionObj; closeModal();
     if (o) promptUpgradeObject(o);
   },
+  trainstaff: function () {
+    var sid = UI.actionStaff; closeModal();
+    if (sid) { trainStaff(sid); renderBuildPanel(); }
+  },
+  firestaff: function () {
+    var sid = UI.actionStaff; closeModal();
+    if (sid && staffHired(sid)) { toggleStaff(sid); renderBuildPanel(); }
+  },
   sellobj: function () {
     var o = UI.actionObj; closeModal();
     if (!o) return;
@@ -245,7 +253,8 @@ function renderDex() {
   var seen = BREEDS.filter(function (b) { return S.dex[b.id]; }).sort(function (a, b) { return (S.dex[a.id].first - S.dex[b.id].first) || (a.index - b.index); });
   var grid = seen.map(function (b, i) {
     var e = S.dex[b.id] || {}, c0 = (Array.isArray(e.coats) && e.coats.length) ? e.coats[0] : 0;
-    return '<div class="dex-cell' + (UI.dexSel === b.id ? ' on' : '') + '" data-breed="' + b.id + '"><span class="num">#' + (i < 9 ? '0' : '') + (i + 1) + '</span>' + (b.cross ? '<span class="x">🧬</span>' : '') +
+    var mLv = typeof breedMasteryLvl === 'function' ? breedMasteryLvl(b.id) : 0;
+    return '<div class="dex-cell' + (UI.dexSel === b.id ? ' on' : '') + '" data-breed="' + b.id + '"><span class="num">#' + (i < 9 ? '0' : '') + (i + 1) + (mLv > 0 ? ' · ★' + mLv : '') + '</span>' + (b.cross ? '<span class="x">🧬</span>' : '') +
       '<img src="' + portraitURL(b.id, c0, 80, { bg: 'badge' }) + '"><b>' + esc(b.name) + '</b></div>';
   }).join('');
   var det;
@@ -254,10 +263,12 @@ function renderDex() {
     var b = BREED_BY_ID[UI.dexSel] || seen[0], e = S.dex[b.id] || { n: 1, first: 1, coats: [0], best: 0, names: [] };
     var coats = (Array.isArray(e.coats) && e.coats.length) ? e.coats : [0], names = Array.isArray(e.names) ? e.names : [];
     var cross = b.cross ? b.cross.map(function (p) { return BREED_BY_ID[p] ? BREED_BY_ID[p].name : p; }).join(' × ') : '';
-    det = '<img class="big" src="' + portraitURL(b.id, coats[0], 160, { bg: 'card' }) + '"><h3>' + esc(b.name) + '</h3><div class="grp">' + esc(b.group) + (cross ? ' · ' + esc(cross) : '') + '</div>' +
+    var bmLv = typeof breedMasteryLvl === 'function' ? breedMasteryLvl(b.id) : 0;
+    var bmNext = typeof breedMasteryNextAt === 'function' ? breedMasteryNextAt(bmLv) : 2;
+    det = '<img class="big" src="' + portraitURL(b.id, coats[0], 160, { bg: 'card' }) + '"><h3>' + esc(b.name) + '</h3><div class="grp">' + esc(b.group) + (cross ? ' · ' + esc(cross) : '') + ' · <b>★ Mastery Lv ' + bmLv + ' (+' + (bmLv * 8) + '% Pay)</b></div>' +
       '<p>' + esc(b.blurb) + '</p>' +
       (coats.length > 1 ? '<div class="coats">' + coats.map(function (ci) { var co = (b.coats && (b.coats[ci] || b.coats[0])) || { name: '' }; return '<div><img src="' + portraitURL(b.id, ci, 56, { bg: 'badge' }) + '">' + esc(co.name) + '</div>'; }).join('') + '</div>' : '<p class="small" style="text-align:center">' + esc(((b.coats && (b.coats[coats[0]] || b.coats[0])) || { name: '' }).name) + '</p>') +
-      '<div class="facts"><div><span>Height</span><b>' + b.cm + ' cm</b></div><div><span>Guests met</span><b>' + (e.n || 1) + '</b></div><div><span>First met</span><b>Day ' + (e.first || 1) + '</b></div><div><span>Best pickup</span><b>' + (e.best ? e.best + '%' : '—') + '</b></div></div>' +
+      '<div class="facts"><div><span>Height</span><b>' + b.cm + ' cm</b></div><div><span>Guests met</span><b>' + (e.n || 1) + ' / ' + bmNext + ' next ★</b></div><div><span>First met</span><b>Day ' + (e.first || 1) + '</b></div><div><span>Best pickup</span><b>' + (e.best ? e.best + '%' : '—') + '</b></div></div>' +
       '<div class="tagrow">' + (b.likely || []).filter(function (t) { return !!TRAITS[t]; }).map(function (t) { return '<span>' + TRAITS[t].icon + ' often ' + TRAITS[t].label + '</span>'; }).join('') + '</div>' +
       '<p class="fact">💡 ' + esc(b.fact) + '</p>' + (names.length ? '<p class="small">Guests so far: ' + names.map(esc).join(', ') + '</p>' : '');
   }
@@ -305,7 +316,15 @@ function showBanner(title, sub) {
   el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
 }
 var WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-function dayBanner() { if ($('levelup').classList.contains('show')) { setTimeout(dayBanner, 1500); return; } showBanner('Day ' + S.day, WEEKDAYS[(S.day - 1) % 7] + ' · doors open at 8'); }
+function dayBanner() {
+  if ($('levelup').classList.contains('show')) { setTimeout(dayBanner, 1500); return; }
+  var ev = typeof currentDailyEvent === 'function' ? currentDailyEvent() : null;
+  if (ev) {
+    showBanner('Day ' + S.day + ' · ' + ev.icon + ' ' + ev.name, ev.desc);
+  } else {
+    showBanner('Day ' + S.day, WEEKDAYS[(S.day - 1) % 7] + ' · doors open at 8');
+  }
+}
 
 var toastQ = [];
 function toast(text, kind) {
@@ -355,10 +374,23 @@ function renderBuildPanel() {
       h += '<div class="item' + (owned ? ' owned' : '') + (locked || far ? ' locked' : '') + (S.cash < p.cost && !owned && !locked ? ' poor' : '') + '" data-plot="' + p.id + '" style="grid-column:1/-1"><div class="ic">🗺️</div><div class="tx"><b>' + p.name + '</b><small>' + p.w + '×' + p.h + ' tiles · ⏱ ' + fmtDur(p.time) + unlTxt + (far && !locked ? ' · unlock neighbour first' : '') + '</small></div><div class="pr">' +
         (owned ? '✅' : pend ? '🚜 ' + fmtDur((pend.end - Date.now()) / 1000) : locked ? '🔒 Lv ' + p.lvl : fmtMoney(p.cost)) + '</div></div>';
     });
+    var fTierL = typeof franchiseTier === 'function' ? franchiseTier() : 0;
+    var fCostL = typeof franchiseCost === 'function' ? franchiseCost() : 750;
+    var fReqL = typeof franchiseReqLvl === 'function' ? franchiseReqLvl() : 2;
+    var fLockedL = S.level < fReqL;
+    h += '<div class="bp-sub">🏆 Endless Franchise Certification — expand capacity &amp; pay forever!</div>';
+    h += '<div class="item' + (fLockedL ? ' locked' : '') + (S.cash < fCostL && !fLockedL ? ' poor' : '') + '" data-franchise="1" style="grid-column:1/-1"><div class="ic">🏆</div><div class="tx"><b>' + esc(franchiseName(fTierL + 1)) + ' <span style="color:#8e6bd6">Tier ' + (fTierL + 1) + '</span></b><small>Permanent +2 Max Dog Capacity, +12% All Boarding Pay &amp; +10 Yard Charm (Current: ' + esc(franchiseName(fTierL)) + ')</small></div><div class="pr">' +
+      (fLockedL ? '🔒 Lv ' + fReqL : '⬆️ ' + fmtMoney(fCostL)) + '</div></div>';
   } else if (UI.buildTab === 'biz') {
     h += '<div class="bp-sub">⭐ Boost Star Rating (' + S.rep.toFixed(1) + '★ → Max ' + capacity() + ' dogs)</div>';
     h += '<div class="item' + (S.cash < 35 ? ' poor' : '') + '" data-repboost="social"><div class="ic">🍪</div><div class="tx"><b>Pup Cup Social</b><small>Instant +0.35★ Star Rating &amp; happy pups</small></div><div class="pr">$35</div></div>';
     h += '<div class="item' + (S.cash < 95 ? ' poor' : '') + '" data-repboost="ad"><div class="ic">📸</div><div class="tx"><b>Pet Magazine Ad</b><small>Instant +0.80★ Star Rating &amp; more dogs</small></div><div class="pr">$95</div></div>';
+    var fTier = typeof franchiseTier === 'function' ? franchiseTier() : 0;
+    var fCost = typeof franchiseCost === 'function' ? franchiseCost() : 750;
+    var fReq = typeof franchiseReqLvl === 'function' ? franchiseReqLvl() : 2;
+    var fLocked = S.level < fReq;
+    h += '<div class="item' + (fLocked ? ' locked' : '') + (S.cash < fCost && !fLocked ? ' poor' : '') + '" data-franchise="1" style="grid-column:1/-1"><div class="ic">🏆</div><div class="tx"><b>' + esc(franchiseName(fTier + 1)) + ' <span style="color:#8e6bd6">Tier ' + (fTier + 1) + '</span></b><small>Endless Empire Rank: +2 Max Dog Capacity, +12% Boarding Pay &amp; +10 Charm per Tier</small></div><div class="pr">' +
+      (fLocked ? '🔒 Lv ' + fReq : '⬆️ ' + fmtMoney(fCost)) + '</div></div>';
     h += '<div class="bp-sub">Endless Research Perks — upgradeable forever!</div>';
     UPGRADES.forEach(function (u) {
       var curLv = upLvl(u.id), reqLv = upgReqLvl(u), cost = upgCost(u);
@@ -366,11 +398,11 @@ function renderBuildPanel() {
       h += '<div class="item' + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-upg="' + u.id + '"><div class="ic">' + u.icon + '</div><div class="tx"><b>' + u.name + (curLv ? ' <span style="color:#8e6bd6">Lv' + curLv + '</span>' : '') + '</b><small>' + u.desc + '</small></div><div class="pr">' +
         (locked ? '🔒 Lv' + reqLv : '⬆️ ' + fmtMoney(cost)) + '</div></div>';
     });
-    h += '<div class="bp-sub">Staff — paid per day at closing time</div>';
+    h += '<div class="bp-sub">Staff — hire &amp; train infinitely (Lv 1 → Lv ∞) for faster speed &amp; bonus pay!</div>';
     STAFF.forEach(function (s) {
-      var hired = staffHired(s.id), locked = S.level < s.lvl;
-      h += '<div class="item' + (hired ? ' owned' : '') + (locked ? ' locked' : '') + '" data-staff="' + s.id + '" style="grid-column:1/-1"><div class="ic">' + s.icon + '</div><div class="tx"><b>' + s.name + '</b><small>' + s.desc + '</small></div><div class="pr">' +
-        (hired ? '✅ Hired' : locked ? '🔒 Lv ' + s.lvl : fmtMoney(s.wage) + '/d') + '</div></div>';
+      var hired = staffHired(s.id), locked = S.level < s.lvl, sLv = hired ? staffLvl(s.id) : 0, tCost = hired ? staffTrainCost(s.id) : 0;
+      h += '<div class="item' + (locked ? ' locked' : '') + (hired && S.cash < tCost ? ' poor' : '') + '" data-staff="' + s.id + '" style="grid-column:1/-1"><div class="ic">' + s.icon + '</div><div class="tx"><b>' + s.name + (hired ? ' <span style="color:#8e6bd6">Lv ' + sLv + '</span>' : '') + '</b><small>' + s.desc + (hired ? ' · Tap to Train Lv ' + (sLv + 1) + ' (+12% speed, +care bonus &amp; +15% offline pay)' : '') + '</small></div><div class="pr">' +
+        (hired ? '⬆️ ' + fmtMoney(tCost) : locked ? '🔒 Lv ' + s.lvl : fmtMoney(s.wage) + '/d') + '</div></div>';
     });
   } else {
     CATALOG.filter(function (c) { return c.cat === UI.buildTab; }).forEach(function (c) {
@@ -396,10 +428,11 @@ function bpShowDesc(txt) {
   var bp = $('buildpanel');
   bp.addEventListener('pointerdown', function (ev) {
     if (!ev.target.closest) return;
-    var t = ev.target.closest('#bpClose,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost]'); if (!t) return;
+    var t = ev.target.closest('#bpClose,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise]'); if (!t) return;
     initAudio();
     if (t.id === 'bpClose') { setMode('play'); sfx('ui_close'); return; }
     if (t.hasAttribute('data-repboost')) { runRepCampaign(t.getAttribute('data-repboost')); renderBuildPanel(); return; }
+    if (t.hasAttribute('data-franchise')) { buyFranchiseTier(); renderBuildPanel(); return; }
     if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
     if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
     if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
@@ -411,8 +444,18 @@ function bpShowDesc(txt) {
     }
     if (t.hasAttribute('data-staff')) {
       var sid = t.getAttribute('data-staff'), sd = STAFF_BY_ID[sid];
-      if (staffHired(sid)) confirmBox('Let the <b>' + sd.name + '</b> go?', function () { toggleStaff(sid); renderBuildPanel(); });
-      else if (S.level < sd.lvl) { toast('🔒 Reach level ' + sd.lvl + ' to hire a ' + sd.name, 'bad'); sfx('error'); }
+      if (staffHired(sid)) {
+        var curSLv = staffLvl(sid), trCost = staffTrainCost(sid);
+        UI.actionStaff = sid;
+        openModal('<h2>' + sd.icon + ' ' + esc(sd.name) + ' <small>Lv ' + curSLv + '</small></h2>' +
+          '<p style="text-align:center">' + esc(sd.desc) + '<br><small>Current bonuses: +' + ((curSLv - 1) * 12) + '% walk speed · +' + ((curSLv - 1) * 4) + ' care happiness · +' + ((curSLv - 1) * 15) + '% offline shift pay</small></p>' +
+          '<div class="row col">' +
+          '<button data-act="trainstaff" class="primary">⬆️ Train to Lv ' + (curSLv + 1) + ' (' + fmtMoney(trCost) + ')</button>' +
+          '<button data-act="firestaff" class="flat">Let ' + esc(sd.name) + ' Go (' + fmtMoney(sd.wage) + '/d)</button>' +
+          '<button data-act="back" class="flat">Cancel</button>' +
+          '</div>', 'confirm', 'narrow');
+        bindModalButtons();
+      } else if (S.level < sd.lvl) { toast('🔒 Reach level ' + sd.lvl + ' to hire a ' + sd.name, 'bad'); sfx('error'); }
       else confirmBox('Hire a <b>' + sd.name + '</b> for ' + fmtMoney(sd.wage) + ' a day?<br>' + sd.desc, function () { toggleStaff(sid); renderBuildPanel(); });
       return;
     }
@@ -428,7 +471,8 @@ function bpShowDesc(txt) {
 })();
 function buildSig() {
   var pend = UI.buildTab === 'land' && S.plots.some(function (p) { return Date.now() < p.end + 1000; });
-  return CATALOG.map(function (c) { return S.cash >= c.cost ? 1 : 0; }).join('') + PLOTS.map(function (p) { return S.cash >= p.cost ? 1 : 0; }).join('') + UPGRADES.map(function (u) { return upLvl(u.id) + ':' + (S.cash >= upgCost(u) ? 1 : 0); }).join(',') + '|' + S.level + '|' + S.plots.length + '|' + (pend ? Math.floor(Date.now() / 1000) : '');
+  var stSig = STAFF.map(function (s) { return staffLvl(s.id) + ':' + (S.cash >= staffTrainCost(s.id) ? 1 : 0); }).join(',');
+  return CATALOG.map(function (c) { return S.cash >= c.cost ? 1 : 0; }).join('') + PLOTS.map(function (p) { return S.cash >= p.cost ? 1 : 0; }).join('') + UPGRADES.map(function (u) { return upLvl(u.id) + ':' + (S.cash >= upgCost(u) ? 1 : 0); }).join(',') + '|' + stSig + '|' + franchiseTier() + ':' + (S.cash >= franchiseCost() ? 1 : 0) + '|' + S.level + '|' + S.plots.length + '|' + (pend ? Math.floor(Date.now() / 1000) : '');
 }
 function tryBuyPlot(p) {
   if (plotOwned(p) || plotPending(p)) return;
@@ -671,7 +715,8 @@ function updateHUD(dt) {
   setStyle('xpbar', 'width', Math.round(S.xp / lvlNeed(S.level) * 50) * 2 + '%');
   var D = dayLen(), f = S.dayTime / D, mins = 8 * 60 + Math.floor(f * 600 / 10) * 10, hh = Math.floor(mins / 60), mm = mins % 60;
   var ph = typeof dayPhase === 'function' ? dayPhase() : { icon: '🌅', short: 'Open' };
-  setText('dayname', 'Day ' + S.day + ' · ' + ph.icon + ' ' + ph.short);
+  var dEv = typeof currentDailyEvent === 'function' ? currentDailyEvent() : null;
+  setText('dayname', 'Day ' + S.day + ' · ' + ph.icon + ' ' + ph.short + (dEv ? ' · ' + dEv.icon : ''));
   setText('clock', ((hh - 1) % 12 + 1) + ':' + (mm < 10 ? '0' : '') + mm + (hh < 12 ? ' AM' : ' PM'));
   var fq = Math.round(f * 60) / 60, ang = Math.PI * (1 - fq);
   setStyle('daybar', 'width', (fq * 100).toFixed(1) + '%');
@@ -721,9 +766,22 @@ function renderTasks() {
   } else {
     var dn = S.goals.filter(function (g) { return g.done; }).length;
     var nextGoal = S.goals.filter(function (g) { return !g.done; })[0];
-    var gsub = UI.tasksOpen ? (dn + '/' + S.goals.length) : (nextGoal ? goalText(nextGoal) : 'All goals done!');
+    var wv = S.goalWave || 1;
+    var gsub = UI.tasksOpen ? ('Wave ' + wv + ' · ' + dn + '/' + S.goals.length) : (nextGoal ? ('W' + wv + ': ' + goalText(nextGoal)) : ('Wave ' + wv + ' done!'));
     h = '<div class="ph" id="tasksHead"><span>🎯</span><span class="ph-sub">' + esc(gsub) + '</span><span class="chev">' + (UI.tasksOpen ? '▲' : '▼') + '</span></div>';
-    if (UI.tasksOpen) h += S.goals.map(function (g) { var p = goalProgress(g); return '<div class="goal' + (g.done ? ' done' : '') + '"><div class="gt"><span>' + (g.done ? '✅ ' : '') + esc(goalText(g)) + '</span><b>' + (g.done ? 'Done!' : '+' + fmtMoney(g.reward)) + '</b></div><div class="gb"><div style="width:' + (p / g.n * 100) + '%"></div></div></div>'; }).join('');
+    if (UI.tasksOpen) {
+      var evNow = typeof currentDailyEvent === 'function' ? currentDailyEvent() : null;
+      if (evNow) h += '<div class="goal done"><div class="gt"><span>' + evNow.icon + ' <b>' + esc(evNow.name) + '</b></span></div><div class="gt"><small>' + esc(evNow.desc) + '</small></div></div>';
+      h += S.goals.map(function (g) { var p = goalProgress(g); return '<div class="goal' + (g.done ? ' done' : '') + '"><div class="gt"><span>' + (g.done ? '✅ ' : '') + esc(goalText(g)) + '</span><b>' + (g.done ? 'Done!' : '+' + fmtMoney(g.reward)) + '</b></div><div class="gb"><div style="width:' + (p / g.n * 100) + '%"></div></div></div>'; }).join('');
+      if (typeof MILESTONES !== 'undefined') {
+        h += '<div class="goal" style="border-top:1px solid rgba(120,80,40,0.2);padding-top:4px;margin-top:4px"><div class="gt"><b>🏆 Endless Empire Milestones</b></div></div>';
+        h += MILESTONES.slice(0, 4).map(function (m) {
+          var tier = milestoneTier(m.id), cur = milestoneValue(m), tgt = milestoneTarget(m, tier), rew = milestoneReward(m, tier);
+          var pct = clamp(Math.round(cur / tgt * 100), 0, 100);
+          return '<div class="goal"><div class="gt"><span>' + m.icon + ' ' + esc(m.name) + ' T' + (tier + 1) + ': ' + esc(m.text.replace('{n}', tgt)) + ' (' + cur + '/' + tgt + ')</span><b>+' + fmtMoney(rew) + '</b></div><div class="gb"><div style="width:' + pct + '%"></div></div></div>';
+        }).join('');
+      }
+    }
   }
   if (UI.tasksHTML !== h) {
     UI.tasksHTML = h; $('tasks').innerHTML = h;
