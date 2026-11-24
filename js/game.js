@@ -626,15 +626,30 @@ function specialsFound() { return S.specials ? Object.keys(S.specials).length : 
 var NPCS = [];
 function npcById(id) { for (var i = 0; i < NPCS.length; i++) if (NPCS[i].id === id) return NPCS[i]; return null; }
 function staffHired(id) { return !!(S && S.staff && S.staff[id]); }
+function hiredStaffCount() {
+  if (!S || !S.staff) return 0;
+  var n = 0;
+  STAFF.forEach(function (s) { if (S.staff[s.id]) n++; });
+  return n;
+}
 function staffWages() { var w = 0; STAFF.forEach(function (s) { if (staffHired(s.id)) w += s.wage; }); return w; }
 function makeNpc(id) {
-  var rec = id === 'receptionist', x = rec ? RECEPTION_SPOT[0] : YARD_ENTRY[0] + 2.5, y = rec ? RECEPTION_SPOT[1] : YARD_ENTRY[1] + 0.5;
-  return { id: id, x: x * TILE, y: y * TILE, dir: 'down', face: 1, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, carry: null,
-    look: ((S.player.look || 0) + (rec ? 1 : 2)) % 4, path: null, idleT: 1.5, task: null, say: '', sayT: 0, stepT: 0 };
+  var def = STAFF_BY_ID[id] || {};
+  var sp = def.spot || (id === 'receptionist' ? RECEPTION_SPOT : [YARD_ENTRY[0] + 2.5, YARD_ENTRY[1] + 0.5]);
+  var lk = typeof def.look === 'number' ? ((def.look + (S && S.player ? S.player.look || 0 : 0) + 1) % 4) : 1;
+  return { id: id, x: sp[0] * TILE, y: sp[1] * TILE, dir: 'down', face: 1, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, carry: null,
+    look: lk, path: null, route: null, idleT: rand(0.4, 1.2), task: null, say: '', sayT: 0, stepT: 0, patrolIdx: 0 };
 }
 function syncStaff() {
   if (!S.staff) S.staff = {};
-  NPCS = NPCS.filter(function (n) { return staffHired(n.id); });
+  NPCS = NPCS.filter(function (n) {
+    var keep = staffHired(n.id);
+    if (!keep && n.carry && n.carry.type === 'dog') {
+      var ld = dogById(n.carry.id);
+      if (ld && ld.state === 'npcLeashed') { ld.state = 'idle'; ld.npcHolder = null; }
+    }
+    return keep;
+  });
   STAFF.forEach(function (s) { if (staffHired(s.id) && !npcById(s.id)) NPCS.push(makeNpc(s.id)); });
 }
 function toggleStaff(id) {
@@ -648,29 +663,86 @@ function updateNPCs(dt) {
   syncStaff();
   NPCS.forEach(function (n) {
     n.sayT -= dt; if (n.emote) { n.emoteT += dt; if (n.emoteT > 1.4) n.emote = null; }
-    if (n.id === 'receptionist') updateReceptionist(n, dt); else updateHelper(n, dt);
+    if (n.id === 'receptionist') updateReceptionist(n, dt);
+    else if (n.id === 'runner') updateRunner(n, dt);
+    else updateYardWorker(n, dt);
   });
 }
+var SHOP_PATROL = [[6.6, 24.3], [11.2, 22.0], [14.5, 23.8], [8.8, 24.3], [5.4, 24.3]];
 function updateReceptionist(n, dt) {
-  n.moving = false; n.idleT -= dt;
-  // dogs whose owner is back get brought to the desk
-  S.owners.forEach(function (o) {
-    if (o.state !== 'waitPickup') return;
-    var d = dogById(o.dogId); if (!d) return;
-    if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'drink' || d.state === 'romp')) return;
-    // leave the dog to you for a while if it still needs something, or if you are right next to it
-    if (d.need && !d.need.self && o.patienceMax - o.patience < 25) return;
-    if (dist(S.player.x, S.player.y, d.x, d.y) < 150 && o.patienceMax - o.patience < 25) return;
-    startToCounter(d);
-  });
+  n.idleT -= dt;
+  // If Pickup Runner is not hired, Receptionist only brings pickup dogs if she isn't busy and the owner has waited a long time (>45s)
+  if (!staffHired('runner')) {
+    S.owners.forEach(function (o) {
+      if (o.state !== 'waitPickup') return;
+      var d = dogById(o.dogId); if (!d) return;
+      if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'drink' || d.state === 'romp')) return;
+      if (o.patienceMax - o.patience < 45) return;
+      startToCounter(d);
+    });
+  }
   var busy = S.owners.some(function (o) { return o.state === 'toHandover' || o.state === 'handover'; });
-  if (busy) { n.idleT = 2; return; }
+  if (busy) {
+    // Walk to the handover desk position behind the counter
+    var hSpot = [8.9 * TILE, 24.3 * TILE];
+    if (dist(n.x, n.y, hSpot[0], hSpot[1]) > 6) {
+      moveTo(n, hSpot[0], hSpot[1], 145, dt);
+      if (n.moving) n.walkT += dt;
+    } else {
+      n.moving = false; n.dir = 'down';
+    }
+    n.idleT = 1.2;
+    return;
+  }
+  // Check if there is a shop counter chore to polish
+  var shopChore = (S.chores || []).filter(function (c) { return c.kind === 'desk'; })[0];
+  if (shopChore) {
+    if (dist(n.x, n.y, shopChore.x, shopChore.y) > 20) {
+      moveTo(n, shopChore.x, shopChore.y, 145, dt);
+      if (n.moving) n.walkT += dt;
+      return;
+    } else {
+      n.moving = false;
+      doChore(shopChore);
+      n.say = 'Counter sparkling!'; n.sayT = 2; n.idleT = 1.5;
+      return;
+    }
+  }
   var ready = S.owners.filter(function (o) { return o.state === 'waitPickup' && (dogById(o.dogId) || {}).state === 'atDesk'; });
-  if (ready.length && n.idleT <= 0) { summonOwner(ready[0], true); n.say = pick(['Here we go!', 'Someone missed you!']); n.sayT = 2; n.idleT = 2.5; return; }
-  if (playerOnMat()) { n.idleT = Math.max(n.idleT, 1.5); return; } // you are at the desk: it's your customer
-  if (n.idleT > 0) return;
   var wc = S.owners.filter(function (o) { return o.state === 'waitCheckin'; }).sort(function (a, b) { return a.patience / a.patienceMax - b.patience / b.patienceMax; });
-  if (wc.length) { summonOwner(wc[0], true); n.say = pick(['Welcome!', 'Hello there!', 'Come on through!']); n.sayT = 2; n.idleT = 2.5; }
+  if ((ready.length || wc.length) && !playerOnMat()) {
+    var deskX = 8.9 * TILE, deskY = 24.3 * TILE;
+    if (dist(n.x, n.y, deskX, deskY) > 10) {
+      moveTo(n, deskX, deskY, 155, dt);
+      if (n.moving) n.walkT += dt;
+      return;
+    }
+    n.moving = false; n.dir = 'down';
+    if (n.idleT <= 0) {
+      if (ready.length) {
+        summonOwner(ready[0], true); n.say = pick(['Here we go!', 'Someone missed you!']); n.sayT = 2; n.idleT = 2.0; return;
+      }
+      if (wc.length) {
+        summonOwner(wc[0], true); n.say = pick(['Welcome!', 'Hello there!', 'Come on through!']); n.sayT = 2; n.idleT = 2.0; return;
+      }
+    }
+    return;
+  }
+  // When no customer is actively being served, patrol around the reception shop floor!
+  if (n.route && n.route.length) {
+    var wp = n.route[0];
+    if (moveTo(n, wp[0], wp[1], 115, dt)) n.route.shift();
+    if (n.moving) n.walkT += dt;
+    return;
+  }
+  n.moving = false;
+  if (n.idleT <= 0) {
+    n.patrolIdx = ((n.patrolIdx || 0) + 1) % SHOP_PATROL.length;
+    var pt = SHOP_PATROL[n.patrolIdx];
+    n.route = [[pt[0] * TILE + rand(-10, 10), pt[1] * TILE + rand(-8, 8)]];
+    n.idleT = rand(1.4, 2.8);
+    if (Math.random() < 0.25) { n.say = pick(['Checking bookings…', 'Stocking leashes!', 'Ready for guests!']); n.sayT = 1.8; }
+  }
 }
 function startToCounter(d) {
   var b = bfs(tileOf(d.x), tileOf(d.y)), path = pathTo(b, YARD_ENTRY[0], YARD_ENTRY[1]);
@@ -693,31 +765,181 @@ function followPath(d, sp, dt) { // walk a tile path (from pathTo); true when do
   if (moveTo(d, (nx[0] + 0.5) * TILE + (d.ox || 0), (nx[1] + 0.5) * TILE + (d.oy || 0), sp, dt)) d.path.shift();
   return !d.path.length;
 }
-// the yard helper: cuddles, feeds and plays with dogs that ask, and scoops poop
-function updateHelper(n, dt) {
+// 🦮 Pickup Dog Runner: searches the yard for dogs whose owner is waiting at the counter, walks to them, and sends/escorts them to the desk!
+function updateRunner(n, dt) {
   n.idleT -= dt; n.moving = false;
-  var cap = poopCap();
   if (!n.task && n.idleT <= 0) {
-    var best = null, bd = 1e9;
-    S.dogs.forEach(function (d) {
-      if (!d.need || d.need.self || !d.checkedIn || d.called || d.helperSkip > S.clock) return;
-      if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap')) return;
-      if (d.need.type === 'bath') return; // needs the leash and the tub: that one is yours
-      var dd = dist(n.x, n.y, d.x, d.y) - d.need.t * 30; if (dd < bd) { bd = dd; best = { kind: 'need', dogId: d.id, type: d.need.type }; }
-    });
-    if (!best) {
-      if (n.carry && n.carry.type === 'poop' && ((n.carry.n || 1) >= cap || !S.poops.length)) best = { kind: 'bin' };
-      else if (S.poops.some(function (q) { return !(q.helperSkip > S.clock); }) && (!n.carry || n.carry.type === 'poop')) { var pp = S.poops.filter(function (q) { return !(q.helperSkip > S.clock); }).sort(function (a, b) { return dist(n.x, n.y, a.x, a.y) - dist(n.x, n.y, b.x, b.y); })[0]; best = { kind: 'poop', id: pp.id }; }
-      else if (n.carry) best = { kind: 'bin' };
+    var pickupDog = null;
+    for (var i = 0; i < S.owners.length; i++) {
+      var o = S.owners[i];
+      if (o.state !== 'waitPickup') continue;
+      var d = dogById(o.dogId);
+      if (!d || !(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'drink' || d.state === 'romp' || d.state === 'kennel')) continue;
+      if (S.player.carry && S.player.carry.type === 'dog' && S.player.carry.id === d.id) continue;
+      pickupDog = d; break;
     }
-    if (best) { n.task = best; n.path = null; n.tries = 0; }
-    else { n.idleT = 1.2; if (Math.random() < 0.3) helperWalkTo(n, null); }
+    if (pickupDog) {
+      n.task = { kind: 'fetchPickup', dogId: pickupDog.id };
+      n.path = null;
+      n.say = 'Finding ' + pickupDog.name + '!'; n.sayT = 2.0;
+    } else {
+      // Help with cuddles or patrol the yard actively
+      var petDog = S.dogs.filter(function (d) { return d.checkedIn && d.need && d.need.type === 'pet' && !d.need.self && (d.state === 'idle' || d.state === 'wander' || d.state === 'nap'); })[0];
+      if (petDog) { n.task = { kind: 'need', dogId: petDog.id, type: 'pet' }; n.path = null; }
+      else { n.idleT = rand(0.6, 1.4); helperWalkTo(n, null); }
+    }
   }
   if (!n.task) { helperWalk(n, dt); return; }
+  if (n.task.kind === 'fetchPickup') {
+    var fd = dogById(n.task.dogId);
+    var stillWanted = fd && S.owners.some(function (o) { return o.dogId === fd.id && o.state === 'waitPickup'; });
+    if (!fd || !stillWanted || fd.state === 'leashed' || fd.state === 'toCounter' || fd.state === 'atDesk') {
+      n.task = null; return;
+    }
+    if (dist(n.x, n.y, fd.x, fd.y) < 48) {
+      n.say = 'Come on, ' + fd.name + '! Pickup time!'; n.sayT = 2.2;
+      n.emote = 'happy'; n.emoteT = 0;
+      startToCounter(fd);
+      // Runner trots back toward the yard door with the dog
+      helperWalkTo(n, [(YARD_ENTRY[0] + 1.5) * TILE, (YARD_ENTRY[1] + 0.5) * TILE]);
+      n.task = null; n.idleT = 1.5;
+      return;
+    }
+    if (!n.path || n.pathT <= 0) helperWalkTo(n, [fd.x, fd.y]);
+    helperWalk(n, dt);
+    return;
+  }
+  runWorkerTask(n, dt);
+}
+
+// Specialized yard workers: cleaner (🧹), feeder (🥣), groomer (🛁), trainer (🎾), helper (🧑‍🌾 all-rounder)
+function workerCanDoNeed(role, needType) {
+  if (role === 'feeder') return needType === 'food' || needType === 'treat';
+  if (role === 'groomer') return needType === 'bath' || needType === 'pet';
+  if (role === 'trainer') return needType === 'play' || needType === 'pet';
+  if (role === 'helper') return needType === 'food' || needType === 'treat' || needType === 'play' || needType === 'pet';
+  return false;
+}
+function workerCanDoChore(role, choreKind) {
+  if (choreKind === 'desk') return false;
+  if (role === 'cleaner') return choreKind === 'rake' || choreKind === 'water' || choreKind === 'toys';
+  if (role === 'feeder') return choreKind === 'water' || choreKind === 'bone';
+  if (role === 'groomer') return choreKind === 'brush';
+  if (role === 'trainer') return choreKind === 'bone' || choreKind === 'toys';
+  if (role === 'helper') return true;
+  return false;
+}
+function updateYardWorker(n, dt) {
+  n.idleT -= dt; n.moving = false;
+  var role = n.id, cap = poopCap();
+  // If worker is currently walking a leashed dog to the bath tub, finish that task first!
+  if (n.carry && n.carry.type === 'dog') {
+    if (!n.task || n.task.kind !== 'toTub') n.task = { kind: 'toTub', dogId: n.carry.id };
+  }
+  if (!n.task && n.idleT <= 0) {
+    var best = null, bd = 1e9;
+    // 1. Check matching dog needs for this worker's specialty
+    S.dogs.forEach(function (d) {
+      if (!d.need || d.need.self || !d.checkedIn || d.helperSkip > S.clock) return;
+      if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap')) return;
+      if (!workerCanDoNeed(role, d.need.type)) return;
+      if (d.need.type === 'bath') {
+        var freeTub = S.objects.some(function (o) { return o.done && o.type === 'tub' && !o.dogId; });
+        if (!freeTub) return;
+      }
+      var dd = dist(n.x, n.y, d.x, d.y) - d.need.t * 30;
+      if (dd < bd) { bd = dd; best = { kind: d.need.type === 'bath' ? 'washDog' : 'need', dogId: d.id, type: d.need.type }; }
+    });
+    // 2. Cleaner & Helper prioritize scooping poop
+    if (!best && (role === 'cleaner' || role === 'helper')) {
+      if (n.carry && n.carry.type === 'poop' && ((n.carry.n || 1) >= cap || !S.poops.length)) best = { kind: 'bin' };
+      else if (S.poops.some(function (q) { return !(q.helperSkip > S.clock); }) && (!n.carry || n.carry.type === 'poop')) {
+        var pp = S.poops.filter(function (q) { return !(q.helperSkip > S.clock); }).sort(function (a, b) { return dist(n.x, n.y, a.x, a.y) - dist(n.x, n.y, b.x, b.y); })[0];
+        best = { kind: 'poop', id: pp.id };
+      } else if (n.carry && n.carry.type === 'poop') best = { kind: 'bin' };
+    }
+    // 3. Matching yard chores for this worker's role
+    if (!best && S.chores && S.chores.length) {
+      var ch = S.chores.filter(function (c) { return workerCanDoChore(role, c.kind); })
+        .sort(function (a, b) { return dist(n.x, n.y, a.x, a.y) - dist(n.x, n.y, b.x, b.y); })[0];
+      if (ch) best = { kind: 'chore', id: ch.id };
+    }
+    if (best) { n.task = best; n.path = null; n.tries = 0; }
+    else {
+      // Keep moving & patrolling around the yard!
+      n.idleT = rand(0.5, 1.3);
+      helperWalkTo(n, null);
+      if (Math.random() < 0.22) {
+        var lines = role === 'cleaner' ? ['Keeping the grass spotless!', 'On poop patrol!']
+          : role === 'feeder' ? ['Checking water & bowls!', 'Who wants kibble?']
+          : role === 'groomer' ? ['Bubble bath ready!', 'Looking fluffy!']
+          : role === 'trainer' ? ['Who wants to play fetch?', 'Good agility!']
+          : ['Checking on the pack!', 'Good pups!'];
+        n.say = pick(lines); n.sayT = 1.8;
+      }
+    }
+  }
+  if (!n.task) { helperWalk(n, dt); return; }
+  runWorkerTask(n, dt);
+}
+
+function runWorkerTask(n, dt) {
   var t = n.task;
+  if (!t) return;
+  if (t.kind === 'chore') {
+    var ch = null;
+    for (var ci = 0; ci < (S.chores || []).length; ci++) if (S.chores[ci].id === t.id) ch = S.chores[ci];
+    if (!ch) { n.task = null; return; }
+    if (dist(n.x, n.y, ch.x, ch.y) < 34) {
+      doChore(ch);
+      n.emote = 'happy'; n.emoteT = 0;
+      n.say = ch.icon + ' All done!'; n.sayT = 1.6;
+      n.task = null; n.idleT = 0.7; n.path = null; return;
+    }
+    if (!n.path || n.pathT <= 0) helperWalkTo(n, [ch.x, ch.y]);
+    helperWalk(n, dt); return;
+  }
+  if (t.kind === 'washDog') {
+    var wd = dogById(t.dogId);
+    var tub = S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
+    if (!wd || !tub || !wd.need || wd.need.type !== 'bath' || !(wd.state === 'idle' || wd.state === 'wander' || wd.state === 'nap')) {
+      n.task = null; return;
+    }
+    if (dist(n.x, n.y, wd.x, wd.y) < 42) {
+      wd.state = 'npcLeashed'; wd.npcHolder = n.id; wd.path = null; wd.anim = null;
+      n.carry = { type: 'dog', id: wd.id };
+      n.say = 'Bath time, ' + wd.name + '!'; n.sayT = 2.0;
+      sfx('leash');
+      n.task = { kind: 'toTub', dogId: wd.id }; n.path = null; return;
+    }
+    if (!n.path || n.pathT <= 0) helperWalkTo(n, [wd.x, wd.y]);
+    helperWalk(n, dt); return;
+  }
+  if (t.kind === 'toTub') {
+    var bd = dogById(t.dogId);
+    var tub2 = S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
+    if (!bd || !tub2) {
+      if (bd && bd.state === 'npcLeashed') { bd.state = 'idle'; bd.npcHolder = null; }
+      n.carry = null; n.task = null; return;
+    }
+    // Keep the leashed dog trotting right behind the Groomer
+    moveTo(bd, n.x - (DIRV[n.dir] ? DIRV[n.dir][0] * 26 : 0), n.y - (DIRV[n.dir] ? DIRV[n.dir][1] * 22 : -18), 175, dt);
+    var tPad = stationPad(tub2) || { x: tub2.x * TILE, y: (tub2.y + 1) * TILE, w: tub2.w * TILE, h: TILE };
+    if (inRect(n.x, n.y, tPad) || dist(n.x, n.y, (tub2.x + tub2.w / 2) * TILE, (tub2.y + 1) * TILE) < 44) {
+      n.carry = null;
+      var tLv = tub2.lvl || 1;
+      bd.state = 'bath'; bd.actT = Math.max(1.6, 4.2 - (tLv - 1) * 0.35); bd.objId = tub2.id; tub2.dogId = bd.id; tub2.useAt = now; bd.anim = null; bd.npcHolder = null;
+      bd.x = (tub2.x + tub2.w / 2) * TILE; bd.y = (tub2.y + 0.75) * TILE;
+      sfx('splash'); gainXP(2); S.stats.baths++;
+      n.say = 'Scrub-a-dub!'; n.sayT = 1.8; n.emote = 'happy'; n.emoteT = 0;
+      n.task = null; n.idleT = 0.9; n.path = null; return;
+    }
+    if (!n.path || n.pathT <= 0) helperWalkTo(n, [tPad.x + tPad.w / 2, tPad.y + tPad.h / 2]);
+    helperWalk(n, dt); return;
+  }
   if (t.kind === 'need') {
     var d = dogById(t.dogId);
-    if (!d || !d.need || d.need.self || d.called || !(d.state === 'idle' || d.state === 'wander' || d.state === 'nap')) { n.task = null; return; }
+    if (!d || !d.need || d.need.self || !(d.state === 'idle' || d.state === 'wander' || d.state === 'nap')) { n.task = null; return; }
     var item = t.type === 'food' ? 'food' : t.type === 'treat' ? 'treat' : t.type === 'play' ? 'ball' : null;
     if (item && !(n.carry && n.carry.type === item)) { // fetch it from the station first
       if (n.carry && n.carry.type === 'poop') { t.kind = 'bin'; t.then = { kind: 'need', dogId: t.dogId, type: t.type }; return; }
@@ -741,7 +963,7 @@ function updateHelper(n, dt) {
       n.task = null; n.idleT = 0.6; n.path = null; return;
     }
     if (!n.path) helperWalkTo(n, [pp.x, pp.y]);
-    else if (!n.path.length) { pp.helperSkip = S.clock + 40; n.task = null; n.idleT = 0.5; return; } // can't get to it
+    else if (!n.path.length) { pp.helperSkip = S.clock + 40; n.task = null; n.idleT = 0.5; return; }
     helperWalk(n, dt); return;
   }
   if (t.kind === 'bin') {
@@ -757,8 +979,14 @@ function updateHelper(n, dt) {
 function helperWalkTo(n, target) {
   var t0 = nearestWalkable(n.x, n.y), b = bfs(t0[0], t0[1]), goal;
   if (target) goal = nearestWalkable(target[0], target[1]);
-  else { var c = []; for (var i = 0; i < W * H; i++) if (b.dist[i] > 0 && b.dist[i] <= 6) c.push(i); if (!c.length) return; var k = pick(c); goal = [k % W, (k / W) | 0]; }
-  n.path = pathTo(b, goal[0], goal[1]) || []; n.pathT = 2.5;
+  else {
+    var c = [];
+    for (var i = 0; i < W * H; i++) if (b.dist[i] >= 2 && b.dist[i] <= 11) c.push(i);
+    if (!c.length) { for (var j = 0; j < W * H; j++) if (b.dist[j] > 0) c.push(j); }
+    if (!c.length) return;
+    var k = pick(c); goal = [k % W, (k / W) | 0];
+  }
+  n.path = pathTo(b, goal[0], goal[1]) || []; n.pathT = 2.8;
 }
 function helperWalk(n, dt) {
   if (!n.path || !n.path.length) { n.moving = false; return; }
@@ -1875,6 +2103,48 @@ function checkBuilds() {
   if (changed) saveGame();
 }
 
+// ================= Smart Business Advisor & Employee Hints =================
+function currentAdvisorHint() {
+  if (!S) return null;
+  var dogsIn = S.dogs.filter(function (d) { return d.checkedIn && d.state !== 'leaving'; }).length;
+  var needy = S.dogs.filter(function (d) { return d.checkedIn && d.need && !d.need.self; }).length;
+  var waitingO = S.owners.filter(function (o) { return o.state === 'waitCheckin' || o.state === 'waitPickup'; }).length;
+  var staffN = hiredStaffCount();
+  if ((dogsIn >= 3 && staffN === 0) || (dogsIn >= 5 && staffN <= 1) || (needy >= 2 && staffN === 0)) {
+    return { id: 'many_dogs', act: 'staff', text: '💡 Too many dogs to manage alone! Think about hiring employees in 🔨 Shop → Staff.' };
+  }
+  if (waitingO >= 2 && !staffHired('receptionist')) {
+    return { id: 'hire_rec', act: 'staff', text: '💡 Customers are waiting at the counter — think about hiring a 🧑‍💼 Receptionist!' };
+  }
+  if ((S.poops.length >= 2 || (S.chores && S.chores.length >= 2)) && !staffHired('cleaner') && S.totalServed >= 1) {
+    return { id: 'hire_clean', act: 'staff', text: '💡 Yard mess is piling up — think about hiring a 🧹 Grounds Keeper!' };
+  }
+  if (S.dogs.some(function (d) { return d.need && d.need.type === 'bath' && d.need.t > 6; }) && !staffHired('groomer') && hasDone('tub')) {
+    return { id: 'hire_groom', act: 'staff', text: '💡 Muddy pups waiting for baths? Hire a 🛁 Pet Groomer to bathe them automatically!' };
+  }
+  if (S.dogs.filter(function (d) { return d.need && (d.need.type === 'food' || d.need.type === 'treat'); }).length >= 2 && !staffHired('feeder')) {
+    return { id: 'hire_feed', act: 'staff', text: '💡 Hungry dogs asking at once? Think about hiring a 🥣 Kennel Chef!' };
+  }
+  if (S.owners.some(function (o) { return o.state === 'waitPickup' && (o.patienceMax - o.patience) > 10; }) && !staffHired('runner')) {
+    return { id: 'hire_run', act: 'staff', text: '💡 Busy searching for pickup dogs? Hire a 🦮 Pickup Runner to fetch them from the yard!' };
+  }
+  if (dogsIn >= capacity() && S.level >= 2 && S.plots.length === 1) {
+    return { id: 'expand_land', act: 'land', text: '💡 Daycare is full! Step on the golden 🗺️ box at the fence to expand your business & unlock new workers.' };
+  }
+  return null;
+}
+function updateAdvisorHints(dt) {
+  if (!S) return;
+  S._hintCd = Math.max(0, (S._hintCd || 0) - dt);
+  if (S._hintCd > 0) return;
+  var h = currentAdvisorHint();
+  if (h && S._lastHintId !== h.id) {
+    S._lastHintId = h.id;
+    S._hintCd = 34;
+    toast(h.text, '');
+  }
+}
+
 // ================= simulation =================
 var _iterOwners = [], _iterDogs = [];
 function update(dt) {
@@ -1918,6 +2188,7 @@ function update(dt) {
   }
   updateDirector(dt);
   updateChores(dt);
+  updateAdvisorHints(dt);
   updatePlayer(dt);
   updateDwell(dt);
   updateNPCs(dt);
@@ -2150,6 +2421,11 @@ function updateDog(d, dt) {
   if (d.anim) { d.animT += dt; if (d.animDur > 0 && d.animT > d.animDur) d.anim = null; }
 
   // behaviour
+  if (d.state === 'npcLeashed') {
+    var npc = d.npcHolder ? npcById(d.npcHolder) : null;
+    if (!npc || !npc.carry || npc.carry.id !== d.id) { d.state = 'idle'; d.npcHolder = null; d.idleT = 0.5; }
+    return;
+  }
   if (d.state === 'leashed') {
     var peerHolder = (typeof MP !== 'undefined' && d.leashedBy && d.leashedBy !== MP.playerId) ? MP.getPeer(d.leashedBy) : null;
     var p = (peerHolder && peerHolder.online) ? peerHolder : S.player;
@@ -2930,9 +3206,8 @@ function clearWaitingOwners(s, simulateOfflineShift) {
   S = s;
   try {
     var D = dayLen();
-    var hasRec = !!(s.staff && s.staff.receptionist);
-    var hasHelp = !!(s.staff && s.staff.helper);
-    var hasWorkers = hasRec || hasHelp;
+    var wCount = hiredStaffCount();
+    var hasWorkers = wCount > 0;
     var remainingDogs = [];
     var dogsById = {};
     (s.dogs || []).forEach(function (d) { if (d) dogsById[d.id] = d; });
@@ -2943,8 +3218,9 @@ function clearWaitingOwners(s, simulateOfflineShift) {
       var d = dogsById[o.dogId];
       if (o.kind === 'pickup' && d && d.checkedIn && d.state !== 'leaving') {
         if (hasWorkers) {
-          // Hired staff handle the pickup while closed, but offline net earnings are much lower (35% after staff/supply costs)
-          var pay = Math.max(3, Math.round(dogPrice(d) * (hasRec && hasHelp ? 0.42 : 0.25)));
+          // Hired staff handle the pickup while closed, but offline net earnings are much lower (after staff/supply costs)
+          var payRate = Math.min(0.48, 0.20 + wCount * 0.06);
+          var pay = Math.max(2, Math.round(dogPrice(d) * payRate));
           s.cash = (s.cash || 0) + pay;
           if (s.stats) { s.stats.earned = (s.stats.earned || 0) + pay; s.stats.served = (s.stats.served || 0) + 1; }
           if (s.life) { s.life.earned = (s.life.earned || 0) + pay; s.life.served = (s.life.served || 0) + 1; }
@@ -2964,10 +3240,10 @@ function clearWaitingOwners(s, simulateOfflineShift) {
       if (!d || d._settledOnClose || d.state === 'leaving' || (!d.checkedIn && d.state === 'arriving')) return;
       d.called = false;
       d.ownerId = null;
-      if (d.state === 'toCounter' || d.state === 'atDesk' || d.state === 'toOwner') {
+      if (d.state === 'toCounter' || d.state === 'atDesk' || d.state === 'toOwner' || d.state === 'npcLeashed') {
         var tw = nearestWalkable(d.x, d.y);
         d.x = (tw[0] + 0.5) * TILE; d.y = (tw[1] + 0.5) * TILE;
-        d.state = 'idle'; d.route = null; d.path = null;
+        d.state = 'idle'; d.route = null; d.path = null; d.npcHolder = null;
       }
       // Give the player breathing room before any daytime pickup owner arrives after reopening
       if (!d.overnight && d.pickupDay <= s.day && !s.closing) {
@@ -2984,16 +3260,16 @@ function clearWaitingOwners(s, simulateOfflineShift) {
       var elapsedSec = Math.floor((Date.now() - s.savedAt) / 1000);
       if (elapsedSec >= 45) {
         var cappedSec = Math.min(elapsedSec, 6 * 3600);
-        var both = hasRec && hasHelp;
+        var teamFactor = Math.min(1.2, 0.25 + wCount * 0.14);
         var capNow = Math.max(1, starBaseCap(s.rep || 3, s.day || 1));
-        var dogsHandled = Math.max(1, Math.floor((cappedSec / 180) * (both ? 0.65 : 0.32) * Math.min(capNow, 6)));
-        var netPerDog = Math.max(2, Math.round((3 + (s.level || 1) * 0.4) * (both ? 1.0 : 0.6)));
+        var dogsHandled = Math.max(1, Math.floor((cappedSec / 180) * teamFactor * Math.min(capNow, 6)));
+        var netPerDog = Math.max(2, Math.round((2.5 + (s.level || 1) * 0.35) * Math.min(1.1, 0.5 + wCount * 0.12)));
         var totalNet = dogsHandled * netPerDog;
         s.cash = (s.cash || 0) + totalNet;
         s.totalServed = (s.totalServed || 0) + dogsHandled;
         if (s.stats) { s.stats.earned = (s.stats.earned || 0) + totalNet; s.stats.served = (s.stats.served || 0) + dogsHandled; }
         if (s.life) { s.life.earned = (s.life.earned || 0) + totalNet; s.life.served = (s.life.served || 0) + dogsHandled; }
-        s.offlineReport = { sec: cappedSec, dogs: dogsHandled, earned: totalNet, both: both };
+        s.offlineReport = { sec: cappedSec, dogs: dogsHandled, earned: totalNet, workers: wCount };
       }
     }
   } catch (e) {}

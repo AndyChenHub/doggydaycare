@@ -287,13 +287,21 @@ function drawRemotePeer(c, rp, t) {
 function drawNpc(c, n, t) {
   var look = (typeof PLAYER_LOOKS !== 'undefined' && PLAYER_LOOKS[n.look || 0]) || playerLook();
   var ho = n.id === 'receptionist' && S.owners.some(function (o) { return o.byStaff && o.state === 'handover' && o.kind === 'dropoff' && o.hoT > 0.5 && leashSide(o); });
-  var p = { x: n.x, y: n.y, dir: n.dir, moving: n.moving, walkT: n.walkT, walkDist: n.walkDist || 0, carry: n.carry ? 'item' : ho ? 'leash' : null, emote: n.emote, emoteT: n.emoteT, id: 900 + (n.id === 'receptionist' ? 1 : 2) };
+  var holdingDog = n.carry && n.carry.type === 'dog' ? dogById(n.carry.id) : null;
+  var p = { x: n.x, y: n.y, dir: n.dir, moving: n.moving, walkT: n.walkT, walkDist: n.walkDist || 0, carry: (n.carry && !holdingDog) ? 'item' : (ho || holdingDog) ? 'leash' : null, emote: n.emote, emoteT: n.emoteT, id: 900 + (n.look || 1) };
   var a = anchorOf(p, look);
-  if (ho) { var hd = dogById((S.owners.filter(function (o) { return o.byStaff && o.state === 'handover'; })[0] || {}).dogId); if (hd) { var m = dogTop(hd); c.strokeStyle = '#7a3b2e'; c.lineWidth = 2; c.lineCap = 'round'; c.beginPath(); c.moveTo(n.x + a.leashX, n.y + a.leashY); c.quadraticCurveTo((n.x + hd.x) / 2, Math.max(n.y + a.leashY, hd.y + m.hy + 8) + 14, hd.x + m.hx * 0.55, hd.y + m.hy + 8); c.stroke(); } }
-  if (n.carry && p.dir === 'up') drawCarry(c, n.carry.type, n.x + a.handX, n.y + a.handY, t, n.carry);
+  var leashDog = holdingDog || (ho ? dogById((S.owners.filter(function (o) { return o.byStaff && o.state === 'handover'; })[0] || {}).dogId) : null);
+  if (leashDog) {
+    var m = dogTop(leashDog);
+    c.strokeStyle = '#7a3b2e'; c.lineWidth = 2; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(n.x + a.leashX, n.y + a.leashY); c.quadraticCurveTo((n.x + leashDog.x) / 2, Math.max(n.y + a.leashY, leashDog.y + m.hy + 8) + 14, leashDog.x + m.hx * 0.55, leashDog.y + m.hy + 8); c.stroke();
+  }
+  if (n.carry && !holdingDog && p.dir === 'up') drawCarry(c, n.carry.type, n.x + a.handX, n.y + a.handY, t, n.carry);
   drawPersonEntity(c, p, t, look);
-  if (n.carry && p.dir !== 'up') drawCarry(c, n.carry.type, n.x + a.handX, n.y + a.handY, t, n.carry);
-  c.font = '12px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle'; outlined(c, STAFF_BY_ID[n.id] ? STAFF_BY_ID[n.id].name : n.id, n.x, n.y + 11, '#ffe9b0');
+  if (n.carry && !holdingDog && p.dir !== 'up') drawCarry(c, n.carry.type, n.x + a.handX, n.y + a.handY, t, n.carry);
+  var sDef = STAFF_BY_ID[n.id];
+  c.font = '12px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+  outlined(c, sDef ? (sDef.icon + ' ' + sDef.name) : n.id, n.x, n.y + 11, '#ffe9b0');
   if (n.sayT > 0 && n.say) bubble(c, n.x, n.y - 82, n.say, { size: 11 });
 }
 function drawCarry(c, kind, x, y, t, car) {

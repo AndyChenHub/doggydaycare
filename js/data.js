@@ -31,9 +31,9 @@ MAP.shop.furniture.forEach(function (f) { FURN[f[0] + ',' + f[1]] = f[2]; });
 // yard land. 'base' is owned from the start. Walk onto the border expansion box or use the Land tab to expand!
 var PLOTS = [
   { id: 'base',      name: 'Starter Yard',   x: 18, y: 18, w: 14, h: 14, cost: 0,    lvl: 1,  time: 0,   unlocks: [] },
-  { id: 'north',     name: 'North Lawn',     x: 18, y: 6,  w: 14, h: 12, cost: 450,  lvl: 2,  time: 45,  padX: 21, padY: 18, unlocks: ['🏖️ Sand Pit', '🧺 Picnic Table', '🚧 Agility Course'] },
-  { id: 'east',      name: 'East Meadow',    x: 32, y: 18, w: 13, h: 14, cost: 1200, lvl: 4,  time: 120, padX: 30, padY: 23, unlocks: ['🏊 Splash Pool', '🤖 Auto-Feeder', '🏠 Extra Kennel', '🐩 Dog Topiary'] },
-  { id: 'northeast', name: 'Orchard Corner', x: 32, y: 6,  w: 13, h: 12, cost: 3200, lvl: 7,  time: 300, padX: 30, padY: 11, unlocks: ['🪷 Lily Pond', '⛲ Fountain', '🦴 Golden Bone'] },
+  { id: 'north',     name: 'North Lawn',     x: 18, y: 6,  w: 14, h: 12, cost: 450,  lvl: 2,  time: 45,  padX: 21, padY: 18, unlocks: ['🏖️ Sand Pit', '🥣 Kennel Chef Pad', '🧺 Picnic Table', '🚧 Agility Course'] },
+  { id: 'east',      name: 'East Meadow',    x: 32, y: 18, w: 13, h: 14, cost: 1200, lvl: 4,  time: 120, padX: 30, padY: 23, unlocks: ['🏊 Splash Pool', '🛁 Pet Groomer Pad', '🎾 Play Trainer Pad', '🤖 Auto-Feeder'] },
+  { id: 'northeast', name: 'Orchard Corner', x: 32, y: 6,  w: 13, h: 12, cost: 3200, lvl: 7,  time: 300, padX: 30, padY: 11, unlocks: ['🦮 Pickup Runner Pad', '🪷 Lily Pond', '⛲ Fountain', '🦴 Golden Bone'] },
   { id: 'far',       name: 'Lakeside Field', x: 45, y: 6,  w: 12, h: 26, cost: 7500, lvl: 10, time: 600, padX: 43, padY: 22, unlocks: ['🏛️ Royal Gazebo', '🏊 Lakeside Pool', '🚧 Agility Arena'] },
 ];
 // tiles that must stay free so the yard door is never blocked
@@ -133,17 +133,21 @@ var UNLOCK_PADS = [
   { id: 'pad_treat',     plot: 'base',      kind: 'obj',   type: 'treatjar',   x: 20, y: 23, uniqueType: true },
   { id: 'pad_nap',       plot: 'base',      kind: 'obj',   type: 'napmat',     x: 24, y: 29 },
   { id: 'pad_recep',     plot: 'base',      kind: 'staff', staffId: 'receptionist', x: 5,  y: 23, w: 2, h: 2 },
-  { id: 'pad_helper',    plot: 'base',      kind: 'staff', staffId: 'helper',       x: 20, y: 20, w: 2, h: 2 },
+  { id: 'pad_cleaner',   plot: 'base',      kind: 'staff', staffId: 'cleaner',      x: 20, y: 20, w: 2, h: 2 },
   // Unlocked when North Lawn ('north') is expanded!
   { id: 'pad_n_sand',    plot: 'north',     kind: 'obj',   type: 'sandpit',    x: 20, y: 13, ignoreLvl: true },
+  { id: 'pad_n_feeder',  plot: 'north',     kind: 'staff', staffId: 'feeder',  x: 24, y: 14, w: 2, h: 2 },
   { id: 'pad_n_picnic',  plot: 'north',     kind: 'obj',   type: 'picnic',     x: 27, y: 13, ignoreLvl: true },
   { id: 'pad_n_agility', plot: 'north',     kind: 'obj',   type: 'agility',    x: 22, y: 8,  ignoreLvl: true },
   // Unlocked when East Meadow ('east') is expanded!
   { id: 'pad_e_pool',    plot: 'east',      kind: 'obj',   type: 'pool',       x: 35, y: 22, ignoreLvl: true },
+  { id: 'pad_e_groomer', plot: 'east',      kind: 'staff', staffId: 'groomer', x: 33, y: 25, w: 2, h: 2 },
+  { id: 'pad_e_trainer', plot: 'east',      kind: 'staff', staffId: 'trainer', x: 39, y: 20, w: 2, h: 2 },
   { id: 'pad_e_feeder',  plot: 'east',      kind: 'obj',   type: 'autofeeder', x: 34, y: 19, ignoreLvl: true },
   { id: 'pad_e_kennel2', plot: 'east',      kind: 'obj',   type: 'kennel',     x: 36, y: 28, ignoreLvl: true },
   { id: 'pad_e_topiary', plot: 'east',      kind: 'obj',   type: 'topiary',    x: 41, y: 24, ignoreLvl: true },
   // Unlocked when Orchard Corner ('northeast') is expanded!
+  { id: 'pad_ne_runner', plot: 'northeast', kind: 'staff', staffId: 'runner',  x: 33, y: 11, w: 2, h: 2 },
   { id: 'pad_ne_pond',   plot: 'northeast', kind: 'obj',   type: 'pond',       x: 35, y: 10, ignoreLvl: true },
   { id: 'pad_ne_fount',  plot: 'northeast', kind: 'obj',   type: 'fountain',   x: 40, y: 13, ignoreLvl: true },
   { id: 'pad_ne_statue', plot: 'northeast', kind: 'obj',   type: 'statue',     x: 34, y: 14, ignoreLvl: true },
@@ -166,10 +170,15 @@ var UPGRADES = [
   { id: 'nightstaff', name: 'Overnight Suite Care', icon: '🌙', cost: 1200, lvl: 6, desc: 'Overnight guests wake up happy & pay +15% per level.' },
   { id: 'webcam',     name: 'HD Pup Cam',           icon: '📷', cost: 1650, lvl: 8, desc: '+12% base boarding pay per level.' },
 ];
-// ---------- staff you can hire (paid per day, at closing time) ----------
+// ---------- staff you can hire as you expand your business (paid per day, at closing time) ----------
 var STAFF = [
-  { id: 'receptionist', name: 'Receptionist', icon: '🧑‍💼', wage: 95,  lvl: 4, desc: 'Stands behind the counter and handles check-ins and pickups automatically.' },
-  { id: 'helper',       name: 'Yard Helper',  icon: '🧑‍🌾', wage: 145, lvl: 6, desc: 'Walks round the yard cuddling, feeding and playing with dogs, and scooping poop.' },
+  { id: 'receptionist', name: 'Receptionist',     icon: '🧑‍💼', wage: 55,  lvl: 2, look: 1, spot: [6.6, 24.3],  desc: 'Moves around the front shop, welcomes drop-off customers, and polishes the counter.' },
+  { id: 'cleaner',      name: 'Grounds Keeper',   icon: '🧹', wage: 60,  lvl: 2, look: 2, spot: [20.5, 25.5], desc: 'Patrols the yard scooping poop into the Poop Bin and sweeping leaves & yard chores.' },
+  { id: 'feeder',       name: 'Kennel Chef',      icon: '🥣', wage: 75,  lvl: 3, look: 3, spot: [21.5, 20.5], desc: 'Walks to the Food Bin and Treat Jar to feed hungry and picky dogs across the yard.' },
+  { id: 'groomer',      name: 'Pet Groomer',      icon: '🛁', wage: 90,  lvl: 3, look: 0, spot: [27.5, 20.5], desc: 'Walks out to muddy dogs, leashes them to the Bath Tub for a scrub, and cuddles nervous pups.' },
+  { id: 'trainer',      name: 'Play Trainer',     icon: '🎾', wage: 105, lvl: 4, look: 1, spot: [24.5, 22.5], desc: 'Grabs balls from the Toy Box to play fetch with energetic dogs and keeps morale high.' },
+  { id: 'runner',       name: 'Pickup Runner',    icon: '🦮', wage: 115, lvl: 5, look: 2, spot: [19.5, 23.5], desc: 'Searches the yard when an owner asks for pickup, walks to that dog, and brings it to the counter!' },
+  { id: 'helper',       name: 'Yard Manager',     icon: '🧑‍🌾', wage: 145, lvl: 6, look: 3, spot: [23.5, 25.5], desc: 'Veteran all-rounder who pitches in on feeding, playing, cuddling, scooping, and chores.' },
 ];
 var STAFF_BY_ID = {};
 STAFF.forEach(function (s) { STAFF_BY_ID[s.id] = s; });

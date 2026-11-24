@@ -684,7 +684,11 @@ function updateHUD(dt) {
   var z = UI.zone, hh2 = '';
   if (UI.mode === 'play') {
     if (z) hh2 += '<span data-hact="interact" class="' + (z.disabled ? 'dim' : '') + '">' + (z.disabled ? '' : '⚡ ') + esc(z.label) + '</span>';
-    else if (!S.tutorialDone && !S.tutorial.checkin) hh2 = '<span class="dim">Drag anywhere to walk to the SERVE pad</span>';
+    else {
+      var adv = typeof currentAdvisorHint === 'function' ? currentAdvisorHint() : null;
+      if (adv) hh2 = '<span data-hact="' + esc(adv.act || 'staff') + '">' + esc(adv.text) + '</span>';
+      else if (!S.tutorialDone && !S.tutorial.checkin) hh2 = '<span class="dim">Drag anywhere to walk to the SERVE pad</span>';
+    }
   }
   if (UI.hintHTML !== hh2) { UI.hintHTML = hh2; $('hint').innerHTML = hh2; }
   // Floating Drop button when carrying items or a dog
@@ -834,6 +838,8 @@ $('hint').addEventListener('pointerdown', function (ev) {
   var act = sp.getAttribute('data-hact');
   if (act === 'interact' && UI.mode === 'play') triggerZoneNow();
   else if (act === 'grab' && UI.mode === 'play') { var qa = qAction(); if (qa && !qa.disabled) qa.run(); }
+  else if (act === 'staff') { UI.buildTab = 'biz'; setMode('build'); sfx('ui_open'); }
+  else if (act === 'land') { UI.buildTab = 'land'; setMode('build'); sfx('ui_open'); }
   else if (act === 'build' && UI.mode === 'build') { setMode('play'); sfx('ui_close'); }
 });
 document.addEventListener('pointerdown', function () { initAudio(); }, true);
