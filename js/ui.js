@@ -831,16 +831,18 @@ function updateDragPosFromScreen(clientX, clientY) {
   var mw = screenToWorld(clientX, clientY), tx = tileOf(mw.x), ty = tileOf(mw.y);
   if (UI.buildSel && CAT_BY_ID[UI.buildSel]) {
     var bDims = typeof objDims === 'function' ? objDims(UI.buildSel, UI.buildRot || 0) : CAT_BY_ID[UI.buildSel];
+    var bb = typeof ownedYardBounds === 'function' ? ownedYardBounds(bDims.w, bDims.h) : { minX: MAP.yard.x0, maxX: MAP.yard.x1 - bDims.w + 1, minY: MAP.yard.y0, maxY: MAP.yard.y1 - bDims.h + 1 };
     UI.dragPos = {
-      x: clamp(tx - Math.floor((bDims.w - 1) / 2), MAP.yard.x0, MAP.yard.x1 - bDims.w + 1),
-      y: clamp(ty - Math.floor((bDims.h - 1) / 2), MAP.yard.y0, MAP.yard.y1 - bDims.h + 1)
+      x: clamp(tx - Math.floor((bDims.w - 1) / 2), bb.minX, bb.maxX),
+      y: clamp(ty - Math.floor((bDims.h - 1) / 2), bb.minY, bb.maxY)
     };
   } else if (UI.moveObj && CAT_BY_ID[UI.moveObj.type]) {
     var mRot = UI.moveRot != null ? UI.moveRot : (UI.moveObj.rot || 0);
     var mDims = typeof objDims === 'function' ? objDims(UI.moveObj.type, mRot) : UI.moveObj;
+    var mb = typeof ownedYardBounds === 'function' ? ownedYardBounds(mDims.w, mDims.h) : { minX: MAP.yard.x0, maxX: MAP.yard.x1 - mDims.w + 1, minY: MAP.yard.y0, maxY: MAP.yard.y1 - mDims.h + 1 };
     UI.dragPos = {
-      x: clamp(tx - Math.floor((mDims.w - 1) / 2), MAP.yard.x0, MAP.yard.x1 - mDims.w + 1),
-      y: clamp(ty - Math.floor((mDims.h - 1) / 2), MAP.yard.y0, MAP.yard.y1 - mDims.h + 1)
+      x: clamp(tx - Math.floor((mDims.w - 1) / 2), mb.minX, mb.maxX),
+      y: clamp(ty - Math.floor((mDims.h - 1) / 2), mb.minY, mb.maxY)
     };
   }
 }
@@ -1251,7 +1253,7 @@ function frame(ts) {
           CAM.panY = 0;
         }
       }
-      UI.bakeAll = !CAM.ready; updateCamera(dt, tx, ty, zm, !CAM.ready); CAM.ready = true;
+      UI.bakeAll = !CAM.ready; updateCamera(dt, tx, ty, zm, !CAM.ready || building); CAM.ready = true;
       render(dt); updateHUD(dt);
       saveT += dt; if (saveT > 3) { saveT = 0; saveGame(); }
       UI.sceneT -= dt; if (UI.sceneT <= 0) { UI.sceneT = 0.5; setScene(UI.mode === 'summary' ? 'summary' : UI.mode === 'build' ? 'build' : 'play'); }

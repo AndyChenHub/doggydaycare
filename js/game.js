@@ -361,15 +361,31 @@ function objDims(typeOrDef, rot) {
   return { w: swap ? c.h : c.w, h: swap ? c.w : c.h, rot: r };
 }
 
+function ownedYardBounds(w, h) {
+  w = w || 1; h = h || 1;
+  var x0 = 18, y0 = 18, x1 = 32, y1 = 32;
+  if (S && Array.isArray(PLOTS)) {
+    PLOTS.forEach(function (p) {
+      if (plotOwned(p)) {
+        x0 = Math.min(x0, p.x);
+        y0 = Math.min(y0, p.y);
+        x1 = Math.max(x1, p.x + p.w);
+        y1 = Math.max(y1, p.y + p.h);
+      }
+    });
+  }
+  return { minX: x0, maxX: Math.max(x0, x1 - w), minY: y0, maxY: Math.max(y0, y1 - h) };
+}
+
 function defaultBuildSpot(type, rot) {
   var dims = objDims(type, rot), w = dims.w, h = dims.h;
-  var yv = ownedYardView();
-  var cx = clamp(tileOf(yv.cx) - Math.floor(w / 2), MAP.yard.x0, MAP.yard.x1 - w + 1);
-  var cy = clamp(tileOf(yv.cy) - Math.floor(h / 2), MAP.yard.y0, MAP.yard.y1 - h + 1);
+  var b = ownedYardBounds(w, h);
+  var cx = clamp(Math.floor((b.minX + b.maxX) / 2), b.minX, b.maxX);
+  var cy = clamp(Math.floor((b.minY + b.maxY) / 2), b.minY, b.maxY);
   if (typeof canPlace === 'function' && canPlace(type, cx, cy, dims.rot)) return { x: cx, y: cy };
   var best = null, bestD = 1e9;
-  for (var y = MAP.yard.y0; y <= MAP.yard.y1 - h + 1; y++) {
-    for (var x = MAP.yard.x0; x <= MAP.yard.x1 - w + 1; x++) {
+  for (var y = b.minY; y <= b.maxY; y++) {
+    for (var x = b.minX; x <= b.maxX; x++) {
       if (typeof canPlace === 'function' && canPlace(type, x, y, dims.rot)) {
         var d = Math.abs(x - cx) + Math.abs(y - cy);
         if (d < bestD) { bestD = d; best = { x: x, y: y }; }
