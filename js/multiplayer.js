@@ -91,6 +91,38 @@ var MP = (function () {
   }
 
   // ---------------- Identity & Multi-Tab / Multi-Device Slot Assignment ----------------
+  function generateSecureRoomCode() {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    var out = '';
+    try {
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        var arr = new Uint8Array(6);
+        crypto.getRandomValues(arr);
+        for (var i = 0; i < 6; i++) out += chars.charAt(arr[i] % chars.length);
+        return out;
+      }
+    } catch (e) {}
+    for (var j = 0; j < 6; j++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+    return out;
+  }
+
+  function safeJsonParse(raw) {
+    if (!raw || typeof raw !== 'string' || raw.length > 524288) return null;
+    try {
+      return JSON.parse(raw, function (k, v) {
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') return undefined;
+        return v;
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function cleanStr(val, maxLen) {
+    if (typeof val !== 'string') return '';
+    return val.replace(/[\u0000-\u001F\u007F]/g, '').trim().slice(0, maxLen || 32);
+  }
+
   function initIdentity() {
     // Check URL parameters (?room=XXXX&name=YYYY&player=2)
     try {
@@ -129,10 +161,13 @@ var MP = (function () {
     }
 
     var devProfile = null;
-    try { devProfile = JSON.parse(localStorage.getItem(DEV_KEY) || 'null'); } catch (e) {}
+    try { devProfile = safeJsonParse(localStorage.getItem(DEV_KEY) || ''); } catch (e) {}
     if (!devProfile || !devProfile.baseId) {
+      if (roomCode === 'PAWS' && !(typeof window !== 'undefined' && window.location && window.location.search.includes('room='))) {
+        roomCode = generateSecureRoomCode();
+      }
       devProfile = {
-        baseId: 'p_' + Math.random().toString(36).slice(2, 10),
+        baseId: 'p_' + generateSecureRoomCode() + generateSecureRoomCode(),
         roomCode: roomCode,
         slots: {
           1: { name: 'Sam', look: 0, lastSeenSeq: 0 },
@@ -349,8 +384,7 @@ var MP = (function () {
       try {
         var u8 = new Uint8Array(ev.data);
         mqttParsePackets(u8, function (topic, payloadStr) {
-          var msg = null;
-          try { msg = JSON.parse(payloadStr); } catch (e) { return; }
+          var msg = safeJsonParse(payloadStr);
           if (msg) handleIncomingMessage(msg, true);
         });
       } catch (e) {}
@@ -693,23 +727,23 @@ var MP = (function () {
       var sName = msg.senderName || msg.name || 'Partner';
       var act = msg.action;
       var ev = msg.event || (act ? {
-        seq: msg.seq || (++seq),
+        seq: typeof msg.seq === 'number' ? msg.seq : (++seq),
         ts: Date.now(),
-        playerId: sId,
-        playerName: sName,
-        playerLook: typeof msg.senderLook === 'number' ? msg.senderLook : (msg.look || 0),
+        playerId: cleanStr(sId, 40),
+        playerName: cleanStr(sName, 18) || 'Partner',
+        playerLook: typeof msg.senderLook === 'number' ? clamp(Math.floor(msg.senderLook), 0, 3) : (typeof msg.look === 'number' ? clamp(Math.floor(msg.look), 0, 3) : 0),
         day: (S && S.day) || 1,
-        kind: act.kind,
-        item: act.item || null,
-        name: act.name || null,
-        icon: act.icon || null,
-        cost: act.cost || 0,
-        earned: act.earned || 0,
-        tip: act.tip || 0,
-        dogName: act.dogName || null,
-        breed: act.breed || null,
-        count: act.count || 1,
-        level: act.level || null,
+        kind: cleanStr(act.kind, 20),
+        item: cleanStr(act.item, 24) || null,
+        name: cleanStr(act.name, 32) || null,
+        icon: cleanStr(act.icon, 8) || null,
+        cost: (typeof act.cost === 'number' && isFinite(act.cost)) ? Math.max(0, Math.floor(act.cost)) : 0,
+        earned: (typeof act.earned === 'number' && isFinite(act.earned)) ? Math.max(0, Math.floor(act.earned)) : 0,
+        tip: (typeof act.tip === 'number' && isFinite(act.tip)) ? Math.max(0, Math.floor(act.tip)) : 0,
+        dogName: cleanStr(act.dogName, 24) || null,
+        breed: cleanStr(act.breed, 24) || null,
+        count: (typeof act.count === 'number' && isFinite(act.count)) ? clamp(Math.floor(act.count), 1, 20) : 1,
+        level: (typeof act.level === 'number' && isFinite(act.level)) ? clamp(Math.floor(act.level), 1, 999) : null,
         perfect: !!act.perfect,
         complaint: !!act.complaint,
       } : null);
@@ -839,12 +873,12 @@ var MP = (function () {
     var oldDoneCount = S.objects ? S.objects.filter(function (o) { return o.done; }).length : 0;
     var newDoneCount = incoming.objects ? incoming.objects.filter(function (o) { return o.done; }).length : 0;
 
-    S.cash = incoming.cash;
-    S.xp = incoming.xp;
-    S.level = incoming.level;
-    S.rep = incoming.rep;
-    S.day = incoming.day;
-    if (typeof incoming.dayTime === 'number') {
+    if (typeof incoming.cash === 'number' && isFinite(incoming.cash)) S.cash = clamp(Math.floor(incoming.cash), 0, 1e9);
+    if (typeof incoming.xp === 'number' && isFinite(incoming.xp)) S.xp = clamp(Math.floor(incoming.xp), 0, 1e9);
+    if (typeof incoming.level === 'number' && isFinite(incoming.level)) S.level = clamp(Math.floor(incoming.level), 1, 999);
+    if (typeof incoming.rep === 'number' && isFinite(incoming.rep)) S.rep = clamp(incoming.rep, 0.5, 5.0);
+    if (typeof incoming.day === 'number' && isFinite(incoming.day)) S.day = clamp(Math.floor(incoming.day), 1, 99999);
+    if (typeof incoming.dayTime === 'number' && isFinite(incoming.dayTime)) {
       if (isAction || Math.abs(incoming.dayTime - S.dayTime) > 2.5) S.dayTime = incoming.dayTime;
       else S.dayTime = lerp(S.dayTime, incoming.dayTime, 0.35);
     }
@@ -1293,22 +1327,22 @@ var MP = (function () {
       return ic + ' ' + (n > 1 ? n + '× ' : '') + name;
     });
 
-    // Compose concise natural-language summary paragraph
+    // Compose concise natural-language summary paragraph (all user/network strings strictly HTML-escaped!)
     var parts = [];
     if (builtList.length) {
-      parts.push('built <b>' + builtList.join(', ') + '</b>');
+      parts.push('built <b>' + builtList.map(esc).join(', ') + '</b>');
     }
     if (plotsUnlocked.length) {
-      parts.push('expanded the yard with <b>' + plotsUnlocked.join(', ') + '</b>');
+      parts.push('expanded the yard with <b>' + plotsUnlocked.map(esc).join(', ') + '</b>');
     }
     if (upgradesBought.length) {
-      parts.push('unlocked <b>' + upgradesBought.join(', ') + '</b>');
+      parts.push('unlocked <b>' + upgradesBought.map(esc).join(', ') + '</b>');
     }
     if (staffChanges.length) {
-      parts.push('hired <b>' + staffChanges.join(', ') + '</b>');
+      parts.push('hired <b>' + staffChanges.map(esc).join(', ') + '</b>');
     }
     var careBits = [];
-    if (dogsCheckedIn.length) careBits.push('welcomed ' + dogsCheckedIn.length + ' dog' + (dogsCheckedIn.length > 1 ? 's' : '') + ' (' + dogsCheckedIn.slice(0, 4).join(', ') + (dogsCheckedIn.length > 4 ? '…' : '') + ')');
+    if (dogsCheckedIn.length) careBits.push('welcomed ' + dogsCheckedIn.length + ' dog' + (dogsCheckedIn.length > 1 ? 's' : '') + ' (' + dogsCheckedIn.slice(0, 4).map(esc).join(', ') + (dogsCheckedIn.length > 4 ? '…' : '') + ')');
     if (cuddles) careBits.push(cuddles + ' cuddle' + (cuddles > 1 ? 's' : ''));
     if (feeds) careBits.push(feeds + ' meal' + (feeds > 1 ? 's' : ''));
     if (plays) careBits.push(plays + ' game' + (plays > 1 ? 's' : '') + ' of fetch');
@@ -1656,7 +1690,7 @@ var MP = (function () {
     if (openTabBtn) {
       openTabBtn.onclick = function () {
         var otherSlot = slot === 1 ? 2 : 1;
-        window.open(location.pathname + '?room=' + encodeURIComponent(roomCode) + '&player=' + otherSlot, '_blank');
+        window.open(location.pathname + '?room=' + encodeURIComponent(roomCode) + '&player=' + otherSlot, '_blank', 'noopener,noreferrer');
       };
     }
 

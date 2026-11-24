@@ -67,25 +67,6 @@ function _idbSave(key, val) {
   } catch (e) {}
 }
 
-function _readWindowNameStore() {
-  try {
-    if (typeof window !== 'undefined' && typeof window.name === 'string' && window.name.indexOf('__PAWS_STORE__:') === 0) {
-      return JSON.parse(window.name.slice(15)) || {};
-    }
-  } catch (e) {}
-  return {};
-}
-
-function _writeWindowNameKey(key, val) {
-  try {
-    if (typeof window === 'undefined') return;
-    var obj = _readWindowNameStore();
-    if (val === null) delete obj[key];
-    else obj[key] = val;
-    window.name = '__PAWS_STORE__:' + JSON.stringify(obj);
-  } catch (e) {}
-}
-
 function _storageGet(key) {
   var val = null;
   try { val = localStorage.getItem(key); } catch (e) {}
@@ -97,11 +78,6 @@ function _storageGet(key) {
       return val;
     }
   } catch (e) {}
-  var wn = _readWindowNameStore();
-  if (typeof wn[key] === 'string' && wn[key]) {
-    try { localStorage.setItem(key, wn[key]); } catch (e) {}
-    return wn[key];
-  }
   return _memStorage[key] || null;
 }
 
@@ -114,7 +90,6 @@ function _storageSet(key, val) {
       window.__PAWS_NATIVE_STORAGE__[key] = str;
     }
   } catch (e) {}
-  _writeWindowNameKey(key, str);
   _nativePost({ key: key, value: str });
   _idbSave(key, str);
 }
@@ -127,14 +102,16 @@ function _storageRemove(key) {
       delete window.__PAWS_NATIVE_STORAGE__[key];
     }
   } catch (e) {}
-  _writeWindowNameKey(key, null);
   _nativePost({ remove: [key] });
 }
 
 function _parseSaveJSON(raw) {
-  if (!raw || typeof raw !== 'string') return null;
+  if (!raw || typeof raw !== 'string' || raw.length > 524288) return null;
   try {
-    var obj = JSON.parse(raw);
+    var obj = JSON.parse(raw, function (k, v) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') return undefined;
+      return v;
+    });
     if (obj && typeof obj === 'object' && (typeof obj.day === 'number' || typeof obj.cash === 'number' || Array.isArray(obj.objects) || obj.version)) {
       return obj;
     }

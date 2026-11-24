@@ -53,20 +53,24 @@ final class GameViewController: UIViewController, WKNavigationDelegate, WKScript
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
-        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
 
         let contentController = WKUserContentController()
         contentController.add(self, name: "pawsStorage")
 
         let existing = loadNativeStorage()
-        if let jsonData = try? JSONSerialization.data(withJSONObject: existing, options: []),
-           let jsonStr = String(data: jsonData, encoding: .utf8) {
+        if let jsonData = try? JSONSerialization.data(withJSONObject: existing, options: []) {
+            let b64 = jsonData.base64EncodedString()
             let bootstrapJS = """
             (function() {
               try {
-                var data = \(jsonStr);
+                var raw = atob("\(b64)");
+                var bytes = new Uint8Array(raw.length);
+                for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+                var jsonText = new TextDecoder("utf-8").decode(bytes);
+                var data = JSON.parse(jsonText);
                 window.__PAWS_NATIVE_STORAGE__ = data;
                 for (var k in data) {
+                  if (typeof k !== 'string' || k.indexOf('pawsPlay') !== 0) continue;
                   if (typeof data[k] !== 'string') continue;
                   var cur = null;
                   try { cur = localStorage.getItem(k); } catch (e) {}
@@ -132,17 +136,37 @@ final class GameViewController: UIViewController, WKNavigationDelegate, WKScript
         webView?.evaluateJavaScript("if (typeof saveGame === 'function') saveGame();", completionHandler: nil)
     }
 
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let url = navigationAction.request.url, url.isFileURL {
+            let bundlePath = Bundle.main.bundleURL.standardizedFileURL.path
+            let targetPath = url.standardizedFileURL.path
+            if targetPath.hasPrefix(bundlePath) {
+                decisionHandler(.allow)
+                return
+            }
+        }
+        decisionHandler(.cancel)
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "pawsStorage", let body = message.body as? [String: Any] else { return }
         var store = loadNativeStorage()
-        if let key = body["key"] as? String, let val = body["value"] as? String {
+        if let key = body["key"] as? String,
+           let val = body["value"] as? String,
+           key.hasPrefix("pawsPlay"),
+           key.count <= 64,
+           val.utf8.count <= 524_288 {
             store[key] = val
         }
         if let batch = body["batch"] as? [String: String] {
-            for (k, v) in batch { store[k] = v }
+            for (k, v) in batch where k.hasPrefix("pawsPlay") && k.count <= 64 && v.utf8.count <= 524_288 {
+                store[k] = v
+            }
         }
         if let removeKeys = body["remove"] as? [String] {
-            for k in removeKeys { store.removeValue(forKey: k) }
+            for k in removeKeys where k.hasPrefix("pawsPlay") && k.count <= 64 {
+                store.removeValue(forKey: k)
+            }
         }
         saveNativeStorage(store)
     }

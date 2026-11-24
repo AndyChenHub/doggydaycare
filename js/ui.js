@@ -8,7 +8,7 @@ var UI = {
   joy: null, touchTarget: null, pinch: null, touchBuild: null
 };
 var $ = function (id) { return document.getElementById(id); };
-function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
 function initAudio() { audioInit(); if (!UI.volApplied && typeof AC !== 'undefined' && AC) { UI.volApplied = true; applyVolumes(); } }
 
@@ -118,7 +118,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Drag anywhere on screen to walk to the SERVE pad behind the counter!', 'good');
   saveGame();
 }
-var CURRENT_ASSET_VER = '19';
+var CURRENT_ASSET_VER = '20';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();

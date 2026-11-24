@@ -490,7 +490,7 @@ def build_ipa():
     ent_path = os.path.join(build_dir, "Entitlements.plist")
     ent_dict = {
         "application-identifier": f"TEAMID.{BUNDLE_ID}",
-        "get-task-allow": True,
+        "get-task-allow": False,
     }
     with open(ent_path, "wb") as f:
         f.write(plistlib.dumps(ent_dict, fmt=plistlib.FMT_XML))
