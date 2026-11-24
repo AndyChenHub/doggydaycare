@@ -511,46 +511,62 @@ function drawPad(c, r, t, lit, active) {
   c.setLineDash(lit || active ? [] : [6, 5]); rr(c, r.x, r.y, r.w, r.h, 9); c.stroke(); c.setLineDash([]);
 }
 function drawPlayerGuide(c, t) {
-  var p = S.player, car = p.carry, tx = null, ty = null, col = '#ffe082';
-  if (car && car.type === 'dog') {
-    var cd = dogById(car.id);
-    var ow = S.owners.filter(function (o) { return o.dogId === car.id && (o.state === 'waitPickup' || o.state === 'toHandover' || o.state === 'handover'); })[0];
-    if (ow) { tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2; col = '#ffd54a'; }
-    else if (cd && cd.need && cd.need.type === 'bath') {
-      var tub = S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
-      if (tub) { var tp = stationPad(tub) || { x: tub.x * TILE, y: tub.y * TILE, w: tub.w * TILE, h: tub.h * TILE }; tx = tp.x + tp.w / 2; ty = tp.y + tp.h / 2; col = '#80d8ff'; }
-    }
-  } else if (car && car.type === 'poop') {
-    var bin = S.objects.filter(function (o) { return o.done && o.type === 'trash'; })[0];
-    if (bin) { var bp = stationPad(bin) || { x: bin.x * TILE, y: bin.y * TILE, w: bin.w * TILE, h: bin.h * TILE }; tx = bp.x + bp.w / 2; ty = bp.y + bp.h / 2; col = '#cfd8dc'; }
-  } else if (car && (car.type === 'food' || car.type === 'treat' || car.type === 'ball')) {
-    var wantDog = S.dogs.filter(function (d) {
-      if (!d.checkedIn || !d.need || d.need.self) return false;
-      var nt = d.need.type;
-      return (car.type === 'food' && (nt === 'food' || nt === 'treat')) || (car.type === 'treat' && (nt === 'treat' || nt === 'food')) || (car.type === 'ball' && nt === 'play');
-    }).sort(function (a, b) { return dist(p.x, p.y, a.x, a.y) - dist(p.x, p.y, b.x, b.y); })[0];
-    if (wantDog) { tx = wantDog.x; ty = wantDog.y; col = '#8bf06e'; }
-  } else {
-    var wc = S.owners.filter(function (o) { return o.state === 'waitCheckin'; })[0];
-    if (wc) { tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2; col = '#ffd54a'; }
-    else {
-      var nd = S.dogs.filter(function (d) { return d.checkedIn && d.need && !d.need.self && (d.state === 'idle' || d.state === 'wander' || d.state === 'nap'); })
-        .sort(function (a, b) { return b.need.t - a.need.t; })[0];
-      if (nd) {
-        var reqItem = NEED_INFO[nd.need.type] && NEED_INFO[nd.need.type].item;
-        if (reqItem) {
-          var st = S.objects.filter(function (o) { return o.done && STATION_ITEM[o.type] === reqItem; })[0];
-          if (st) { var sp = stationPad(st); if (sp) { tx = sp.x + sp.w / 2; ty = sp.y + sp.h / 2; col = '#ffe082'; } }
-        } else { tx = nd.x; ty = nd.y; col = '#ff8a80'; }
-      } else if (S.chores && S.chores.length) {
-        var nearCh = S.chores.slice().sort(function (a, b) { return dist(p.x, p.y, a.x, a.y) - dist(p.x, p.y, b.x, b.y); })[0];
-        if (nearCh) { tx = nearCh.x; ty = nearCh.y; col = '#80d8ff'; }
+  var p = S.player, car = p.carry, tx = null, ty = null, col = '#ffe082', tutG = null;
+  if (!S.tutorialDone && typeof tutorialGuidance === 'function') {
+    tutG = tutorialGuidance();
+    if (tutG) { tx = tutG.tx; ty = tutG.ty; col = tutG.col || '#ffe082'; }
+  }
+  if (tx == null || ty == null) {
+    if (car && car.type === 'dog') {
+      var cd = dogById(car.id);
+      var ow = S.owners.filter(function (o) { return o.dogId === car.id && (o.state === 'waitPickup' || o.state === 'toHandover' || o.state === 'handover'); })[0];
+      if (ow) { tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2; col = '#ffd54a'; }
+      else if (cd && cd.need && cd.need.type === 'bath') {
+        var tub = S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
+        if (tub) { var tp = stationPad(tub) || { x: tub.x * TILE, y: tub.y * TILE, w: tub.w * TILE, h: tub.h * TILE }; tx = tp.x + tp.w / 2; ty = tp.y + tp.h / 2; col = '#80d8ff'; }
+      }
+    } else if (car && car.type === 'poop') {
+      var bin = S.objects.filter(function (o) { return o.done && o.type === 'trash'; })[0];
+      if (bin) { var bp = stationPad(bin) || { x: bin.x * TILE, y: bin.y * TILE, w: bin.w * TILE, h: bin.h * TILE }; tx = bp.x + bp.w / 2; ty = bp.y + bp.h / 2; col = '#cfd8dc'; }
+    } else if (car && (car.type === 'food' || car.type === 'treat' || car.type === 'ball')) {
+      var wantDog = S.dogs.filter(function (d) {
+        if (!d.checkedIn || !d.need || d.need.self) return false;
+        var nt = d.need.type;
+        return (car.type === 'food' && (nt === 'food' || nt === 'treat')) || (car.type === 'treat' && (nt === 'treat' || nt === 'food')) || (car.type === 'ball' && nt === 'play');
+      }).sort(function (a, b) { return dist(p.x, p.y, a.x, a.y) - dist(p.x, p.y, b.x, b.y); })[0];
+      if (wantDog) { tx = wantDog.x; ty = wantDog.y; col = '#8bf06e'; }
+    } else {
+      var wc = S.owners.filter(function (o) { return o.state === 'waitCheckin'; })[0];
+      if (wc) { tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2; col = '#ffd54a'; }
+      else {
+        var nd = S.dogs.filter(function (d) { return d.checkedIn && d.need && !d.need.self && (d.state === 'idle' || d.state === 'wander' || d.state === 'nap'); })
+          .sort(function (a, b) { return b.need.t - a.need.t; })[0];
+        if (nd) {
+          var reqItem = NEED_INFO[nd.need.type] && NEED_INFO[nd.need.type].item;
+          if (reqItem) {
+            var st = S.objects.filter(function (o) { return o.done && STATION_ITEM[o.type] === reqItem; })[0];
+            if (st) { var sp = stationPad(st); if (sp) { tx = sp.x + sp.w / 2; ty = sp.y + sp.h / 2; col = '#ffe082'; } }
+          } else { tx = nd.x; ty = nd.y; col = '#ff8a80'; }
+        } else if (S.chores && S.chores.length) {
+          var nearCh = S.chores.slice().sort(function (a, b) { return dist(p.x, p.y, a.x, a.y) - dist(p.x, p.y, b.x, b.y); })[0];
+          if (nearCh) { tx = nearCh.x; ty = nearCh.y; col = '#80d8ff'; }
+        }
       }
     }
   }
   if (tx == null || ty == null) return;
+  if (tutG) {
+    var bob = Math.sin(t * 6) * 5;
+    var pulseR = 22 + Math.sin(t * 5) * 4;
+    c.save();
+    c.strokeStyle = col; c.lineWidth = 2.6; c.setLineDash([6, 4]);
+    ell(c, tx, ty + 4, pulseR, pulseR * 0.58); c.stroke();
+    c.setLineDash([]);
+    bubble(c, tx, ty - 34 + bob, '▼ ' + tutG.callout, { size: 12, bg: '#2b1b12', fg: '#ffe66d', stroke: col });
+    c.restore();
+  }
   var d = dist(p.x, p.y, tx, ty);
-  if (d < 68) return;
+  if (d < 52) return;
   var ang = Math.atan2(ty - (p.y - 6), tx - p.x), r = 34 + Math.sin(t * 7) * 3;
   var ax = p.x + Math.cos(ang) * r, ay = p.y - 6 + Math.sin(ang) * r * 0.72;
   c.save(); c.translate(ax, ay); c.rotate(ang);

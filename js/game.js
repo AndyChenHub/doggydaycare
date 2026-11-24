@@ -224,7 +224,14 @@ function newState() {
     created: Date.now(),
   };
   S = s; groundDirty = true; NPCS = [];
-  // Empty land at startup — tutorial goals and floor pads guide the player to build Food Bin, Poop Bin, Toy Box & Bath Tub!
+  // Empty land at startup — spawn the very first customer & dog right at the entrance and guide the player step by step!
+  spawnArrival();
+  if (s.owners[0]) {
+    var o0 = s.owners[0], d0 = dogById(o0.dogId);
+    o0.x = DOOR_X; o0.y = (MAP.shop.streetDoor.y + 0.3) * TILE;
+    o0.route = [[DOOR_X, 31.3 * TILE], [QUEUE[o0.slot][0] * TILE, QUEUE[o0.slot][1] * TILE]];
+    if (d0) { d0.x = o0.x + 18; d0.y = o0.y + 6; }
+  }
   return s;
 }
 function newStats(rep) { return { earned: 0, tips: 0, served: 0, complaints: 0, perfect: 0, repStart: rep, spent: 0, complaintList: [], pets: 0, scoops: 0, baths: 0, feeds: 0, fetches: 0, goalCash: 0, wages: 0 }; }
@@ -232,8 +239,9 @@ function nid() { return S.nextId++; }
 
 function addObject(type, x, y, instant) {
   var c = CAT_BY_ID[type];
-  var o = { id: nid(), type: type, x: x, y: y, w: c.w, h: c.h, lvl: 1, upgrading: false, done: !!instant, buildEnd: instant ? 0 : Date.now() + c.time * 1000,
-            buildDur: c.time, dogId: null, reservedFor: null, useAt: -99 };
+  var dur = (!S.tutorialDone && !instant) ? Math.min(c.time, 2.5) : c.time;
+  var o = { id: nid(), type: type, x: x, y: y, w: c.w, h: c.h, lvl: 1, upgrading: false, done: !!instant, buildEnd: instant ? 0 : Date.now() + dur * 1000,
+            buildDur: dur, dogId: null, reservedFor: null, useAt: -99 };
   S.objects.push(o);
   markDirty();
   return o;
@@ -1073,10 +1081,227 @@ function maxNeeds() {
 function hasDone(type) { return S.objects.some(function (o) { return o.type === type && o.done; }); }
 function hasAnyType(type) { return S.objects.some(function (o) { return o.type === type; }); }
 function checkStationTut(type) {
-  if (type === 'foodbin') tut('build_food');
-  else if (type === 'trash') tut('build_trash');
-  else if (type === 'toybox' && S.stats && S.stats.fetches > 0) tut('build_toy');
-  else if (type === 'tub' && S.stats && S.stats.baths > 0) tut('build_tub');
+  if (type === 'foodbin' && hasDone('foodbin')) tut('build_food');
+  else if (type === 'waterbowl' && hasDone('waterbowl')) tut('build_water');
+  else if (type === 'toybox' && hasDone('toybox') && S.stats && S.stats.fetches > 0) tut('build_toy');
+  else if (type === 'tub' && hasDone('tub') && S.stats && S.stats.baths > 0) tut('build_tub');
+}
+function currentTutorialStep() {
+  if (!S || S.tutorialDone || typeof TUTORIAL === 'undefined') return null;
+  for (var i = 0; i < TUTORIAL.length; i++) {
+    if (!S.tutorial[TUTORIAL[i].id]) {
+      return { id: TUTORIAL[i].id, text: TUTORIAL[i].text, reward: TUTORIAL[i].reward || 20, idx: i, stepNum: i + 1, total: TUTORIAL.length };
+    }
+  }
+  return null;
+}
+function advanceTutorialPacing() {
+  if (!S || S.tutorialDone) return;
+  var step = currentTutorialStep();
+  if (!step) return;
+  // Never let a waiting customer run out of patience while the player is learning how to play!
+  S.owners.forEach(function (o) {
+    if (o.state === 'waitCheckin' || o.state === 'waitPickup') {
+      o.patience = Math.max(o.patience, o.patienceMax * 0.7);
+    }
+  });
+  // Ensure the first arrival exists on step 1 if none are present
+  if (step.id === 'checkin' && S.owners.length === 0 && S.dogs.length === 0) {
+    spawnArrival();
+    if (S.owners[0]) {
+      var o0 = S.owners[0], d0 = dogById(o0.dogId);
+      o0.x = DOOR_X; o0.y = (MAP.shop.streetDoor.y + 0.3) * TILE;
+      o0.route = [[DOOR_X, 31.3 * TILE], [QUEUE[o0.slot][0] * TILE, QUEUE[o0.slot][1] * TILE]];
+      if (d0) { d0.x = o0.x + 18; d0.y = o0.y + 6; }
+    }
+  }
+  // Auto-complete build steps once their station is built
+  if (hasDone('foodbin') && !S.tutorial.build_food) tut('build_food');
+  if (hasDone('waterbowl') && !S.tutorial.build_water) {
+    tut('build_water');
+    var wb = S.objects.filter(function (o) { return o.type === 'waterbowl' && o.done; })[0];
+    var wd = S.dogs.filter(function (q) { return q.checkedIn && q.state !== 'leaving'; })[0];
+    if (wb && wd && (wd.state === 'idle' || wd.state === 'wander')) {
+      goToObject(wd, wb);
+      float(wd.x, wd.y - 54, '💧 Drinking fresh water!', '#80d8ff', 1.25);
+    }
+  }
+  step = currentTutorialStep();
+  if (!step) return;
+  // Prevent soft-lock if player somehow spent cash before building required tutorial station
+  var reqType = step.id === 'build_food' ? 'foodbin' : step.id === 'build_water' ? 'waterbowl' : step.id === 'scoop' ? 'trash' : step.id === 'build_toy' ? 'toybox' : step.id === 'build_tub' ? 'tub' : null;
+  if (reqType && !hasAnyType(reqType) && CAT_BY_ID[reqType] && S.cash < CAT_BY_ID[reqType].cost) {
+    S.cash = CAT_BY_ID[reqType].cost;
+  }
+  var d = S.dogs.filter(function (q) { return q.checkedIn && q.state !== 'leaving'; })[0];
+  if (!d) return;
+  var inYard = (d.state === 'idle' || d.state === 'wander' || d.state === 'nap') && baseKind(tileOf(d.x), tileOf(d.y)) === 'yard';
+  // Hold off pickup until the player reaches the final tutorial step ('return')
+  if (step.id !== 'return' && d.pickupDay === S.day && d.pickupAt < S.dayTime + 45) {
+    d.pickupAt = Math.min(dayLen() - 10, S.dayTime + 45);
+  }
+  if (step.id === 'pet') {
+    if (inYard && (!d.need || d.need.type !== 'pet')) {
+      d.need = { type: 'pet', t: 0 }; d.path = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, 'sit', 1e9);
+    }
+  } else if (step.id === 'feed') {
+    if (hasDone('foodbin') && inYard && (!d.need || (d.need.type !== 'food' && d.need.type !== 'treat'))) {
+      d.need = { type: 'food', t: 0 }; d.path = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, 'beg', 1e9);
+    }
+  } else if (step.id === 'scoop') {
+    if (!S.poops.length && !(S.player.carry && S.player.carry.type === 'poop') && S.stats.scoops === 0 && inYard) {
+      dropPoop(d);
+    }
+    if (hasDone('trash') && S.stats.scoops > 0 && !(S.player.carry && S.player.carry.type === 'poop')) {
+      tut('scoop');
+    }
+  } else if (step.id === 'build_toy') {
+    if (hasDone('toybox') && inYard && (!d.need || d.need.type !== 'play')) {
+      d.need = { type: 'play', t: 0 }; d.path = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, 'playbow', 1e9);
+    }
+  } else if (step.id === 'build_tub') {
+    if (hasDone('tub') && inYard && (!d.need || d.need.type !== 'bath')) {
+      d.need = { type: 'bath', t: 0 }; d.path = null; d.state = 'idle'; d.idleT = 1e9; setAnim(d, 'scratch', 1e9);
+    }
+  } else if (step.id === 'return') {
+    if (d.state !== 'bath' && !d.called && !S.owners.some(function (o) { return o.dogId === d.id && (o.state === 'waitPickup' || o.state === 'walkIn' || o.state === 'toHandover' || o.state === 'handover'); })) {
+      d.need = null;
+      d.pickupDay = S.day;
+      d.pickupAt = S.dayTime;
+      var ow = makeOwner('pickup', d);
+      if (ow) {
+        d.called = true;
+        ow.patienceMax = ow.patience = 120 * patienceMul();
+        ow.x = DOOR_X; ow.y = (MAP.shop.streetDoor.y + 0.3) * TILE;
+        ow.route = [[DOOR_X, 31.3 * TILE], [QUEUE[ow.slot][0] * TILE, QUEUE[ow.slot][1] * TILE]];
+      }
+    }
+  }
+}
+function tutorialGuidance() {
+  var step = currentTutorialStep();
+  if (!step) return null;
+  var car = S.player.carry;
+  var d = S.dogs.filter(function (q) { return q.checkedIn && q.state !== 'leaving'; })[0] || S.dogs[0] || null;
+  var dName = d ? d.name : 'your dog';
+  var tx = ACTION_BOX.x + ACTION_BOX.w / 2, ty = ACTION_BOX.y + ACTION_BOX.h / 2;
+  var callout = 'SERVE PAD', subText = step.text, col = '#ffd54a';
+  function padTarget(padId, typeId, buildLabel) {
+    var obj = S.objects.filter(function (o) { return o.type === typeId; })[0];
+    if (obj) {
+      if (!obj.done) {
+        tx = (obj.x + obj.w / 2) * TILE; ty = (obj.y + obj.h / 2) * TILE;
+        callout = 'BUILDING…';
+        subText = 'Wait a second for ' + CAT_BY_ID[typeId].name + ' to finish building!';
+        col = '#ffe082';
+        return { built: false, building: true, obj: obj };
+      }
+      return { built: true, building: false, obj: obj };
+    }
+    var up = null;
+    for (var i = 0; i < UNLOCK_PADS.length; i++) if (UNLOCK_PADS[i].id === padId) { up = UNLOCK_PADS[i]; break; }
+    var def = CAT_BY_ID[typeId] || { w: 2, h: 2, cost: 50, name: typeId };
+    if (up) { tx = (up.x + def.w / 2) * TILE; ty = (up.y + def.h / 2) * TILE; }
+    callout = buildLabel;
+    subText = 'Stand on the green ' + def.icon + ' ' + def.name + ' ($' + def.cost + ') box in the yard to build it!';
+    col = '#8bf06e';
+    return { built: false, building: false, obj: null };
+  }
+  if (step.id === 'checkin') {
+    tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2;
+    callout = 'WELCOME DOG';
+    subText = 'Step onto the SERVE pad behind the counter to welcome your first dog!';
+  } else if (step.id === 'pet') {
+    if (d) { tx = d.x; ty = d.y; }
+    callout = 'CUDDLE ' + dName.toUpperCase();
+    subText = 'Walk out to the yard and stand next to ' + dName + ' to ❤️ cuddle them!';
+    col = '#ff8ad8';
+  } else if (step.id === 'build_food') {
+    padTarget('pad_foodbin', 'foodbin', 'BUILD FOOD BIN ($60)');
+  } else if (step.id === 'feed') {
+    var fb = padTarget('pad_foodbin', 'foodbin', 'BUILD FOOD BIN ($60)');
+    if (fb.built) {
+      if (car && car.type === 'food') {
+        if (d) { tx = d.x; ty = d.y; }
+        callout = 'FEED ' + dName.toUpperCase();
+        subText = 'Walk over to ' + dName + ' with the kibble bowl to feed them 🍖!';
+        col = '#8bf06e';
+      } else {
+        var fPad = stationPad(fb.obj);
+        if (fPad) { tx = fPad.x + fPad.w / 2; ty = fPad.y + fPad.h / 2; }
+        else { tx = (fb.obj.x + fb.obj.w / 2) * TILE; ty = (fb.obj.y + fb.obj.h) * TILE; }
+        callout = 'GRAB KIBBLE';
+        subText = 'Stand on the pad in front of the 🍖 Food Bin to grab a kibble bowl!';
+        col = '#ffe082';
+      }
+    }
+  } else if (step.id === 'build_water') {
+    padTarget('pad_water', 'waterbowl', 'BUILD WATER FOUNTAIN ($55)');
+  } else if (step.id === 'scoop') {
+    var tb = padTarget('pad_trash', 'trash', 'BUILD POOP BIN ($40)');
+    if (tb.built) {
+      if (car && car.type === 'poop') {
+        var tPad = stationPad(tb.obj);
+        if (tPad) { tx = tPad.x + tPad.w / 2; ty = tPad.y + tPad.h / 2; }
+        else { tx = (tb.obj.x + tb.obj.w / 2) * TILE; ty = (tb.obj.y + tb.obj.h) * TILE; }
+        callout = 'TOSS IN POOP BIN';
+        subText = 'Walk onto the 🗑️ Poop Bin pad to toss the poop bag away!';
+        col = '#cfd8dc';
+      } else if (S.poops.length) {
+        tx = S.poops[0].x; ty = S.poops[0].y;
+        callout = 'SCOOP POOP';
+        subText = 'Walk over the 💩 poop in the yard to scoop it up!';
+        col = '#ffe082';
+      }
+    }
+  } else if (step.id === 'build_toy') {
+    var tyb = padTarget('pad_toybox', 'toybox', 'BUILD TOY BOX ($65)');
+    if (tyb.built) {
+      if (car && car.type === 'ball') {
+        if (d) { tx = d.x; ty = d.y; }
+        callout = 'PLAY FETCH!';
+        subText = 'Walk over to ' + dName + ' with the ball to play fetch 🎾!';
+        col = '#8bf06e';
+      } else {
+        var tyPad = stationPad(tyb.obj);
+        if (tyPad) { tx = tyPad.x + tyPad.w / 2; ty = tyPad.y + tyPad.h / 2; }
+        else { tx = (tyb.obj.x + tyb.obj.w / 2) * TILE; ty = (tyb.obj.y + tyb.obj.h) * TILE; }
+        callout = 'GRAB BALL';
+        subText = 'Stand on the 🎾 Toy Box pad to grab a tennis ball!';
+        col = '#ffe082';
+      }
+    }
+  } else if (step.id === 'build_tub') {
+    var tubB = padTarget('pad_tub', 'tub', 'BUILD BATH TUB ($110)');
+    if (tubB.built) {
+      if (car && car.type === 'dog') {
+        var bPad = stationPad(tubB.obj);
+        if (bPad) { tx = bPad.x + bPad.w / 2; ty = bPad.y + bPad.h / 2; }
+        else { tx = (tubB.obj.x + tubB.obj.w / 2) * TILE; ty = (tubB.obj.y + tubB.obj.h) * TILE; }
+        callout = 'WASH IN BATH TUB';
+        subText = 'Walk onto the 🛁 Bath Tub pad to give ' + dName + ' a bubble bath!';
+        col = '#80d8ff';
+      } else {
+        if (d) { tx = d.x; ty = d.y; }
+        callout = 'LEASH FOR BATH';
+        subText = 'Walk up to muddy ' + dName + ' to leash them for a bath 🛁!';
+        col = '#80d8ff';
+      }
+    }
+  } else if (step.id === 'return') {
+    if (car && car.type === 'dog') {
+      tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2;
+      callout = 'RETURN AT SERVE PAD';
+      subText = 'Walk back to the SERVE pad behind the counter to return ' + dName + ' to their owner!';
+      col = '#ffd54a';
+    } else {
+      if (d) { tx = d.x; ty = d.y; }
+      callout = 'LEASH ' + dName.toUpperCase();
+      subText = dName + '\'s owner is at the counter for pickup! Walk to ' + dName + ' in the yard to leash them.';
+      col = '#ffe082';
+    }
+  }
+  return { stepNum: step.stepNum, total: step.total, id: step.id, text: step.text, subText: subText, callout: callout, tx: tx, ty: ty, col: col };
 }
 function assignNeed(d) {
   var ph = dayPhase().id;
@@ -1325,11 +1550,19 @@ function findPlotPadSpot(p) {
 function activeUnlockPads() {
   if (!S || typeof UNLOCK_PADS === 'undefined') return [];
   if (!S.builtPads) S.builtPads = {};
+  var tutStepObj = !S.tutorialDone && typeof currentTutorialStep === 'function' ? currentTutorialStep() : null;
+  var maxItems = !S.tutorialDone ? 1 : 2;
   var out = [], itemCount = 0;
   for (var i = 0; i < UNLOCK_PADS.length; i++) {
-    if (itemCount >= 2) break; // Show at most 2 building/staff unlock pads at once
+    if (itemCount >= maxItems) break;
     var up = UNLOCK_PADS[i];
     if (S.builtPads[up.id]) continue;
+    if (!S.tutorialDone) {
+      if (!up.tutStep || !tutStepObj) continue;
+      var reqIdx = -1;
+      for (var ti = 0; ti < TUTORIAL.length; ti++) if (TUTORIAL[ti].id === up.tutStep) { reqIdx = ti; break; }
+      if (reqIdx < 0 || reqIdx > tutStepObj.idx) continue;
+    }
     if (up.plot && up.plot !== 'base') {
       var reqP = plotById(up.plot);
       if (!reqP || !plotOwned(reqP)) continue;
@@ -1358,6 +1591,8 @@ function activeUnlockPads() {
       itemCount++;
     }
   }
+  // During the onboarding tutorial, hide land expansion boxes so the player focuses 100% on the current step!
+  if (!S.tutorialDone) return out;
   // Stand-on Land Expansion Boxes along the border of adjacent locked plots!
   for (var pi = 0; pi < PLOTS.length; pi++) {
     var pl = PLOTS[pi];
@@ -1424,8 +1659,8 @@ function updateUnlockPads(dt) {
         var tx = tileOf(d.x), ty = tileOf(d.y);
         if (tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h) { var t2 = nearestWalkable(d.x, d.y); d.x = (t2[0] + .5) * TILE; d.y = (t2[1] + .5) * TILE; }
       });
-      burst(ox, oy, 'dust', 18); float(ox, o.y * TILE - 10, '🔨 Building ' + c.name + ' (' + fmtDur(c.time) + ')', '#ffe082', 1.15);
-      toast('🏗️ Started building ' + c.name + ' — finishes in ' + fmtDur(c.time), 'good');
+      burst(ox, oy, 'dust', 18); float(ox, o.y * TILE - 10, '🔨 Building ' + c.name + ' (' + fmtDur(o.buildDur || c.time) + ')', '#ffe082', 1.15);
+      toast('🏗️ Started building ' + c.name + ' — finishes in ' + fmtDur(o.buildDur || c.time), 'good');
       sfx('place'); checkStationTut(hit.type);
       if (typeof MP !== 'undefined') MP.recordAction('build', { item: hit.type, name: c.name, icon: c.icon, cost: c.cost, x: hit.x, y: hit.y });
       saveGame();
@@ -2085,6 +2320,7 @@ function checkBuilds() {
         confetti(cx, cy, 30); float(cx, o.y * TILE - 10, msg, '#b9f6ca', 1.3);
         toast((wasUpg ? '⬆️ ' : '🏗️ ') + msg, 'good'); sfx('built'); gainXP(Math.round(c.cost * (o.lvl || 1) / 30) + 4);
       }
+      checkStationTut(o.type);
     }
   });
   S.plots.forEach(function (pl) {
@@ -2150,6 +2386,7 @@ var _iterOwners = [], _iterDogs = [];
 function update(dt) {
   now += dt; S.clock = (S.clock || 0) + dt;
   checkBuilds();
+  advanceTutorialPacing();
   var D = dayLen(), i, n;
   if (!S.closing) {
     S.dayTime += dt;
