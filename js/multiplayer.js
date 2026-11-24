@@ -559,7 +559,24 @@ var MP = (function () {
       return;
     }
 
+    if (msg.type === 'new_game') {
+      if (msg.playerId && msg.playerId !== playerId && msg.state) {
+        roomState = msg.state;
+        rev = Math.max(rev, msg.rev || 1);
+        seq = 0;
+        lastSeenSeq = 0;
+        unreadEvents = [];
+        recentEvents = [];
+        if (inGame && S) applySharedState(msg.state, true);
+      }
+      return;
+    }
+
     if (msg.type === 'retained_snapshot' || msg.type === 'joined' || msg.type === 'sync_ack') {
+      // Never overwrite a brand-new local game (during onboarding tutorial with empty lawn) with an old retained snapshot!
+      if (S && !S.tutorialDone && S.objects && S.objects.length === 0) {
+        return;
+      }
       if (msg.state && (!roomState || (msg.rev || 0) >= rev)) {
         if (msg.type === 'retained_snapshot' && typeof clearWaitingOwners === 'function') {
           var anyOnline = Object.keys(peers).some(function (pid) { return peers[pid].online; });
@@ -612,6 +629,7 @@ var MP = (function () {
     if (msg.type === 'world_state' || (fromBc && msg.type === 'world_sync')) {
       var sender = msg.senderId || msg.playerId;
       if (sender === playerId) return;
+      if (S && !S.tutorialDone && S.objects && S.objects.length === 0) return;
       if (msg.state) {
         roomState = msg.state;
         if (inGame && S && Date.now() - lastLocalActionAt > 1200) {
@@ -1335,25 +1353,30 @@ var MP = (function () {
 
   // Called when the player clicks Play / Continue on the Title Screen
   function onStartGame(fresh) {
-    loadLocalRoomFallback();
     if (fresh) {
       inGame = true;
-      if (S) S.player.look = playerLook;
-      rev++;
+      if (S) {
+        S.player.look = playerLook;
+        S.objects = [];
+        S.chores = [];
+      }
+      rev = Math.max(rev, (roomState && roomState.rev) || 0) + 1000;
       seq = 0;
       lastSeenSeq = 0;
       unreadEvents = [];
       recentEvents = [];
+      try { localStorage.removeItem(ROOM_STORAGE_PREFIX + roomCode); } catch (e) {}
       roomState = serializeSharedState();
       saveLocalRoomFallback(null);
-      sendPacket({ type: 'new_game', state: roomState }, true);
+      sendPacket({ type: 'new_game', rev: rev, state: roomState }, true);
       updateCoopBadge();
       return false;
     }
 
+    loadLocalRoomFallback();
     var appliedShared = false;
-    if (roomState && roomState.version === 2) {
-      if (!S) newState();
+    // Only apply roomState when continuing if the local game has already finished the tutorial or matches the shared session
+    if (roomState && roomState.version === 2 && S && (S.tutorialDone || S.objects.length > 0)) {
       applySharedState(roomState, true);
       appliedShared = true;
     }

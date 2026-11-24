@@ -119,21 +119,8 @@ var CATALOG = [
   { id: 'gazebo',     cat: 'decor', name: 'Gazebo',          icon: '🏛️', w: 3, h: 3, cost: 4800, time: 1800, lvl: 12, charm: 20, solid: true, desc: '+20 charm. The crown jewel of the daycare.' },
 ];
 
-// In-world floor unlock pads (shown progressively across starter yard and newly expanded land plots!)
+// In-world floor unlock pads (only appear in newly expanded land plots — starter lawn is 100% empty so you place buildings yourself!)
 var UNLOCK_PADS = [
-  // Starter Essential Stations ('base' — revealed step-by-step during the new-game tutorial!)
-  { id: 'pad_foodbin',   plot: 'base',      kind: 'obj',   type: 'foodbin',    x: 20, y: 18, uniqueType: true, tutStep: 'build_food' },
-  { id: 'pad_water',     plot: 'base',      kind: 'obj',   type: 'waterbowl',  x: 23, y: 18, uniqueType: true, tutStep: 'build_water' },
-  { id: 'pad_trash',     plot: 'base',      kind: 'obj',   type: 'trash',      x: 19, y: 28, uniqueType: true, tutStep: 'scoop' },
-  { id: 'pad_toybox',    plot: 'base',      kind: 'obj',   type: 'toybox',     x: 26, y: 18, uniqueType: true, tutStep: 'build_toy' },
-  { id: 'pad_tub',       plot: 'base',      kind: 'obj',   type: 'tub',        x: 29, y: 18, uniqueType: true, tutStep: 'build_tub' },
-  // Additional Starter Yard ('base') Unlocks (after tutorial is complete)
-  { id: 'pad_kennel',    plot: 'base',      kind: 'obj',   type: 'kennel',     x: 28, y: 28 },
-  { id: 'pad_play',      plot: 'base',      kind: 'obj',   type: 'playzone',   x: 23, y: 24 },
-  { id: 'pad_treat',     plot: 'base',      kind: 'obj',   type: 'treatjar',   x: 20, y: 23, uniqueType: true },
-  { id: 'pad_nap',       plot: 'base',      kind: 'obj',   type: 'napmat',     x: 24, y: 29 },
-  { id: 'pad_recep',     plot: 'base',      kind: 'staff', staffId: 'receptionist', x: 5,  y: 23, w: 2, h: 2 },
-  { id: 'pad_cleaner',   plot: 'base',      kind: 'staff', staffId: 'cleaner',      x: 20, y: 20, w: 2, h: 2 },
   // Unlocked when North Lawn ('north') is expanded!
   { id: 'pad_n_sand',    plot: 'north',     kind: 'obj',   type: 'sandpit',    x: 20, y: 13, ignoreLvl: true },
   { id: 'pad_n_feeder',  plot: 'north',     kind: 'staff', staffId: 'feeder',  x: 24, y: 14, w: 2, h: 2 },
@@ -241,13 +228,13 @@ var DIFFICULTY = {
 
 var TUTORIAL = [
   { id: 'checkin',     reward: 20, text: 'Step onto the SERVE pad behind the counter to welcome your first dog' },
-  { id: 'pet',         reward: 20, text: 'Walk out to the yard and stand next to your dog to ❤️ cuddle it' },
-  { id: 'build_food',  reward: 25, text: 'Stand on the green 🍖 Food Bin ($60) box in the yard to build it' },
-  { id: 'feed',        reward: 20, text: 'Grab a kibble bowl from the Food Bin and feed your hungry dog' },
-  { id: 'build_water', reward: 25, text: 'Stand on the green 💧 Water Fountain ($55) box so pups can drink' },
-  { id: 'scoop',       reward: 25, text: 'Build the 🗑️ Poop Bin ($40), scoop poop in the yard, and toss it away' },
-  { id: 'build_toy',   reward: 25, text: 'Build the 🎾 Toy Box ($65), grab a ball, and play fetch with your dog' },
-  { id: 'build_tub',   reward: 35, text: 'Build the 🛁 Bath Tub ($110), leash the muddy dog, and give it a bath' },
+  { id: 'pet',         reward: 20, text: 'Walk out to the lawn and stand next to your dog to ❤️ cuddle it' },
+  { id: 'build_food',  reward: 25, text: 'Tap 🔨 Shop and place a 🍖 Food Bin ($60) anywhere on the lawn' },
+  { id: 'feed',        reward: 20, text: 'Grab a kibble bowl from your Food Bin and feed your hungry dog' },
+  { id: 'build_water', reward: 25, text: 'Tap 🔨 Shop and place a 💧 Water Fountain ($55) on the lawn so pups can drink' },
+  { id: 'scoop',       reward: 25, text: 'Place a 🗑️ Poop Bin ($40) from 🔨 Shop, scoop poop on the lawn, and toss it away' },
+  { id: 'build_toy',   reward: 25, text: 'Place a 🎾 Toy Box ($65) from 🔨 Shop, grab a ball, and play fetch with your dog' },
+  { id: 'build_tub',   reward: 35, text: 'Place a 🛁 Bath Tub ($110) from 🔨 Shop, leash the muddy dog, and give it a bath' },
   { id: 'return',      reward: 35, text: 'When the owner arrives for pickup, leash their dog and return it at the SERVE pad' },
 ];
 

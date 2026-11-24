@@ -477,3 +477,11 @@ body.title #modalwrap { background: rgba(30,20,12,.22); }
 @keyframes hop { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-10px); } }
 #fade { display: none; position: fixed; inset: 0; background: #1e140c; opacity: 0; pointer-events: none; transition: opacity .45s; z-index: 20; }
 #fade.on { opacity: 1; }
+#buildBtn.tut-pulse {
+  box-shadow: 0 0 0 3px #ffe66d, 0 0 18px rgba(255, 230, 109, 0.85);
+  animation: tutBtnPulse 1.1s ease-in-out infinite alternate;
+}
+@keyframes tutBtnPulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.07); }
+}

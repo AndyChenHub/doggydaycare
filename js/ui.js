@@ -19,6 +19,15 @@ function setMode(m) {
   document.body.classList.toggle('title', !!UI.inTitle);
   if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; UI.moveObj = null; CAM.panX = 0; CAM.panY = 0; }
   if (m !== 'play') { UI.joy = null; UI.touchTarget = null; }
+  if (m === 'build' && S && !S.tutorialDone && typeof tutorialRequiredBuildType === 'function') {
+    var reqType = tutorialRequiredBuildType();
+    if (reqType) {
+      UI.buildTab = 'care';
+      UI.buildSel = reqType;
+      UI.buildTool = null;
+      UI.moveObj = null;
+    }
+  }
   $('buildpanel').hidden = m !== 'build';
   if (m === 'build') renderBuildPanel();
   $('buildBtn').classList.toggle('on', m === 'build');
@@ -74,21 +83,28 @@ function bindModalButtons() {
 }
 function fadeThen(fn) { var f = $('fade'); f.style.display = 'block'; void f.offsetWidth; f.classList.add('on'); setTimeout(function () { fn(); setTimeout(function () { f.classList.remove('on'); setTimeout(function () { if (!f.classList.contains('on')) f.style.display = 'none'; }, 700); }, 160); }, 420); }
 function enterPlayFromState(fresh) {
+  var isFreshStart = !!fresh;
   if (fresh) {
     if (typeof clearSavedGame === 'function') clearSavedGame();
     else { try { localStorage.removeItem(SAVE_KEY); localStorage.setItem(OLD_DONE_KEY, '1'); } catch (e) {} }
     S = null; newState(); S.player.look = UI.pickLook || 0;
   } else if (!loadGame()) {
+    isFreshStart = true;
     newState(); S.player.look = UI.pickLook || 0;
   } else if (S.migrated) {
     S.player.look = UI.pickLook || 0;
   }
-  if (S && (fresh || UI._userPickedLook) && UI.pickLook != null) S.player.look = UI.pickLook;
+  if (isFreshStart && S) {
+    S.objects = [];
+    S.chores = [];
+    markDirty(true);
+  }
+  if (S && (isFreshStart || UI._userPickedLook) && UI.pickLook != null) S.player.look = UI.pickLook;
   else if (S && S.player && typeof S.player.look === 'number') UI.pickLook = S.player.look;
   UI._userPickedLook = false;
   UI.inTitle = false;
   if (typeof setActiveSession === 'function') setActiveSession(true);
-  if (typeof MP !== 'undefined') MP.onStartGame(fresh);
+  if (typeof MP !== 'undefined') MP.onStartGame(isFreshStart);
   UI.cashShown = S.cash; FX.parts = []; FX.floats = [];
   UI.modalStack = []; $('modalwrap').hidden = true; $('modal').innerHTML = ''; UI.prevMode = 'play'; setMode('play');
   CAM.ready = false; sfx('day_start'); setTimeout(dayBanner, 650);
@@ -129,7 +145,7 @@ function showGift(g) {
   bindModalButtons(); sfx('coin'); confetti(S.player.x, S.player.y - 50, 30);
 }
 var MODAL_ACTS = {
-  play: function () { startGame(false); },
+  play: function () { startGame(!hasSave()); },
   newgame: function () {
     if (hasSave()) confirmBox('Start over? Your daycare, cash and buildings will be erased.', function () { startGame(true); });
     else startGame(true);
@@ -405,10 +421,14 @@ function renderBuildPanel() {
         (hired ? '⬆️ ' + fmtMoney(tCost) : locked ? '🔒 Lv ' + s.lvl : fmtMoney(s.wage) + '/d') + '</div></div>';
     });
   } else {
+    var reqTutItem = (!S.tutorialDone && typeof tutorialRequiredBuildType === 'function') ? tutorialRequiredBuildType() : null;
+    if (reqTutItem && CAT_BY_ID[reqTutItem]) {
+      h += '<div class="bp-sub">🎓 Tutorial: Tap any open green spot on the lawn above to place your <b>' + CAT_BY_ID[reqTutItem].icon + ' ' + esc(CAT_BY_ID[reqTutItem].name) + '</b>!</div>';
+    }
     CATALOG.filter(function (c) { return c.cat === UI.buildTab; }).forEach(function (c) {
-      var locked = S.level < c.lvl, poor = S.cash < c.cost, url = objectIconURL(c.id);
-      h += '<div class="item' + (UI.buildSel === c.id ? ' sel' : '') + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-item="' + c.id + '">' +
-        '<div class="ic">' + (url ? '<img src="' + url + '">' : c.icon) + '</div><div class="tx"><b>' + c.name + '</b><small>⏱ ' + fmtDur(c.time) + (c.charm >= 1 ? ' · 🌸+' + c.charm : '') + (c.cap ? ' · 🐕+' + c.cap : '') + '</small></div>' +
+      var locked = S.level < c.lvl, poor = S.cash < c.cost, url = objectIconURL(c.id), isTut = reqTutItem === c.id;
+      h += '<div class="item' + (UI.buildSel === c.id ? ' sel' : '') + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-item="' + c.id + '"' + (isTut ? ' style="box-shadow:0 0 0 3px #ffe66d"' : '') + '>' +
+        '<div class="ic">' + (url ? '<img src="' + url + '">' : c.icon) + '</div><div class="tx"><b>' + c.name + (isTut ? ' <span style="color:#d9574a">🎓 Place Now</span>' : '') + '</b><small>⏱ ' + fmtDur(!S.tutorialDone ? Math.min(c.time, 2.5) : c.time) + (c.charm >= 1 ? ' · 🌸+' + c.charm : '') + (c.cap ? ' · 🐕+' + c.cap : '') + '</small></div>' +
         '<div class="pr">' + (locked ? '🔒' + c.lvl : fmtMoney(c.cost)) + '</div></div>';
     });
   }
@@ -552,8 +572,13 @@ function handleBuildTap(clientX, clientY) {
   if (UI.buildSel && !(site && !site.done) && UI.buildTool !== 'upgrade' && UI.buildTool !== 'sell') {
     var def = CAT_BY_ID[UI.buildSel], x = tx - Math.floor((def.w - 1) / 2), y = ty - Math.floor((def.h - 1) / 2);
     if (S.cash < def.cost) { toast('Not enough cash for a ' + def.name, 'bad'); sfx('error'); return; }
-    if (!canPlace(UI.buildSel, x, y)) { toast('Tap an open green tile in the yard', 'bad'); sfx('error'); return; }
+    if (!canPlace(UI.buildSel, x, y)) { toast('Tap an open green tile on the lawn', 'bad'); sfx('error'); return; }
     placeBuild(UI.buildSel, x, y);
+    if (!S.tutorialDone) {
+      UI.buildSel = null;
+      setMode('play');
+      return;
+    }
     if (S.cash < def.cost) UI.buildSel = null;
     renderBuildPanel(); return;
   }
@@ -727,15 +752,20 @@ function updateHUD(dt) {
   var badge = $('dexBadge'), bh = !UI.dexNew; if (badge.hidden !== bh) badge.hidden = bh; if (UI.dexNew) setText('dexBadge', UI.dexNew);
   // Contextual hint pill above bottom dock
   var z = UI.zone, hh2 = '';
+  var tutReqBuild = (!S.tutorialDone && typeof tutorialRequiredBuildType === 'function') ? tutorialRequiredBuildType() : null;
+  if ($('buildBtn')) $('buildBtn').classList.toggle('tut-pulse', !!(UI.mode === 'play' && tutReqBuild));
   if (UI.mode === 'play') {
     if (z) hh2 += '<span data-hact="interact" class="' + (z.disabled ? 'dim' : '') + '">' + (z.disabled ? '' : '⚡ ') + esc(z.label) + '</span>';
     else if (!S.tutorialDone && typeof tutorialGuidance === 'function') {
       var tg = tutorialGuidance();
-      if (tg) hh2 = '<span data-hact="tut">🎓 Step ' + tg.stepNum + '/' + tg.total + ': ' + esc(tg.subText) + '</span>';
+      if (tg) hh2 = '<span data-hact="' + (tg.needShop ? 'openbuild' : 'tut') + '">🎓 Step ' + tg.stepNum + '/' + tg.total + ': ' + esc(tg.subText) + '</span>';
     } else {
       var adv = typeof currentAdvisorHint === 'function' ? currentAdvisorHint() : null;
       if (adv) hh2 = '<span data-hact="' + esc(adv.act || 'staff') + '">' + esc(adv.text) + '</span>';
     }
+  } else if (UI.mode === 'build' && !S.tutorialDone && tutReqBuild && CAT_BY_ID[tutReqBuild]) {
+    var bDef = CAT_BY_ID[tutReqBuild];
+    hh2 = '<span data-hact="build">🎓 Tap any open green spot on the lawn to place your ' + bDef.icon + ' ' + esc(bDef.name) + '!</span>';
   }
   if (UI.hintHTML !== hh2) { UI.hintHTML = hh2; $('hint').innerHTML = hh2; }
   // Floating Drop button when carrying items or a dog
@@ -898,6 +928,7 @@ $('hint').addEventListener('pointerdown', function (ev) {
   var act = sp.getAttribute('data-hact');
   if (act === 'interact' && UI.mode === 'play') triggerZoneNow();
   else if (act === 'grab' && UI.mode === 'play') { var qa = qAction(); if (qa && !qa.disabled) qa.run(); }
+  else if (act === 'openbuild') { setMode('build'); sfx('ui_open'); }
   else if (act === 'tut') { UI.tasksOpen = !UI.tasksOpen; if (UI.tasksOpen) UI.rosterOpen = false; sfx('click'); renderTasks(); renderRoster(); }
   else if (act === 'staff') { UI.buildTab = 'biz'; setMode('build'); sfx('ui_open'); }
   else if (act === 'land') { UI.buildTab = 'land'; setMode('build'); sfx('ui_open'); }
