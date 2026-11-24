@@ -894,7 +894,9 @@ function drawBuildGhost(c, t) {
     var def = CAT_BY_ID[UI.buildSel], x = tx - Math.floor((def.w - 1) / 2), y = ty - Math.floor((def.h - 1) / 2);
     var site = objAt(tx, ty);
     if (site && !site.done) { siteHint(c, site); return; }
-    var ok = canPlace(UI.buildSel, x, y) && S.cash >= def.cost && S.level >= def.lvl;
+    var bCost = typeof itemCost === 'function' ? itemCost(UI.buildSel) : def.cost;
+    var bReq = typeof itemReqLvl === 'function' ? itemReqLvl(UI.buildSel) : def.lvl;
+    var ok = canPlace(UI.buildSel, x, y) && S.cash >= bCost && S.level >= bReq;
     c.fillStyle = ok ? 'rgba(120,240,150,0.32)' : 'rgba(255,90,80,0.32)'; rr(c, x * TILE + 1, y * TILE + 1, def.w * TILE - 2, def.h * TILE - 2, 8); c.fill();
     c.strokeStyle = ok ? '#8bf0a4' : '#ff6b5a'; c.lineWidth = 2.5; c.stroke();
     c.globalAlpha = ok ? 0.85 : 0.5;

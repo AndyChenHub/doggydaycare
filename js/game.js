@@ -225,24 +225,59 @@ function newState() {
     created: Date.now(),
   };
   S = s; groundDirty = true; NPCS = [];
-  // Empty land at startup — spawn the very first customer & dog right at the entrance and guide the player step by step!
-  spawnArrival();
-  if (s.owners[0]) {
-    var o0 = s.owners[0], d0 = dogById(o0.dogId);
-    o0.x = DOOR_X; o0.y = (MAP.shop.streetDoor.y + 0.3) * TILE;
-    o0.route = [[DOOR_X, 31.3 * TILE], [QUEUE[o0.slot][0] * TILE, QUEUE[o0.slot][1] * TILE]];
-    if (d0) { d0.x = o0.x + 18; d0.y = o0.y + 6; }
-  }
+  // Empty lawn at startup — 0 kennels and 0 dogs until the player places their first Kennel on the lawn in Step 1!
   return s;
 }
 function newStats(rep) { return { earned: 0, tips: 0, served: 0, complaints: 0, perfect: 0, repStart: rep, spent: 0, complaintList: [], pets: 0, scoops: 0, baths: 0, feeds: 0, fetches: 0, goalCash: 0, wages: 0 }; }
 function nid() { return S.nextId++; }
 
-function addObject(type, x, y, instant) {
+function kennelCount(includeBuilding) {
+  if (!S || !Array.isArray(S.objects)) return 0;
+  var n = 0;
+  for (var i = 0; i < S.objects.length; i++) {
+    var o = S.objects[i];
+    if (o && o.type === 'kennel' && (includeBuilding || o.done)) n++;
+  }
+  return n;
+}
+function itemCost(type) {
   var c = CAT_BY_ID[type];
-  var dur = (!S.tutorialDone && !instant) ? Math.min(c.time, 2.5) : c.time;
+  if (!c) return 0;
+  if (type === 'kennel') {
+    var kc = kennelCount(true);
+    if (kc <= 0) return 50;
+    return Math.round(160 * Math.pow(1.54, kc - 1));
+  }
+  return c.cost;
+}
+function itemReqLvl(type) {
+  var c = CAT_BY_ID[type];
+  if (!c) return 1;
+  if (type === 'kennel') {
+    var kc = kennelCount(true);
+    if (kc <= 0) return 1;
+    if (S && !S.tutorialDone) return 99; // Only 1 Kennel during the tutorial
+    return Math.max(1, kc); // 2nd Kennel at Lv 1 (after tutorial), 3rd at Lv 2, 4th at Lv 3, 5th at Lv 4... slowly goes up as you play!
+  }
+  return c.lvl;
+}
+function itemBuildTime(type) {
+  var c = CAT_BY_ID[type];
+  if (!c) return 10;
+  if (type === 'kennel') {
+    var kc = kennelCount(true);
+    if (kc <= 0) return 10;
+    return Math.min(1800, Math.round(35 * Math.pow(1.45, kc - 1)));
+  }
+  return c.time;
+}
+
+function addObject(type, x, y, instant, paidCost) {
+  var c = CAT_BY_ID[type];
+  var baseTime = itemBuildTime(type);
+  var dur = (!S.tutorialDone && !instant) ? Math.min(baseTime, 2.5) : baseTime;
   var o = { id: nid(), type: type, x: x, y: y, w: c.w, h: c.h, lvl: 1, upgrading: false, done: !!instant, buildEnd: instant ? 0 : Date.now() + dur * 1000,
-            buildDur: dur, dogId: null, reservedFor: null, useAt: -99 };
+            buildDur: dur, paidCost: paidCost != null ? paidCost : c.cost, dogId: null, reservedFor: null, useAt: -99 };
   S.objects.push(o);
   markDirty();
   return o;
@@ -325,14 +360,13 @@ function buildWalk() {
   if (!baseGrid) baseGrid = new Array(N);
   _gridState = S; walkStamp++;
   for (var i = 0; i < N; i++) objGrid[i] = null;
-  var dNum = S ? (S.day || 1) : 1, repVal = S && typeof S.rep === 'number' ? S.rep : 3.0;
-  var baseCap = starBaseCap(repVal, dNum);
   var fTier = S && typeof S.franchiseTier === 'number' ? S.franchiseTier : 0;
-  var bonusCap = fTier * 2, ch = fTier * 10, objs = S ? S.objects : [];
+  var kennelCap = 0, ch = fTier * 10, objs = S ? S.objects : [];
   for (var oi = 0; oi < objs.length; oi++) {
     var o = objs[oi], def = CAT_BY_ID[o.type], olv = o.lvl || 1;
     if (o.done && def) {
-      if (def.cap) bonusCap += def.cap + Math.floor((olv - 1) / 2);
+      // Number of dogs allowed is strictly equal to the number of built Kennels!
+      if (o.type === 'kennel') kennelCap += 1;
       if (def.charm) ch += def.charm * (1 + (olv - 1) * 0.6);
       else if (olv > 1) ch += (olv - 1) * 1.5;
     }
@@ -340,10 +374,7 @@ function buildWalk() {
       if (ox >= 0 && oy >= 0 && ox < W && oy < H) objGrid[oy * W + ox] = o;
     }
   }
-  // Star rating also scales how much of your facility capacity owners will fill
-  var starMul = repVal < 1.6 ? 0.35 : repVal < 2.4 ? 0.6 : repVal < 2.9 ? 0.8 : (1 + Math.max(0, repVal - 3.5) * 0.2);
-  var cap = Math.max(1, Math.round((baseCap + bonusCap) * starMul));
-  _capCache = cap; _charmCache = Math.floor(ch);
+  _capCache = kennelCap; _charmCache = Math.floor(ch);
   var ownedPlots = {};
   if (S && S.plots) {
     var nowMs = Date.now();
@@ -507,11 +538,11 @@ function activeDogCount() { return S.dogs.filter(function (d) { return d.state !
 function patienceMul() { return diff().patience * (1 + upLvl('lounge') * 0.18); }
 
 function spawnArrival() {
-  if (freeSlot() < 0) return false;
+  if (capacity() <= 0 || activeDogCount() >= capacity() || freeSlot() < 0) return false;
   var d = makeDog();
   var sp = pickSpecial(); if (sp) makeSpecialDog(d, sp);
   var k = freeKennel();
-  if (k && Math.random() < 0.4) { d.overnight = true; k.reservedFor = d.id; d.kennelId = k.id; }
+  if (S.tutorialDone && S.day >= 2 && k && Math.random() < 0.3) { d.overnight = true; k.reservedFor = d.id; d.kennelId = k.id; }
   S.dogs.push(d);
   var o = makeOwner('dropoff', d);
   o.patienceMax = o.patience = 75 * patienceMul();
@@ -1257,7 +1288,8 @@ function maxNeeds() {
 function hasDone(type) { return S.objects.some(function (o) { return o.type === type && o.done; }); }
 function hasAnyType(type) { return S.objects.some(function (o) { return o.type === type; }); }
 function checkStationTut(type) {
-  if (type === 'foodbin' && hasDone('foodbin')) tut('build_food');
+  if (type === 'kennel' && hasDone('kennel')) tut('build_kennel');
+  else if (type === 'foodbin' && hasDone('foodbin')) tut('build_food');
   else if (type === 'waterbowl' && hasDone('waterbowl')) tut('build_water');
   else if (type === 'toybox' && hasDone('toybox') && S.stats && S.stats.fetches > 0) tut('build_toy');
   else if (type === 'tub' && hasDone('tub') && S.stats && S.stats.baths > 0) tut('build_tub');
@@ -1281,17 +1313,8 @@ function advanceTutorialPacing() {
       o.patience = Math.max(o.patience, o.patienceMax * 0.7);
     }
   });
-  // Ensure the first arrival exists on step 1 if none are present
-  if (step.id === 'checkin' && S.owners.length === 0 && S.dogs.length === 0) {
-    spawnArrival();
-    if (S.owners[0]) {
-      var o0 = S.owners[0], d0 = dogById(o0.dogId);
-      o0.x = DOOR_X; o0.y = (MAP.shop.streetDoor.y + 0.3) * TILE;
-      o0.route = [[DOOR_X, 31.3 * TILE], [QUEUE[o0.slot][0] * TILE, QUEUE[o0.slot][1] * TILE]];
-      if (d0) { d0.x = o0.x + 18; d0.y = o0.y + 6; }
-    }
-  }
   // Auto-complete build steps once their station is built
+  if (hasDone('kennel') && !S.tutorial.build_kennel) tut('build_kennel');
   if (hasDone('foodbin') && !S.tutorial.build_food) tut('build_food');
   if (hasDone('waterbowl') && !S.tutorial.build_water) {
     tut('build_water');
@@ -1304,10 +1327,20 @@ function advanceTutorialPacing() {
   }
   step = currentTutorialStep();
   if (!step) return;
+  // Spawn the first customer & dog as soon as the player finishes Step 1 (build_kennel) and has 1 Kennel!
+  if (step.id === 'checkin' && S.owners.length === 0 && S.dogs.length === 0 && capacity() >= 1) {
+    spawnArrival();
+    if (S.owners[0]) {
+      var o0 = S.owners[0], d0 = dogById(o0.dogId);
+      o0.x = DOOR_X; o0.y = (MAP.shop.streetDoor.y + 0.3) * TILE;
+      o0.route = [[DOOR_X, 31.3 * TILE], [QUEUE[o0.slot][0] * TILE, QUEUE[o0.slot][1] * TILE]];
+      if (d0) { d0.x = o0.x + 18; d0.y = o0.y + 6; }
+    }
+  }
   // Prevent soft-lock if player somehow spent cash before building required tutorial station
-  var reqType = step.id === 'build_food' ? 'foodbin' : step.id === 'build_water' ? 'waterbowl' : step.id === 'scoop' ? 'trash' : step.id === 'build_toy' ? 'toybox' : step.id === 'build_tub' ? 'tub' : null;
-  if (reqType && !hasAnyType(reqType) && CAT_BY_ID[reqType] && S.cash < CAT_BY_ID[reqType].cost) {
-    S.cash = CAT_BY_ID[reqType].cost;
+  var reqType = step.id === 'build_kennel' ? 'kennel' : step.id === 'build_food' ? 'foodbin' : step.id === 'build_water' ? 'waterbowl' : step.id === 'scoop' ? 'trash' : step.id === 'build_toy' ? 'toybox' : step.id === 'build_tub' ? 'tub' : null;
+  if (reqType && !hasAnyType(reqType) && CAT_BY_ID[reqType] && S.cash < itemCost(reqType)) {
+    S.cash = itemCost(reqType);
   }
   var d = S.dogs.filter(function (q) { return q.checkedIn && q.state !== 'leaving'; })[0];
   if (!d) return;
@@ -1354,6 +1387,7 @@ function advanceTutorialPacing() {
 function tutorialRequiredBuildType() {
   var step = currentTutorialStep();
   if (!step) return null;
+  if (step.id === 'build_kennel' && !hasAnyType('kennel')) return 'kennel';
   if (step.id === 'build_food' && !hasAnyType('foodbin')) return 'foodbin';
   if (step.id === 'build_water' && !hasAnyType('waterbowl')) return 'waterbowl';
   if (step.id === 'scoop' && !hasAnyType('trash')) return 'trash';
@@ -1390,7 +1424,9 @@ function tutorialGuidance() {
     col = '#8bf06e';
     return { built: false, building: false, obj: null };
   }
-  if (step.id === 'checkin') {
+  if (step.id === 'build_kennel') {
+    checkStationState('kennel');
+  } else if (step.id === 'checkin') {
     tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2;
     callout = 'WELCOME DOG';
     subText = 'Step onto the SERVE pad behind the counter to welcome your first dog!';
@@ -1478,14 +1514,15 @@ function tutorialGuidance() {
       subText = 'Walk back to the SERVE pad behind the counter to return ' + dName + ' to their owner!';
       col = '#ffd54a';
     } else if (d && d.state === 'bath') {
-      tx = d.x; ty = d.y;
+      tx = null; ty = null;
       callout = 'FINISHING BATH…';
       subText = dName + ' is finishing their bath while their owner arrives at the counter!';
       col = '#80d8ff';
     } else {
-      if (d) { tx = d.x; ty = d.y; }
-      callout = 'LEASH ' + dName.toUpperCase();
-      subText = dName + '\'s owner is at the counter for pickup! Walk to ' + dName + ' on the lawn to leash them.';
+      // Never put a home icon or highlight marker on the pickup dog in the yard — player finds the dog themselves!
+      tx = null; ty = null;
+      callout = 'FIND ' + dName.toUpperCase() + ' FOR PICKUP';
+      subText = dName + '\'s owner is at the counter for pickup! Find ' + dName + ' on the lawn, walk up to leash them, and return them at the SERVE pad.';
       col = '#ffe082';
     }
   }
@@ -2393,9 +2430,10 @@ function moveObject(o, nx, ny) {
 }
 function placeBuild(type, x, y) {
   var c = CAT_BY_ID[type];
-  if (!c || S.level < c.lvl || S.cash < c.cost || !canPlace(type, x, y)) { sfx('error'); return false; }
-  S.cash -= c.cost; S.stats.spent += c.cost;
-  var o = addObject(type, x, y, false);
+  var cost = itemCost(type), reqLvl = itemReqLvl(type);
+  if (!c || S.level < reqLvl || S.cash < cost || !canPlace(type, x, y)) { sfx('error'); return false; }
+  S.cash -= cost; S.stats.spent += cost;
+  var o = addObject(type, x, y, false, cost);
   // push dogs out of the new footprint
   S.dogs.forEach(function (d) {
     if (d.state === 'leashed' || d.state === 'bath' || d.state === 'kennel' || d.state === 'leaving' || d.state === 'arriving') return;
@@ -2404,10 +2442,10 @@ function placeBuild(type, x, y) {
     d.path = null;
   });
   S.poops = S.poops.filter(function (pp) { var tx = tileOf(pp.x), ty = tileOf(pp.y); return !(tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h); });
-  float((x + c.w / 2) * TILE, y * TILE - 12, '-' + fmtMoney(c.cost), '#ff8a80');
+  float((x + c.w / 2) * TILE, y * TILE - 12, '-' + fmtMoney(cost), '#ff8a80');
   burst((x + c.w / 2) * TILE, (y + c.h / 2) * TILE, 'dust', 16); sfx('place');
   checkStationTut(type);
-  if (typeof MP !== 'undefined') MP.recordAction('build', { item: type, name: c.name, icon: c.icon, cost: c.cost, x: x, y: y });
+  if (typeof MP !== 'undefined') MP.recordAction('build', { item: type, name: c.name, icon: c.icon, cost: cost, x: x, y: y });
   saveGame();
   return true;
 }
@@ -2445,11 +2483,11 @@ function upgradeObject(o) {
 function sellValue(o) {
   var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
   if (!c) return 0;
-  var invested = c.cost;
+  var invested = (o && typeof o.paidCost === 'number') ? o.paidCost : c.cost;
   for (var i = 1; i < lv; i++) invested += Math.round(c.cost * Math.pow(1.65, i));
   return Math.floor(invested * (o.done ? 0.5 : 0.75));
 }
-var ESSENTIAL = { foodbin: 1, toybox: 1, trash: 1, tub: 1 };
+var ESSENTIAL = { kennel: 1, foodbin: 1, toybox: 1, trash: 1, tub: 1 };
 function isLastEssential(o) { return ESSENTIAL[o.type] && o.done && S.objects.filter(function (x) { return x.type === o.type && x.done; }).length <= 1; }
 function canSell(o) { return !o.dogId && !o.reservedFor && !isLastEssential(o); }
 function sellObject(o) {
@@ -3272,9 +3310,17 @@ function sanitizeAndMigrateState(s) {
       done: isDone,
       buildEnd: isDone ? 0 : buildEnd,
       buildDur: buildDur,
+      paidCost: _isnum(o.paidCost) ? Math.floor(o.paidCost) : cDef.cost,
       dogId: _isnum(o.dogId) ? Math.floor(o.dogId) : null,
       reservedFor: _isnum(o.reservedFor) ? Math.floor(o.reservedFor) : null,
       useAt: -99
+    });
+  }
+  if (s.tutorialDone && !cleanObjects.some(function (o) { return o.type === 'kennel'; })) {
+    cleanObjects.push({
+      id: maxId++, type: 'kennel', x: 28, y: 28, w: 2, h: 2, lvl: 1,
+      upgrading: false, done: true, buildEnd: 0, buildDur: 10, paidCost: 50,
+      dogId: null, reservedFor: null, useAt: -99
     });
   }
   s.objects = cleanObjects;

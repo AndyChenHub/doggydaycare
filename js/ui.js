@@ -118,7 +118,26 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Drag anywhere on screen to walk to the SERVE pad behind the counter!', 'good');
   saveGame();
 }
+var CURRENT_ASSET_VER = '16';
+function checkAndReloadIfUpdated( startFreshAfterReload ) {
+  if (typeof fetch !== 'function' || (location.protocol !== 'http:' && location.protocol !== 'https:')) return false;
+  try {
+    fetch('index.html?_cb=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.text() : ''; })
+      .then(function (txt) {
+        var m = txt && txt.match(/js\/game\.js\?v=(\d+)/);
+        if (m && m[1] && m[1] !== CURRENT_ASSET_VER) {
+          if (startFreshAfterReload) {
+            try { if (typeof clearSavedGame === 'function') clearSavedGame(); sessionStorage.setItem('paws_autostart_fresh', '1'); } catch (e) {}
+          }
+          location.reload();
+        }
+      }).catch(function () {});
+  } catch (e) {}
+  return false;
+}
 function startGame(fresh) {
+  checkAndReloadIfUpdated(fresh);
   var tName = $('titleNameInput'), tRoom = $('titleRoomInput');
   if (typeof MP !== 'undefined' && (tName || tRoom)) {
     MP.setProfile(tName ? tName.value : undefined, UI.pickLook, tRoom ? tRoom.value : undefined);
@@ -229,7 +248,7 @@ function openHelp() {
     '<p>⭐ <b>Star Rating &amp; Dog Count:</b> Your <b>★ Star Rating</b> controls how many dogs visit your daycare! Raise your stars (or recover from a low rating) by completing <b>🍂💧🦴✨ Yard &amp; Shop Chores</b>, playing fetch, cuddling, teaching tricks, or running an <b>Open House</b> in <b>🔨 Shop → Research &amp; Staff</b>.</p>' +
     '<p>🥣 <b>Stack, Play &amp; Train Anytime:</b> Walk onto the <b>Food Bin</b>, <b>Toy Box</b>, or <b>Treat Jar</b> pad to stack items, then walk up to any dog in the yard to play fetch, teach tricks, feed snacks, or cuddle them for bonus cash and ★ Reputation!</p>' +
     '<p>💵 <b>Floor Unlock Boxes &amp; Land Expansion:</b> Step onto green <b>$ Boxes</b> or golden <b>🗺️ Land Expansion Boxes</b> at the yard border to build stations and unlock new land with new attractions!</p>' +
-    '<p>🏠 <b>Pickup:</b> In the afternoon, owners return after work. Walk near a dog with 🏠 to leash it, then bring it to the <b>SERVE pad</b> behind the counter to get paid!</p>' +
+    '<p>🏠 <b>Kennels &amp; Pickups:</b> The number of dogs allowed in your daycare equals your number of built <b>🏠 Kennels</b> (unlock more Kennels as you level up!). At pickup time, check which dog the owner at the counter asks for — pickup dogs have <b>no home icon</b> and keep doing their own thing on the lawn, so find them, walk near them to leash them, and return them at the <b>SERVE pad</b>!</p>' +
     '</div><div class="row"><button data-act="back" class="primary">Got it!</button></div>', 'help');
   bindModalButtons();
 }
@@ -426,10 +445,16 @@ function renderBuildPanel() {
       h += '<div class="bp-sub">🎓 Tutorial: Tap any open green spot on the lawn above to place your <b>' + CAT_BY_ID[reqTutItem].icon + ' ' + esc(CAT_BY_ID[reqTutItem].name) + '</b>!</div>';
     }
     CATALOG.filter(function (c) { return c.cat === UI.buildTab; }).forEach(function (c) {
-      var locked = S.level < c.lvl, poor = S.cash < c.cost, url = objectIconURL(c.id), isTut = reqTutItem === c.id;
+      var cCost = typeof itemCost === 'function' ? itemCost(c.id) : c.cost;
+      var cReq = typeof itemReqLvl === 'function' ? itemReqLvl(c.id) : c.lvl;
+      var cTime = typeof itemBuildTime === 'function' ? itemBuildTime(c.id) : c.time;
+      var locked = S.level < cReq, poor = S.cash < cCost, url = objectIconURL(c.id), isTut = reqTutItem === c.id;
+      var kCount = (c.id === 'kennel' && typeof kennelCount === 'function') ? kennelCount(true) : 0;
+      var lockLabel = (c.id === 'kennel' && !S.tutorialDone && kCount >= 1) ? '🔒 Tut' : ('🔒 Lv' + cReq);
+      var titleSuffix = c.id === 'kennel' ? (' <small style="color:#58b368">(#' + (kCount + 1) + ' → ' + (kCount + 1) + ' Dog' + (kCount + 1 > 1 ? 's' : '') + ')</small>') : '';
       h += '<div class="item' + (UI.buildSel === c.id ? ' sel' : '') + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-item="' + c.id + '"' + (isTut ? ' style="box-shadow:0 0 0 3px #ffe66d"' : '') + '>' +
-        '<div class="ic">' + (url ? '<img src="' + url + '">' : c.icon) + '</div><div class="tx"><b>' + c.name + (isTut ? ' <span style="color:#d9574a">🎓 Place Now</span>' : '') + '</b><small>⏱ ' + fmtDur(!S.tutorialDone ? Math.min(c.time, 2.5) : c.time) + (c.charm >= 1 ? ' · 🌸+' + c.charm : '') + (c.cap ? ' · 🐕+' + c.cap : '') + '</small></div>' +
-        '<div class="pr">' + (locked ? '🔒' + c.lvl : fmtMoney(c.cost)) + '</div></div>';
+        '<div class="ic">' + (url ? '<img src="' + url + '">' : c.icon) + '</div><div class="tx"><b>' + c.name + titleSuffix + (isTut ? ' <span style="color:#d9574a">🎓 Place Now</span>' : '') + '</b><small>⏱ ' + fmtDur(!S.tutorialDone ? Math.min(cTime, 2.5) : cTime) + (c.charm >= 1 ? ' · 🌸+' + c.charm : '') + (c.cap ? ' · 🐕+' + c.cap + ' allowed' : '') + '</small></div>' +
+        '<div class="pr">' + (locked ? lockLabel : fmtMoney(cCost)) + '</div></div>';
     });
   }
   h += '</div><div class="bp-tools"><span class="small" id="bpDesc"></span></div>';
@@ -459,7 +484,12 @@ function bpShowDesc(txt) {
     if (t.hasAttribute('data-tab')) { UI.buildTab = t.getAttribute('data-tab'); UI.buildSel = null; UI.moveObj = null; sfx('click'); renderBuildPanel(); var it = bp.querySelector('.items'); if (it) it.scrollTop = 0; return; }
     if (t.hasAttribute('data-item')) {
       var id = t.getAttribute('data-item'), c = CAT_BY_ID[id];
-      if (S.level < c.lvl) { toast('🔒 Reach level ' + c.lvl + ' to build a ' + c.name, 'bad'); sfx('error'); return; }
+      var reqL = typeof itemReqLvl === 'function' ? itemReqLvl(id) : c.lvl;
+      if (S.level < reqL) {
+        if (id === 'kennel' && !S.tutorialDone) toast('🎓 Finish the onboarding tutorial first before building a 2nd Kennel!', 'bad');
+        else toast('🔒 Reach Daycare Level ' + reqL + ' to build another ' + c.name, 'bad');
+        sfx('error'); return;
+      }
       UI.buildSel = UI.buildSel === id ? null : id; UI.buildTool = null; UI.moveObj = null; sfx('click'); renderBuildPanel(); return;
     }
     if (t.hasAttribute('data-staff')) {
@@ -492,7 +522,8 @@ function bpShowDesc(txt) {
 function buildSig() {
   var pend = UI.buildTab === 'land' && S.plots.some(function (p) { return Date.now() < p.end + 1000; });
   var stSig = STAFF.map(function (s) { return staffLvl(s.id) + ':' + (S.cash >= staffTrainCost(s.id) ? 1 : 0); }).join(',');
-  return CATALOG.map(function (c) { return S.cash >= c.cost ? 1 : 0; }).join('') + PLOTS.map(function (p) { return S.cash >= p.cost ? 1 : 0; }).join('') + UPGRADES.map(function (u) { return upLvl(u.id) + ':' + (S.cash >= upgCost(u) ? 1 : 0); }).join(',') + '|' + stSig + '|' + franchiseTier() + ':' + (S.cash >= franchiseCost() ? 1 : 0) + '|' + S.level + '|' + S.plots.length + '|' + (pend ? Math.floor(Date.now() / 1000) : '');
+  var catSig = CATALOG.map(function (c) { var cost = typeof itemCost === 'function' ? itemCost(c.id) : c.cost; return (S.cash >= cost ? 1 : 0); }).join('');
+  return catSig + ':' + (typeof kennelCount === 'function' ? kennelCount(true) : 0) + '|' + PLOTS.map(function (p) { return S.cash >= p.cost ? 1 : 0; }).join('') + UPGRADES.map(function (u) { return upLvl(u.id) + ':' + (S.cash >= upgCost(u) ? 1 : 0); }).join(',') + '|' + stSig + '|' + franchiseTier() + ':' + (S.cash >= franchiseCost() ? 1 : 0) + '|' + S.level + '|' + S.plots.length + '|' + (pend ? Math.floor(Date.now() / 1000) : '');
 }
 function tryBuyPlot(p) {
   if (plotOwned(p) || plotPending(p)) return;
@@ -571,15 +602,19 @@ function handleBuildTap(clientX, clientY) {
   }
   if (UI.buildSel && !(site && !site.done) && UI.buildTool !== 'upgrade' && UI.buildTool !== 'sell') {
     var def = CAT_BY_ID[UI.buildSel], x = tx - Math.floor((def.w - 1) / 2), y = ty - Math.floor((def.h - 1) / 2);
-    if (S.cash < def.cost) { toast('Not enough cash for a ' + def.name, 'bad'); sfx('error'); return; }
+    var bCost = typeof itemCost === 'function' ? itemCost(UI.buildSel) : def.cost;
+    var bReq = typeof itemReqLvl === 'function' ? itemReqLvl(UI.buildSel) : def.lvl;
+    if (S.level < bReq) { toast('🔒 Reach Level ' + bReq + ' to build another ' + def.name, 'bad'); sfx('error'); return; }
+    if (S.cash < bCost) { toast('Not enough cash for a ' + def.name + ' (' + fmtMoney(bCost) + ')', 'bad'); sfx('error'); return; }
     if (!canPlace(UI.buildSel, x, y)) { toast('Tap an open green tile on the lawn', 'bad'); sfx('error'); return; }
     placeBuild(UI.buildSel, x, y);
-    if (!S.tutorialDone) {
+    if (!S.tutorialDone || UI.buildSel === 'kennel') {
       UI.buildSel = null;
-      setMode('play');
+      if (!S.tutorialDone) setMode('play');
+      else renderBuildPanel();
       return;
     }
-    if (S.cash < def.cost) UI.buildSel = null;
+    if (S.cash < itemCost(UI.buildSel)) UI.buildSel = null;
     renderBuildPanel(); return;
   }
   var o = site;
@@ -946,12 +981,17 @@ resizeView();
     var sc = baseZoom() * VIEW.dpr; CAM.zoom = baseZoom();
     try { if (typeof shopArtPrewarm === 'function') shopArtPrewarm(sc); } catch (e) {}
     try { if (typeof warmObjectArt === 'function') warmObjectArt(sc); } catch (e) {}
-    if (typeof hasActiveSession === 'function' && hasActiveSession()) {
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('paws_autostart_fresh') === '1') {
+      try { sessionStorage.removeItem('paws_autostart_fresh'); } catch (e) {}
+      enterPlayFromState(true);
+      setTimeout(function () { $('splash').classList.add('gone'); setTimeout(function () { $('splash').style.display = 'none'; }, 800); }, 250);
+    } else if (typeof hasActiveSession === 'function' && hasActiveSession()) {
       enterPlayFromState(false);
       setTimeout(function () { $('splash').classList.add('gone'); setTimeout(function () { $('splash').style.display = 'none'; }, 800); }, 250);
     } else {
       openTitle();
     }
+    checkAndReloadIfUpdated(false);
     requestAnimationFrame(frame);
   }
   try { Promise.all([document.fonts.load('20px "Jersey 25"'), document.fonts.load('700 14px Nunito'), document.fonts.load('800 14px Nunito')]).then(go, go); } catch (e) { go(); }

@@ -89,8 +89,8 @@ var OWNER_NAMES = ['Alex','Sam','Priya','Jordan','Maria','Chen','Taylor','Omar',
 // time = real-life seconds to build (continues in real time while app is closed, Clash of Clans style).
 // Every placed building can also be upgraded infinitely (Lv 1 -> Lv 2 -> Lv 3...) for higher capacity, charm & care bonus.
 var CATALOG = [
-  { id: 'kennel',     cat: 'care',  name: 'Kennel',          icon: '🏠', w: 2, h: 2, cost: 360,  time: 120,  lvl: 2,  cap: 1, solid: true,
-    desc: 'Unlocks overnight stays. +1 dog capacity (+1 more every 2 upgrade levels).' },
+  { id: 'kennel',     cat: 'care',  name: 'Kennel',          icon: '🏠', w: 2, h: 2, cost: 50,   time: 10,   lvl: 1,  cap: 1, solid: true,
+    desc: 'Each Kennel allows 1 dog in your daycare (1 Kennel = 1 Dog allowed) and unlocks overnight stays. Unlock more Kennels as you level up!' },
   { id: 'foodbin',    cat: 'care',  name: 'Food Bin',        icon: '🍖', w: 1, h: 1, cost: 60,   time: 8,    lvl: 1,  solid: true, desc: 'Stack bowls of kibble. Upgrade for +care bonus & charm.' },
   { id: 'toybox',     cat: 'care',  name: 'Toy Box',         icon: '🎾', w: 1, h: 1, cost: 65,   time: 8,    lvl: 1,  solid: true, desc: 'Stack balls for fetch. Upgrade for +care bonus & charm.' },
   { id: 'trash',      cat: 'care',  name: 'Poop Bin',        icon: '🗑️', w: 1, h: 1, cost: 40,   time: 6,    lvl: 1,  solid: true, desc: 'Toss scooped poop away. Upgrade for +XP & charm.' },
@@ -98,11 +98,11 @@ var CATALOG = [
   { id: 'waterbowl',  cat: 'care',  name: 'Water Fountain',  icon: '💧', w: 1, h: 1, cost: 55,   time: 8,    lvl: 1,  solid: true, desc: 'Fresh drinking fountain! Thirsty dogs trot over for a drink and +happiness.' },
   { id: 'treatjar',   cat: 'care',  name: 'Treat Jar',       icon: '🍪', w: 1, h: 1, cost: 420,  time: 150,  lvl: 3,  solid: true, desc: 'Stack gourmet dog treats. Upgrade for bigger mood boosts.' },
   { id: 'autofeeder', cat: 'care',  name: 'Auto-Feeder',     icon: '🤖', w: 1, h: 1, cost: 3200, time: 1500, lvl: 10, solid: true, desc: 'Hungry dogs walk over and feed themselves automatically.' },
-  { id: 'playzone',   cat: 'fun',   name: 'Play Zone',       icon: '🛝', w: 3, h: 3, cost: 520,  time: 180,  lvl: 3,  cap: 2, floor: true, desc: 'Dogs inside have fun on their own. +2 capacity.' },
-  { id: 'napmat',     cat: 'fun',   name: 'Nap Mat',         icon: '🛏️', w: 2, h: 1, cost: 320,  time: 120,  lvl: 4,  cap: 1, floor: true, desc: 'Dogs resting here lose needs slower. +1 capacity.' },
-  { id: 'sandpit',    cat: 'fun',   name: 'Sand Pit',        icon: '🏖️', w: 2, h: 2, cost: 640,  time: 240,  lvl: 5,  cap: 1, floor: true, desc: 'Great fun to dig in. +1 capacity.' },
-  { id: 'pool',       cat: 'fun',   name: 'Splash Pool',     icon: '🏊', w: 3, h: 2, cost: 1350, time: 540,  lvl: 6,  cap: 2, floor: true, desc: 'Fun and cooling. Water Babies adore it. +2 capacity.' },
-  { id: 'agility',    cat: 'fun',   name: 'Agility Course',  icon: '🚧', w: 4, h: 2, cost: 2400, time: 900,  lvl: 8,  cap: 3, floor: true, desc: 'High-energy obstacle course. +3 capacity.' },
+  { id: 'playzone',   cat: 'fun',   name: 'Play Zone',       icon: '🛝', w: 3, h: 3, cost: 520,  time: 180,  lvl: 3,  charm: 4, floor: true, desc: 'Dogs inside play and stay happy on their own. +4 charm.' },
+  { id: 'napmat',     cat: 'fun',   name: 'Nap Mat',         icon: '🛏️', w: 2, h: 1, cost: 320,  time: 120,  lvl: 4,  charm: 3, floor: true, desc: 'Dogs resting here lose needs slower and nap happily. +3 charm.' },
+  { id: 'sandpit',    cat: 'fun',   name: 'Sand Pit',        icon: '🏖️', w: 2, h: 2, cost: 640,  time: 240,  lvl: 5,  charm: 5, floor: true, desc: 'Great fun to dig in. +5 charm.' },
+  { id: 'pool',       cat: 'fun',   name: 'Splash Pool',     icon: '🏊', w: 3, h: 2, cost: 1350, time: 540,  lvl: 6,  charm: 8, floor: true, desc: 'Fun and cooling. Water Babies adore it. +8 charm.' },
+  { id: 'agility',    cat: 'fun',   name: 'Agility Course',  icon: '🚧', w: 4, h: 2, cost: 2400, time: 900,  lvl: 8,  charm: 12, floor: true, desc: 'High-energy obstacle course. +12 charm.' },
   { id: 'path',       cat: 'decor', name: 'Stone Path',      icon: '🪨', w: 1, h: 1, cost: 20,   time: 10,   lvl: 1,  charm: 0.25, floor: true, desc: 'A tidy stepping-stone path.' },
   { id: 'flowers',    cat: 'decor', name: 'Flower Bed',      icon: '🌷', w: 1, h: 1, cost: 45,   time: 20,   lvl: 1,  charm: 1, floor: true, desc: '+1 charm (upgradeable).' },
   { id: 'hydrant',    cat: 'decor', name: 'Fire Hydrant',    icon: '🧯', w: 1, h: 1, cost: 75,   time: 30,   lvl: 1,  charm: 1, solid: true, desc: '+1 charm (upgradeable).' },
@@ -227,15 +227,16 @@ var DIFFICULTY = {
 };
 
 var TUTORIAL = [
-  { id: 'checkin',     reward: 20, text: 'Step onto the SERVE pad behind the counter to welcome your first dog' },
-  { id: 'pet',         reward: 20, text: 'Walk out to the lawn and stand next to your dog to ❤️ cuddle it' },
-  { id: 'build_food',  reward: 25, text: 'Tap 🔨 Shop and place a 🍖 Food Bin ($60) anywhere on the lawn' },
-  { id: 'feed',        reward: 20, text: 'Grab a kibble bowl from your Food Bin and feed your hungry dog' },
-  { id: 'build_water', reward: 25, text: 'Tap 🔨 Shop and place a 💧 Water Fountain ($55) on the lawn so pups can drink' },
-  { id: 'scoop',       reward: 25, text: 'Place a 🗑️ Poop Bin ($40) from 🔨 Shop, scoop poop on the lawn, and toss it away' },
-  { id: 'build_toy',   reward: 25, text: 'Place a 🎾 Toy Box ($65) from 🔨 Shop, grab a ball, and play fetch with your dog' },
-  { id: 'build_tub',   reward: 35, text: 'Place a 🛁 Bath Tub ($110) from 🔨 Shop, leash the muddy dog, and give it a bath' },
-  { id: 'return',      reward: 35, text: 'When the owner arrives for pickup, leash their dog and return it at the SERVE pad' },
+  { id: 'build_kennel', reward: 25, text: 'Tap 🔨 Shop and place your first 🏠 Kennel ($50) on the lawn (1 Kennel = 1 Dog allowed)' },
+  { id: 'checkin',      reward: 20, text: 'Step onto the SERVE pad behind the counter to welcome your first dog' },
+  { id: 'pet',          reward: 20, text: 'Walk out to the lawn and stand next to your dog to ❤️ cuddle it' },
+  { id: 'build_food',   reward: 25, text: 'Tap 🔨 Shop and place a 🍖 Food Bin ($60) anywhere on the lawn' },
+  { id: 'feed',         reward: 20, text: 'Grab a kibble bowl from your Food Bin and feed your hungry dog' },
+  { id: 'build_water',  reward: 25, text: 'Tap 🔨 Shop and place a 💧 Water Fountain ($55) on the lawn so pups can drink' },
+  { id: 'scoop',        reward: 25, text: 'Place a 🗑️ Poop Bin ($40) from 🔨 Shop, scoop poop on the lawn, and toss it away' },
+  { id: 'build_toy',    reward: 25, text: 'Place a 🎾 Toy Box ($65) from 🔨 Shop, grab a ball, and play fetch with your dog' },
+  { id: 'build_tub',    reward: 35, text: 'Place a 🛁 Bath Tub ($110) from 🔨 Shop, leash the muddy dog, and give it a bath' },
+  { id: 'return',       reward: 35, text: 'When the owner arrives for pickup, find their dog on the lawn, leash it, and return it at the SERVE pad' },
 ];
 
 // Steep Clash of Clans XP curve for long-term endless play
