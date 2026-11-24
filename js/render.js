@@ -525,6 +525,9 @@ function drawPlayerGuide(c, t) {
           var st = S.objects.filter(function (o) { return o.done && STATION_ITEM[o.type] === reqItem; })[0];
           if (st) { var sp = stationPad(st); if (sp) { tx = sp.x + sp.w / 2; ty = sp.y + sp.h / 2; col = '#ffe082'; } }
         } else { tx = nd.x; ty = nd.y; col = '#ff8a80'; }
+      } else if (S.chores && S.chores.length) {
+        var nearCh = S.chores.slice().sort(function (a, b) { return dist(p.x, p.y, a.x, a.y) - dist(p.x, p.y, b.x, b.y); })[0];
+        if (nearCh) { tx = nearCh.x; ty = nearCh.y; col = '#80d8ff'; }
       }
     }
   }
@@ -599,7 +602,23 @@ function drawZones(c, t, v) {
       }
     }
   }
-  // 4. Rings round the dogs that need you
+  // 4. Daytime Yard & Shop Chores (walk over to complete for cash & ★ Star Rating!)
+  if (S.chores && S.chores.length) {
+    S.chores.forEach(function (ch) {
+      if (!inView(v, ch.x - 45, ch.y - 45, 90, 90)) return;
+      var actC = z && z.key === 'chore' + ch.id, puC = 0.5 + Math.sin(t * 5 + ch.id) * 0.5;
+      c.fillStyle = actC ? 'rgba(128, 216, 255, 0.38)' : 'rgba(255, 248, 225, 0.22)';
+      ell(c, ch.x, ch.y, 26, 13); c.fill();
+      c.strokeStyle = actC ? '#80d8ff' : 'rgba(255, 230, 128, ' + (0.65 + puC * 0.35) + ')';
+      c.lineWidth = actC ? 3 : 2.2; c.setLineDash(actC ? [] : [5, 4]);
+      ell(c, ch.x, ch.y, 26, 13); c.stroke(); c.setLineDash([]);
+      var bobY = ch.y - 12 + Math.sin(t * 4.5 + ch.id) * 3;
+      emoji(c, ch.icon, ch.x, bobY, 18);
+      c.font = '11.5px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+      outlined(c, '+' + fmtMoney(ch.cash) + ' ★', ch.x, ch.y + 11, '#ffe66d', 'rgba(30,18,10,0.9)', 2.4);
+    });
+  }
+  // 5. Rings round the dogs that need you
   S.dogs.forEach(function (d) {
     if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'eat' || d.state === 'play')) return;
     var wanted = d.called && S.owners.some(function (o) { return o.dogId === d.id && o.state === 'waitPickup'; });

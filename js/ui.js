@@ -182,38 +182,34 @@ function openTitle() {
   var pName = (typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : ((looks[UI.pickLook] && looks[UI.pickLook].name) || 'Sam');
   var rCode = (typeof MP !== 'undefined' && MP.roomCode) ? MP.roomCode : 'PAWS';
   var chars = looks.length ? '<p class="small" style="margin-bottom:0">Choose your keeper</p><div class="chars">' + looks.map(function (l, i) { return '<div class="ch' + (i === UI.pickLook ? ' on' : '') + '" data-look="' + i + '"><img src="' + lookPortrait(i, 64) + '"><small>' + esc(l.name || ('Keeper ' + (i + 1))) + '</small></div>'; }).join('') + '</div>' : '';
-  var mpBar = '<div class="title-mp-bar">' +
-    '<label>Name <input type="text" id="titleNameInput" maxlength="18" value="' + esc(pName) + '"></label>' +
-    '<label>Room <input type="text" id="titleRoomInput" maxlength="8" value="' + esc(rCode) + '" style="width:70px;text-transform:uppercase;text-align:center"></label>' +
-    '</div>';
   $('modal').innerHTML = '<div class="card title"><div class="logo">Paws &amp; Play<span>DOGGY DAYCARE</span></div>' +
-    '<p class="tag">Drag with one thumb to welcome pups, stack supplies,<br>and expand the cosiest daycare on iPhone!</p>' + chars + mpBar +
+    '<p class="tag">Drag with one thumb to welcome pups, stack supplies,<br>and expand the cosiest daycare on iPhone!</p>' + chars +
     '<div class="row col"><button data-act="play" class="primary big">' + (has ? '▶ Continue Daycare' : '▶ Play Daycare') + '</button>' +
-    '<button data-act="coop">📱 iPhone Co-op</button>' +
     (has ? '<button data-act="newgame" class="flat">New Game</button>' : '') +
-    '<div class="row" style="margin-top:0"><button data-act="help" class="flat">How to Play</button><button data-act="settings" class="flat">Settings</button></div></div></div>';
+    '<div class="row" style="margin-top:0"><button data-act="help" class="flat">How to Play</button><button data-act="settings" class="flat">Settings &amp; Co-op</button></div></div></div>';
   $('modalwrap').hidden = false; bindModalButtons();
 }
 function openPause() {
   saveGame();
-  openModal('<h2>Paused</h2><div class="row col"><button data-act="resume" class="primary big">Resume</button><button data-act="coop">📱 iPhone Co-op &amp; QR Code</button><button data-act="partnersummary">📋 What Partner Did</button><button data-act="dex">📖 Dog Breeds</button><button data-act="help">How to Play</button><button data-act="settings">Settings</button><button data-act="totitle" class="flat">Save &amp; Quit to Title</button></div>' +
+  openModal('<h2>Paused</h2><div class="row col"><button data-act="resume" class="primary big">Resume</button><button data-act="dex">📖 Dog Breeds</button><button data-act="settings">⚙️ Settings &amp; Co-op</button><button data-act="help">How to Play</button><button data-act="totitle" class="flat">Save &amp; Quit to Title</button></div>' +
     '<p class="small">Your daycare saves automatically on your iPhone.</p>', 'paused', 'narrow');
   bindModalButtons();
 }
 function openHelp() {
   openModal('<h2>How to Play</h2><div class="help">' +
     '<p>🕹️ <b>One-Thumb Controls:</b> Touch and drag anywhere on the screen to move your keeper with the floating joystick (or tap any spot to walk there). Every action happens <b>automatically</b> when you walk up to it!</p>' +
-    '<p>🔔 <b>Check-In:</b> When an owner rings the bell at the counter, step onto the <b>SERVE pad</b>. You welcome their dog and it happily trots straight out to the daycare yard!</p>' +
-    '<p>🥣 <b>Stack &amp; Serve:</b> Walk onto the <b>Food Bin</b>, <b>Toy Box</b>, or <b>Treat Jar</b> pad to stack up to 3 items in your hands, then walk past any dog asking for 🍖 food, 🎾 play, or 🍪 treats to serve them in stride! Walk by a dog with ❤️ to cuddle it, or walk by a muddy 🛁 dog to leash it to the <b>Bath Tub</b>.</p>' +
-    '<p>💩 <b>Quick Scoop:</b> Walk right over poop to scoop it into your stack, then pass by the <b>Poop Bin</b> to toss it away.</p>' +
-    '<p>💵 <b>Floor Unlock Pads &amp; Shop:</b> Step onto green <b>$ Pads</b> in the yard to pour cash in and build stations or hire staff on the spot, or tap <b>🔨 Shop</b> at the bottom to decorate and expand your land!</p>' +
-    '<p>🏠 <b>Pickup:</b> When an owner comes back, a 🏠 marker appears over their dog. Walk near the dog to leash it, then bring it to the <b>SERVE pad</b> behind the counter to get paid!</p>' +
+    '<p>⭐ <b>Star Rating &amp; Dog Count:</b> Your <b>★ Star Rating</b> controls how many dogs visit your daycare! Raise your stars (or recover from a low rating) by completing <b>🍂💧🦴✨ Yard &amp; Shop Chores</b>, playing fetch, cuddling, teaching tricks, or running an <b>Open House</b> in <b>🔨 Shop → Research &amp; Staff</b>.</p>' +
+    '<p>🥣 <b>Stack, Play &amp; Train Anytime:</b> Walk onto the <b>Food Bin</b>, <b>Toy Box</b>, or <b>Treat Jar</b> pad to stack items, then walk up to any dog in the yard to play fetch, teach tricks, feed snacks, or cuddle them for bonus cash and ★ Reputation!</p>' +
+    '<p>💵 <b>Floor Unlock Boxes &amp; Land Expansion:</b> Step onto green <b>$ Boxes</b> or golden <b>🗺️ Land Expansion Boxes</b> at the yard border to build stations and unlock new land with new attractions!</p>' +
+    '<p>🏠 <b>Pickup:</b> In the afternoon, owners return after work. Walk near a dog with 🏠 to leash it, then bring it to the <b>SERVE pad</b> behind the counter to get paid!</p>' +
     '</div><div class="row"><button data-act="back" class="primary">Got it!</button></div>', 'help');
   bindModalButtons();
 }
 function openSettings() {
   function opt(v, cur, label) { return '<option value="' + v + '"' + (String(v) === String(cur) ? ' selected' : '') + '>' + label + '</option>'; }
   function slider(key, min, max, step) { return '<input type="range" data-set="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + settings[key] + '">'; }
+  var rCode = (typeof MP !== 'undefined' && MP.roomCode) ? MP.roomCode : 'PAWS';
+  var onlineN = (typeof MP !== 'undefined' && MP.getOnlinePeers) ? MP.getOnlinePeers().length : 0;
   openModal('<h2>Settings</h2>' +
     '<div class="opts"><span>🎵 Music</span>' + slider('musicVol', 0, 1, 0.05) +
     '<span>🍃 Ambience</span>' + slider('ambVol', 0, 1, 0.05) +
@@ -221,6 +217,10 @@ function openSettings() {
     '<span>🔍 Camera zoom</span>' + slider('zoom', 0.7, 1.4, 0.1) +
     '<span>Day length</span><select data-set="dayLength">' + opt(180, settings.dayLength, '3 minutes') + opt(300, settings.dayLength, '5 minutes') + opt(480, settings.dayLength, '8 minutes') + opt(720, settings.dayLength, '12 minutes') + '</select>' +
     '<span>Difficulty</span><select data-set="difficulty">' + opt('relaxed', settings.difficulty, 'Relaxed') + opt('normal', settings.difficulty, 'Normal') + opt('hectic', settings.difficulty, 'Hectic') + '</select></div>' +
+    '<div class="row col" style="margin-top:10px">' +
+      '<button data-act="coop" class="wood">📱 iPhone Co-op &amp; Room Setup (Room: ' + esc(rCode) + (onlineN ? ' · 🟢 ' + (onlineN + 1) + ' Online' : '') + ')</button>' +
+      (S ? '<button data-act="partnersummary" class="flat">📋 View What Partner Did</button>' : '') +
+    '</div>' +
     '<div class="row"><button data-act="back" class="primary">Done</button><button data-act="defaults" class="flat">Restore Defaults</button></div>', 'settings');
   bindModalButtons();
 }
@@ -352,6 +352,9 @@ function renderBuildPanel() {
         (owned ? '✅' : pend ? '🚜 ' + fmtDur((pend.end - Date.now()) / 1000) : locked ? '🔒 Lv ' + p.lvl : fmtMoney(p.cost)) + '</div></div>';
     });
   } else if (UI.buildTab === 'biz') {
+    h += '<div class="bp-sub">⭐ Boost Star Rating (' + S.rep.toFixed(1) + '★ → Max ' + capacity() + ' dogs)</div>';
+    h += '<div class="item' + (S.cash < 35 ? ' poor' : '') + '" data-repboost="social"><div class="ic">🍪</div><div class="tx"><b>Pup Cup Social</b><small>Instant +0.35★ Star Rating &amp; happy pups</small></div><div class="pr">$35</div></div>';
+    h += '<div class="item' + (S.cash < 95 ? ' poor' : '') + '" data-repboost="ad"><div class="ic">📸</div><div class="tx"><b>Pet Magazine Ad</b><small>Instant +0.80★ Star Rating &amp; more dogs</small></div><div class="pr">$95</div></div>';
     h += '<div class="bp-sub">Endless Research Perks — upgradeable forever!</div>';
     UPGRADES.forEach(function (u) {
       var curLv = upLvl(u.id), reqLv = upgReqLvl(u), cost = upgCost(u);
@@ -389,9 +392,10 @@ function bpShowDesc(txt) {
   var bp = $('buildpanel');
   bp.addEventListener('pointerdown', function (ev) {
     if (!ev.target.closest) return;
-    var t = ev.target.closest('#bpClose,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff]'); if (!t) return;
+    var t = ev.target.closest('#bpClose,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost]'); if (!t) return;
     initAudio();
     if (t.id === 'bpClose') { setMode('play'); sfx('ui_close'); return; }
+    if (t.hasAttribute('data-repboost')) { runRepCampaign(t.getAttribute('data-repboost')); renderBuildPanel(); return; }
     if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
     if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
     if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; renderBuildPanel(); sfx('click'); return; }
@@ -770,7 +774,7 @@ function frame(ts) {
   var dt = clamp((ts - lastT) / 1000, 0.001, 0.05); lastT = ts;
   try {
     if (S) {
-      var active = UI.mode === 'play' || UI.mode === 'build';
+      var active = (UI.mode === 'play' || UI.mode === 'build') && !document.hidden;
       if (active) update(dt);
       else updateFX(dt * 0.5);
       // Portrait iPhone camera centered horizontally on the player!
@@ -813,16 +817,23 @@ function setScene(mode) {
   if (typeof Music === 'undefined' || !Music.setScene) return;
   try { Music.setScene({ mode: mode, dayFrac: S ? dayFrac() : 0.3, indoors: mode === 'title' ? false : playerIndoors(), tension: mode === 'play' ? tension() : 0 }); } catch (e) {}
 }
-window.addEventListener('beforeunload', saveGame);
+window.addEventListener('beforeunload', function () { if (S && typeof clearWaitingOwners === 'function') clearWaitingOwners(S); saveGame(); });
 document.addEventListener('visibilitychange', function () {
-  if (document.hidden) { saveGame(); try { if (typeof AC !== 'undefined' && AC && AC.suspend) AC.suspend(); } catch (e) {} }
-  else { try { if (typeof AC !== 'undefined' && AC) audioInit(); } catch (e) {} }
+  if (document.hidden) {
+    if (S && typeof clearWaitingOwners === 'function') clearWaitingOwners(S);
+    saveGame();
+    try { if (typeof AC !== 'undefined' && AC && AC.suspend) AC.suspend(); } catch (e) {}
+  }
+  else { lastT = performance.now(); try { if (typeof AC !== 'undefined' && AC) audioInit(); } catch (e) {} }
 });
 $('buildBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mode === 'build') { setMode(UI.mode === 'build' ? 'play' : 'build'); sfx('ui_open'); } this.blur(); };
 $('pauseBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mode === 'build') openPause(); this.blur(); };
 $('dexBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mode === 'build') openDex(); this.blur(); };
-if ($('coopBtn')) $('coopBtn').onclick = function () { initAudio(); if (typeof MP !== 'undefined' && (UI.mode === 'play' || UI.mode === 'build')) MP.openCoopModal(); this.blur(); };
-if ($('coopHudPill')) $('coopHudPill').onclick = function () { initAudio(); if (typeof MP !== 'undefined' && (UI.mode === 'play' || UI.mode === 'build')) MP.openCoopModal(); };
+if ($('repPill')) $('repPill').onclick = function () {
+  if (!S) return;
+  initAudio(); sfx('click');
+  toast('⭐ ' + S.rep.toFixed(1) + '★ Rating attracts up to ' + capacity() + ' dogs! Complete yard chores (🍂💧🦴✨), cuddle/play with dogs, or run a Pup Cup Social in Shop to boost stars!', 'good');
+};
 if ($('touchDropBtn')) $('touchDropBtn').onclick = function () { initAudio(); if (UI.mode === 'play') { var qa = qAction(); if (qa && !qa.disabled) qa.run(); } };
 $('hint').addEventListener('pointerdown', function (ev) {
   var sp = ev.target && ev.target.closest ? ev.target.closest('[data-hact]') : null;

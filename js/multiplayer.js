@@ -561,6 +561,10 @@ var MP = (function () {
 
     if (msg.type === 'retained_snapshot' || msg.type === 'joined' || msg.type === 'sync_ack') {
       if (msg.state && (!roomState || (msg.rev || 0) >= rev)) {
+        if (msg.type === 'retained_snapshot' && typeof clearWaitingOwners === 'function') {
+          var anyOnline = Object.keys(peers).some(function (pid) { return peers[pid].online; });
+          if (!anyOnline) clearWaitingOwners(msg.state);
+        }
         roomState = msg.state;
         if (inGame && S && msg.senderId !== playerId && Date.now() - lastLocalActionAt > 1200) {
           applySharedState(msg.state, false);
