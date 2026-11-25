@@ -1733,6 +1733,220 @@ function drawConstruction(c, o, t, progress) {
   c.restore();
 }
 
+// ---------------------------------------------------------------- doggy kitchen (3x2 = 144x96)
+function OA_kitchenStatic(c) {
+  var i;
+  OA_shadow(c, 72, 89, 68, 9);
+  // brick chimney on back-right roof
+  OA_rr(c, 108, -22, 18, 28, 2); OA_fo(c, '#b9443a', 1.8);
+  c.fillStyle = '#99362d'; c.fillRect(120, -21, 5, 26);
+  OA_rr(c, 106, -24, 22, 5, 1.5); OA_fo(c, '#8a3028', 1.6);
+  // main cottage walls (3x2 = 144x96)
+  OA_rr(c, 8, 20, 128, 68, 4); OA_fo(c, '#fbf1d8', 2);
+  c.save(); OA_rr(c, 8, 20, 128, 68, 4); c.clip();
+  c.fillStyle = '#efe0be'; c.fillRect(114, 20, 24, 68);
+  // stone base wainscoting
+  c.fillStyle = '#d3a066'; c.fillRect(8, 72, 128, 16);
+  c.fillStyle = '#b9814a'; c.fillRect(114, 72, 24, 16);
+  c.strokeStyle = '#9a6b3f'; c.lineWidth = 1.2;
+  c.beginPath(); c.moveTo(8, 72); c.lineTo(136, 72);
+  for (i = 20; i < 134; i += 18) { c.moveTo(i, 72); c.lineTo(i, 88); }
+  c.stroke();
+  // timber posts
+  c.fillStyle = OA_WM; c.fillRect(8, 20, 7, 68); c.fillRect(129, 20, 7, 68); c.fillRect(50, 20, 6, 68);
+  c.restore();
+  OA_rr(c, 8, 20, 128, 68, 4); OA_s(c, OA_OUT, 2);
+
+  // terracotta tiled gable roof
+  c.beginPath();
+  c.moveTo(2, 24); c.lineTo(18, -8); c.lineTo(126, -8); c.lineTo(142, 24); c.closePath();
+  OA_fo(c, '#d9574a', 2);
+  c.save(); c.clip();
+  c.fillStyle = '#b9443a'; c.fillRect(112, -10, 32, 36);
+  c.fillStyle = '#f08f7f'; c.fillRect(4, -7, 120, 3.5);
+  c.strokeStyle = '#99362d'; c.lineWidth = 1.3;
+  for (i = 2; i <= 20; i += 7) {
+    c.beginPath(); c.moveTo(4, i); c.lineTo(140, i); c.stroke();
+  }
+  c.restore();
+  c.beginPath(); c.moveTo(2, 24); c.lineTo(18, -8); c.lineTo(126, -8); c.lineTo(142, 24); c.closePath(); OA_s(c, OA_OUT, 2);
+
+  // roof sign: chef hat & bone plaque
+  OA_rr(c, 46, -15, 52, 16, 4); OA_fo(c, OA_WM, 1.8);
+  OA_rr(c, 49, -12.5, 46, 11, 2.5); OA_fo(c, OA_CREAM, 1.2);
+  OA_bonePath(c, 72, -7, 22, 4.2, 0); OA_fo(c, '#e3b877', 1.2);
+
+  // left kitchen door with porthole window
+  OA_rr(c, 18, 36, 26, 51, 3); OA_fo(c, OA_WL, 1.8);
+  OA_rr(c, 22, 41, 18, 15, 2); OA_fo(c, '#ffe7a0', 1.4);
+  OA_el(c, 40, 63, 2, 2); OA_fo(c, '#f2c14e', 1.2);
+
+  // right serving counter window & copper pots
+  OA_rr(c, 62, 34, 60, 28, 3); OA_fo(c, '#4a3020', 1.8);
+  c.save(); OA_rr(c, 62, 34, 60, 28, 3); c.clip();
+  c.fillStyle = '#ffb74d'; c.fillRect(62, 34, 60, 28);
+  // kitchen hood & simmering pot inside window
+  c.fillStyle = '#918b80'; c.fillRect(72, 34, 24, 7);
+  OA_rr(c, 74, 48, 20, 13, 2); OA_fo(c, '#d96b38', 1.5);
+  OA_rr(c, 72, 46, 24, 3.5, 1.2); OA_fo(c, '#b85224', 1.3);
+  // tray of golden bone biscuits on right side of window
+  OA_bonePath(c, 108, 53, 12, 2.8, -0.1); OA_fo(c, '#e3b877', 1.1);
+  OA_bonePath(c, 108, 47, 11, 2.5, 0.12); OA_fo(c, '#e3b877', 1.1);
+  c.restore();
+  OA_rr(c, 62, 34, 60, 28, 3); OA_s(c, OA_OUT, 1.8);
+
+  // red & cream striped awning over serving window
+  for (i = 0; i < 6; i++) {
+    var ax = 59 + i * 11;
+    c.beginPath(); c.moveTo(ax, 27); c.lineTo(ax + 11, 27); c.lineTo(ax + 12, 37); c.lineTo(ax - 1, 37); c.closePath();
+    OA_fo(c, (i % 2 === 0) ? '#d9574a' : '#fbf1d8', 1.4);
+  }
+  // wooden serving counter ledge with soup bowls
+  OA_rr(c, 58, 60, 68, 7, 2); OA_fo(c, OA_WL, 1.7);
+  OA_bowl(c, 74, 60, 7.2, '#3aa89a', '#63c3b5', '#c97a3e');
+  OA_bowl(c, 94, 60, 7.2, '#d9574a', '#ec7a6c', '#c97a3e');
+  // herb planter box below counter
+  OA_rr(c, 68, 75, 48, 12, 2); OA_fo(c, OA_WM, 1.6);
+  OA_tuft(c, 76, 75, 1.0, '#5d9d49'); OA_tuft(c, 92, 75, 1.1, '#6fbf5a'); OA_tuft(c, 108, 75, 0.95, '#5d9d49');
+}
+OBJECT_ART.kitchen = {
+  box: [-2, -26, 146, 94],
+  draw: function (c, o, t, env) {
+    o = o || {}; env = env || OA_ENV0; t = OA_num(t, 0);
+    var ph = OA_usePh(o), night = OA_cl(OA_num(env.night, 0), 0, 1), id = OA_num(o.id, 0), i;
+    OA_begin(c, o);
+    if (ph >= 0) OA_squash(c, ph, 72, 88, 0.05);
+    OA_static(c, 'kitchen0', -4, -28, 152, 122, OA_kitchenStatic);
+    // chimney & soup steam puffs
+    var A0 = c.globalAlpha;
+    for (i = 0; i < 3; i++) {
+      var sp = ((t * 0.55 + i * 0.33 + id * 0.17) % 1 + 1) % 1;
+      c.globalAlpha = A0 * Math.sin(sp * Math.PI) * 0.72;
+      OA_el(c, 117 + Math.sin(t * 2 + i) * 3.5, -26 - sp * 16, 4.5 + sp * 3.5, 3.4 + sp * 2.4);
+      OA_f(c, '#fffaf0');
+    }
+    if (night > 0.02) {
+      c.globalAlpha = A0 * night * 0.75;
+      OA_rr(c, 64, 36, 56, 24, 2); OA_f(c, 'rgba(255,220,125,0.55)');
+      OA_rr(c, 23, 42, 16, 13, 2); OA_f(c, 'rgba(255,220,125,0.55)');
+    }
+    c.globalAlpha = A0;
+    c.restore();
+  },
+  light: function (o, env) {
+    var T = OA_tile(), k = T / 48; o = o || {};
+    return { x: OA_num(o.x, 0) * T + 88 * k, y: OA_num(o.y, 0) * T + 52 * k, r: 82 * k, color: '#ffd27d' };
+  }
+};
+
+// ---------------------------------------------------------------- grooming house (3x2 = 144x96)
+function OA_groomhouseStatic(c) {
+  var i;
+  OA_shadow(c, 72, 89, 68, 9);
+  // pastel spa cottage walls
+  OA_rr(c, 8, 20, 128, 68, 5); OA_fo(c, '#e6f7f5', 2);
+  c.save(); OA_rr(c, 8, 20, 128, 68, 5); c.clip();
+  c.fillStyle = '#c9ebe7'; c.fillRect(112, 20, 26, 68);
+  c.fillStyle = '#3aa89a'; c.fillRect(8, 73, 128, 15);
+  c.fillStyle = '#2d877b'; c.fillRect(112, 73, 26, 15);
+  // white corner pilasters
+  c.fillStyle = '#fffaf0'; c.fillRect(8, 20, 7, 68); c.fillRect(129, 20, 7, 68);
+  c.restore();
+  OA_rr(c, 8, 20, 128, 68, 5); OA_s(c, OA_OUT, 2);
+
+  // lavender-berry shingled spa roof
+  c.beginPath();
+  c.moveTo(2, 24); c.lineTo(18, -8); c.lineTo(126, -8); c.lineTo(142, 24); c.closePath();
+  OA_fo(c, '#8e6bd6', 2);
+  c.save(); c.clip();
+  c.fillStyle = '#7351ba'; c.fillRect(110, -10, 34, 36);
+  c.fillStyle = '#b397ec'; c.fillRect(4, -7, 120, 3.5);
+  c.strokeStyle = '#5e3fa3'; c.lineWidth = 1.3;
+  for (i = 2; i <= 20; i += 7) {
+    c.beginPath(); c.moveTo(4, i); c.lineTo(140, i); c.stroke();
+  }
+  c.restore();
+  c.beginPath(); c.moveTo(2, 24); c.lineTo(18, -8); c.lineTo(126, -8); c.lineTo(142, 24); c.closePath(); OA_s(c, OA_OUT, 2);
+
+  // roof spa crest with heart & paw
+  OA_el(c, 72, -6, 22, 11); OA_fo(c, '#fffaf0', 1.8);
+  OA_paw(c, 72, -6, 1.35, '#e07bb0', 0);
+
+  // center arched grooming bay doorway (where the dog sits at headX:72, headY:56)
+  c.beginPath();
+  c.moveTo(52, 86); c.lineTo(52, 48); c.arc(72, 48, 20, Math.PI, 0, false); c.lineTo(92, 86); c.closePath();
+  OA_fo(c, '#5fd3e3', 1.8);
+  c.beginPath();
+  c.moveTo(55, 86); c.lineTo(55, 49); c.arc(72, 49, 17, Math.PI, 0, false); c.lineTo(89, 86); c.closePath();
+  OA_f(c, '#2d6878');
+
+  // left bay window (towel stack & perfume bottles)
+  OA_rr(c, 18, 36, 24, 26, 3); OA_fo(c, '#b3e5fc', 1.7);
+  OA_rr(c, 21, 52, 14, 4, 1.5); OA_fo(c, '#f2a0b5', 1.1);
+  OA_rr(c, 21, 56, 14, 4, 1.5); OA_fo(c, '#ffe082', 1.1);
+
+  // right bay window (warm dryer & mirror)
+  OA_rr(c, 102, 36, 24, 26, 3); OA_fo(c, '#b3e5fc', 1.7);
+  OA_el(c, 114, 48, 7, 8); OA_fo(c, '#e1f5fe', 1.2);
+
+  // classic grooming salon pole on left of arch
+  OA_rr(c, 43, 42, 6, 24, 2); OA_fo(c, '#ffffff', 1.4);
+  c.strokeStyle = '#d9574a'; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(44, 47); c.lineTo(48, 51); c.moveTo(44, 55); c.lineTo(48, 59); c.stroke();
+  c.strokeStyle = '#5b8def';
+  c.beginPath(); c.moveTo(44, 51); c.lineTo(48, 55); c.moveTo(44, 59); c.lineTo(48, 63); c.stroke();
+  OA_el(c, 46, 41, 3.5, 2.2); OA_fo(c, '#f2c14e', 1.2);
+}
+function OA_groomhouseFront(c) {
+  // porcelain grooming tub rim & fluffy pink towel in front of dog at (72, 56)
+  OA_rr(c, 50, 62, 44, 22, 5); OA_fo(c, '#fffaf0', 1.8);
+  OA_rr(c, 48, 59, 48, 6, 3); OA_fo(c, '#f2a0b5', 1.6);
+  // foam cloud along the rim
+  OA_el(c, 58, 58, 6, 4.2); OA_f(c, '#ffffff');
+  OA_el(c, 67, 59, 6.5, 4.5); OA_f(c, '#ffffff');
+  OA_el(c, 77, 59, 6.5, 4.5); OA_f(c, '#ffffff');
+  OA_el(c, 86, 58, 6, 4.2); OA_f(c, '#ffffff');
+  OA_paw(c, 72, 73, 1.1, '#3aa89a', 0);
+}
+OBJECT_ART.groomhouse = {
+  anchor: { headX: 72, headY: 54, headR: 13.5 },
+  box: [-2, -20, 146, 94],
+  draw: function (c, o, t, env) {
+    o = o || {}; env = env || OA_ENV0; t = OA_num(t, 0);
+    var ph = OA_usePh(o), night = OA_cl(OA_num(env.night, 0), 0, 1), id = OA_num(o.id, 0), i;
+    OA_begin(c, o);
+    if (ph >= 0) OA_squash(c, ph, 72, 88, 0.05);
+    OA_static(c, 'groomhouse0', -4, -22, 152, 116, OA_groomhouseStatic);
+    // floating soap bubbles from roof skylight & doorway
+    var A0 = c.globalAlpha, nBub = o.occupied ? 6 : 3;
+    for (i = 0; i < nBub; i++) {
+      var bp = ((t * (o.occupied ? 0.85 : 0.45) + i * 0.27 + id * 0.19) % 1 + 1) % 1;
+      var bx = 56 + ((i * 17) % 36) + Math.sin(t * 3 + i * 2) * 4;
+      var by = 44 - bp * 54;
+      var br = 2.4 + (i % 3) * 1.1;
+      c.globalAlpha = A0 * Math.sin(bp * Math.PI) * 0.88;
+      OA_el(c, bx, by, br, br); OA_fo(c, 'rgba(225,248,255,0.65)', 1.1);
+    }
+    if (night > 0.02) {
+      c.globalAlpha = A0 * night * 0.72;
+      OA_rr(c, 19, 37, 22, 24, 2); OA_f(c, 'rgba(255,230,150,0.55)');
+      OA_rr(c, 103, 37, 22, 24, 2); OA_f(c, 'rgba(255,230,150,0.55)');
+    }
+    c.globalAlpha = A0;
+    c.restore();
+  },
+  drawFront: function (c, o, t, env) {
+    o = o || {};
+    OA_begin(c, o);
+    OA_static(c, 'groomhouseF', 44, 52, 56, 36, OA_groomhouseFront);
+    c.restore();
+  },
+  light: function (o, env) {
+    var T = OA_tile(), k = T / 48; o = o || {};
+    return { x: OA_num(o.x, 0) * T + 72 * k, y: OA_num(o.y, 0) * T + 54 * k, r: 84 * k, color: '#ffe3a8' };
+  }
+};
+
 // =====================================================================================================
 //  CARRIED ITEMS
 // =====================================================================================================

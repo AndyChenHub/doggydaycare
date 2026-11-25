@@ -286,9 +286,11 @@ function drawRemotePeer(c, rp, t) {
 }
 function drawNpc(c, n, t) {
   var look = (typeof PLAYER_LOOKS !== 'undefined' && PLAYER_LOOKS[n.look || 0]) || playerLook();
+  var sDef = (typeof STAFF_BY_ID !== 'undefined' && STAFF_BY_ID[n.id]) || null;
+  var sIdx = (sDef && typeof STAFF !== 'undefined') ? STAFF.indexOf(sDef) : -1;
   var ho = n.id === 'receptionist' && S.owners.some(function (o) { return o.byStaff && o.state === 'handover' && o.kind === 'dropoff' && o.hoT > 0.5 && leashSide(o); });
   var holdingDog = n.carry && n.carry.type === 'dog' ? dogById(n.carry.id) : null;
-  var p = { x: n.x, y: n.y, dir: n.dir, moving: n.moving, walkT: n.walkT, walkDist: n.walkDist || 0, carry: (n.carry && !holdingDog) ? 'item' : (ho || holdingDog) ? 'leash' : null, emote: n.emote, emoteT: n.emoteT, id: 900 + (n.look || 1) };
+  var p = { x: n.x, y: n.y, dir: n.dir, moving: n.moving, walkT: n.walkT, walkDist: n.walkDist || 0, carry: (n.carry && !holdingDog) ? 'item' : (ho || holdingDog) ? 'leash' : null, emote: n.emote, emoteT: n.emoteT, id: n.uid || (910 + (sIdx >= 0 ? sIdx : (n.look || 1))) };
   var a = anchorOf(p, look);
   var leashDog = holdingDog || (ho ? dogById((S.owners.filter(function (o) { return o.byStaff && o.state === 'handover'; })[0] || {}).dogId) : null);
   if (leashDog) {
@@ -389,18 +391,44 @@ function drawObjectBase(c, o, t) {
   }
   if (art && art.drawFront) { try { drawRotatedArt(c, art, ao, t, ENV, 'drawFront'); } catch (e) {} }
   if (occ && occ.state === 'bath') {
-    var left = clamp(occ.actT / 4, 0, 1), bx = px + w / 2;
+    var maxBathT = o.type === 'groomhouse' ? 2.2 : 4.2;
+    var left = clamp(occ.actT / maxBathT, 0, 1), bx = px + w / 2;
     c.fillStyle = 'rgba(40,26,16,0.7)'; rr(c, bx - 26, py - 16, 52, 9, 4.5); c.fill(); c.fillStyle = '#66bde3'; rr(c, bx - 24.5, py - 14.5, 49 * (1 - left), 6, 3); c.fill();
   }
   var olv = o.lvl || 1;
+  var isLuxKennel = o.type === 'kennel' && olv > 1;
   if (olv > 1 || UI.mode === 'build') {
-    var lx = px + w - 13, ly = py + 10;
-    c.fillStyle = olv > 1 ? '#8e6bd6' : 'rgba(59,42,32,0.78)';
-    rr(c, lx - 13, ly - 7, 26, 14, 5); c.fill();
-    c.strokeStyle = '#fff8e6'; c.lineWidth = 1.2; c.stroke();
+    var lx = px + w - 14, ly = py + 10;
+    c.fillStyle = isLuxKennel ? '#d48b1c' : olv > 1 ? '#8e6bd6' : 'rgba(59,42,32,0.78)';
+    rr(c, lx - 14, ly - 7, 28, 14, 5); c.fill();
+    c.strokeStyle = isLuxKennel ? '#ffe66d' : '#fff8e6'; c.lineWidth = isLuxKennel ? 1.6 : 1.2; c.stroke();
     c.font = '10.5px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillStyle = olv > 1 ? '#ffe66d' : '#fff8e6';
-    c.fillText('Lv' + olv, lx, ly + 0.5);
+    c.fillStyle = olv > 1 ? '#fff8d6' : '#fff8e6';
+    c.fillText((isLuxKennel ? '★' : 'Lv') + olv, lx, ly + 0.5);
+  }
+  // Non-blocking upgrade progress bar hovering above a still-functional station!
+  if (o.upgrading && (o.upgradeEnd || 0) > Date.now()) {
+    var uLeft = Math.max(0, (o.upgradeEnd - Date.now()) / 1000);
+    var uProg = clamp(1 - uLeft / Math.max(1, o.upgradeDur || 60), 0, 1);
+    var ubw = Math.max(70, w - 6), ubx = px + w / 2 - ubw / 2, uby = py - 20;
+    c.fillStyle = 'rgba(40,26,16,0.84)'; rr(c, ubx - 2, uby - 2, ubw + 4, 17, 7); c.fill();
+    c.fillStyle = '#c3a6ff'; rr(c, ubx, uby, Math.max(5, ubw * uProg), 13, 5); c.fill();
+    var uLbl = '⬆️Lv' + (olv + 1) + ' ' + fmtDur(uLeft);
+    c.font = '12px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+    outlined(c, uLbl, px + w / 2, uby + 6.5, '#fff', 'rgba(40,26,16,0.9)', 2.4);
+  }
+  // Partner "Lend a Paw" helper badge
+  if (typeof canLendAPaw === 'function' && canLendAPaw(o)) {
+    var pawBob = Math.sin(t * 6 + o.id) * 3;
+    bubble(c, px + w / 2, py - 30 + pawBob, '🤝 Lend a Paw!', { size: 11.5, bg: '#dff5ef', fg: '#1c5e54', stroke: '#3aa89a' });
+  } else if (o.readyRibbon && !UI.inTitle) {
+    // Festive Grand Opening Ribbon waiting to be cut!
+    var ribBob = Math.sin(t * 5.5 + o.id) * 3.5;
+    c.save();
+    c.strokeStyle = '#ffd54a'; c.lineWidth = 2.6; c.setLineDash([6, 4]); c.lineDashOffset = -t * 18;
+    rr(c, px + 1, py + 1, w - 2, h - 2, 10); c.stroke(); c.setLineDash([]);
+    c.restore();
+    bubble(c, px + w / 2, py - 14 + ribBob, '🎀 Cut Ribbon! (+3💛)', { size: 11.5, bg: '#fff4cc', fg: '#7a4508', stroke: '#e0a526' });
   }
 }
 function drawSite(c, o, t) {
@@ -421,6 +449,10 @@ function drawSite(c, o, t) {
   c.fillStyle = o.upgrading ? '#c3a6ff' : '#8bd46e'; rr(c, bx, by, Math.max(5, bw * prog), 13, 5); c.fill();
   var lbl = (o.upgrading ? '⬆️Lv' + ((o.lvl || 1) + 1) + ' ' : '🔨 ') + fmtDur(left);
   c.font = '12.5px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle'; outlined(c, lbl, px + w / 2, by + 6.5, '#fff', 'rgba(40,26,16,0.9)', 2.5);
+  if (typeof canLendAPaw === 'function' && canLendAPaw(o)) {
+    var pawBob2 = Math.sin(t * 6 + o.id) * 3;
+    bubble(c, px + w / 2, by - 14 + pawBob2, '🤝 Lend a Paw!', { size: 11.5, bg: '#dff5ef', fg: '#1c5e54', stroke: '#3aa89a' });
+  }
 }
 
 // ---------------- speech & tags ----------------
@@ -529,13 +561,19 @@ function drawDogUI(c, d, t) {
 // ---------------- interaction zones ("stand in the box") ----------------
 function matUseful(o) {
   var car = S.player.carry, t = o.type;
-  if (STATION_ITEM[t]) { if (car) return false; var want = STATION_ITEM[t]; return S.dogs.some(function (d) { return d.need && !d.need.self && (NEED_INFO[d.need.type].item === want || (want === 'food' && d.need.type === 'treat' && !hasDone('treatjar'))); }); }
+  if (STATION_ITEM[t]) {
+    if (car) return false;
+    var want = STATION_ITEM[t];
+    return S.dogs.some(function (d) {
+      return d.need && !d.need.self && (NEED_INFO[d.need.type].item === want || (t === 'kitchen' && (d.need.type === 'food' || d.need.type === 'treat')) || (want === 'food' && d.need.type === 'treat' && !hasDone('treatjar')));
+    });
+  }
   if (t === 'trash') return !!(car && car.type !== 'dog');
-  if (t === 'tub') { if (!(car && car.type === 'dog') || o.dogId) return false; var d = dogById(car.id); return !!(d && d.need && d.need.type === 'bath'); }
+  if (t === 'tub' || t === 'groomhouse') { if (!(car && car.type === 'dog') || o.dogId) return false; var d = dogById(car.id); return !!(d && d.need && d.need.type === 'bath'); }
   if (t === 'kennel') return !!(car && car.type === 'dog' && !o.dogId && (!o.reservedFor || o.reservedFor === car.id));
   return false;
 }
-var PAD_ICON = { foodbin: '🍖', toybox: '🎾', treatjar: '🍪', trash: '💩', tub: '🛁', kennel: '💤' };
+var PAD_ICON = { foodbin: '🍖', kitchen: '🍳', toybox: '🎾', treatjar: '🍪', trash: '💩', tub: '🛁', groomhouse: '💈', kennel: '💤' };
 function drawPad(c, r, t, lit, active) {
   var pulse = lit ? 0.5 + Math.sin(t * 5) * 0.25 : 0;
   c.fillStyle = active ? 'rgba(255,244,200,0.55)' : lit ? 'rgba(255,244,200,' + (0.28 + pulse * 0.2) + ')' : 'rgba(255,250,230,0.16)';
@@ -555,7 +593,7 @@ function drawPlayerGuide(c, t) {
       var ow = S.owners.filter(function (o) { return o.dogId === car.id && (o.state === 'waitPickup' || o.state === 'toHandover' || o.state === 'handover'); })[0];
       if (ow) { tx = ACTION_BOX.x + ACTION_BOX.w / 2; ty = ACTION_BOX.y + ACTION_BOX.h / 2; col = '#ffd54a'; }
       else if (cd && cd.need && cd.need.type === 'bath') {
-        var tub = S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
+        var tub = S.objects.filter(function (o) { return o.done && (o.type === 'groomhouse' || o.type === 'tub') && !o.dogId; })[0];
         if (tub) { var tp = stationPad(tub) || { x: tub.x * TILE, y: tub.y * TILE, w: tub.w * TILE, h: tub.h * TILE }; tx = tp.x + tp.w / 2; ty = tp.y + tp.h / 2; col = '#80d8ff'; }
       }
     } else if (car && car.type === 'poop') {
@@ -577,7 +615,7 @@ function drawPlayerGuide(c, t) {
         if (nd) {
           var reqItem = NEED_INFO[nd.need.type] && NEED_INFO[nd.need.type].item;
           if (reqItem) {
-            var st = S.objects.filter(function (o) { return o.done && STATION_ITEM[o.type] === reqItem; })[0];
+            var st = S.objects.filter(function (o) { return o.done && (STATION_ITEM[o.type] === reqItem || (o.type === 'kitchen' && (reqItem === 'food' || reqItem === 'treat'))); })[0];
             if (st) { var sp = stationPad(st); if (sp) { tx = sp.x + sp.w / 2; ty = sp.y + sp.h / 2; col = '#ffe082'; } }
           } else { tx = nd.x; ty = nd.y; col = '#ff8a80'; }
         } else if (S.chores && S.chores.length) {
@@ -658,7 +696,9 @@ function drawZones(c, t, v) {
         var pSub = pend ? fmtDur((pend.end - Date.now()) / 1000) : !lvlOk ? ('🔒 Lv ' + up.lvl) : fmtMoney(up.cost);
         c.font = '12.5px ' + HEAD_FONT;
         outlined(c, pSub, cx, cy + 16, pend ? '#ffe082' : canAfford ? '#b9f6ca' : '#ffd0c4', 'rgba(30,18,10,0.92)', 2.5);
-        if (up.unlocks && up.unlocks.length && dist(S.player.x, S.player.y, cx, cy) < 135) {
+        if (pend && typeof canLendAPaw === 'function' && canLendAPaw(pend)) {
+          bubble(c, cx, ry - 8 + Math.sin(t * 6) * 3, '🤝 Lend a Paw!', { size: 11.5, bg: '#dff5ef', fg: '#1c5e54', stroke: '#3aa89a' });
+        } else if (up.unlocks && up.unlocks.length && dist(S.player.x, S.player.y, cx, cy) < 135) {
           bubble(c, cx, ry - 6, 'Unlocks: ' + up.unlocks.join(' · '), { size: 11, bg: '#4a3426', fg: '#ffe9a8', stroke: '#2a1a10' });
         }
       } else {
@@ -887,6 +927,10 @@ function drawEdgeIndicators(c, t) {
   if (S.repEvent) {
     items.push({ x: S.repEvent.x, y: S.repEvent.y - 20, icon: S.repEvent.icon, col: '#ffd9d4', urgent: true });
   }
+  S.objects.forEach(function (o) {
+    if (o.readyRibbon) items.push({ x: (o.x + o.w / 2) * TILE, y: (o.y + o.h / 2) * TILE, icon: '🎀', col: '#fff4cc', urgent: false, small: true });
+    else if (typeof canLendAPaw === 'function' && canLendAPaw(o)) items.push({ x: (o.x + o.w / 2) * TILE, y: (o.y + o.h / 2) * TILE, icon: '🤝', col: '#dff5ef', urgent: false, small: true });
+  });
   S.dogs.forEach(function (d) { if (!d.checkedIn || !d.need || d.need.self || d.state === 'leaving' || d.state === 'leashed' || d.state === 'kennel' || d.need.t < 2) return; items.push({ x: d.x, y: d.y - 20, icon: NEED_INFO[d.need.type].icon, col: d.need.t > NEED_GRACE ? '#ffd9d4' : '#fffaf0', urgent: d.need.t > NEED_GRACE, small: true }); });
   var padX = 32, topY = 114, botY = VIEW.h - 88;
   items.forEach(function (it) {
@@ -968,7 +1012,7 @@ function drawBuildGhost(c, t) {
     var o = objAt(tx, ty);
     if (o) {
       var sell = UI.buildTool === 'sell', mv = UI.buildTool === 'move';
-      if (!sell && !mv && !o.done) { siteHint(c, o); return; }
+      if (!sell && !mv && (!o.done || o.upgrading)) { siteHint(c, o); return; }
       c.strokeStyle = sell ? '#ff6b5a' : mv ? '#80d8ff' : '#c3a6ff'; c.lineWidth = 3; rr(c, o.x * TILE + 1, o.y * TILE + 1, o.w * TILE - 2, o.h * TILE - 2, 8); c.stroke();
       var label = sell
         ? (canSell(o) ? 'Sell for ' + fmtMoney(sellValue(o)) : isLastEssential(o) ? 'Your only one — can\'t sell' : 'In use — can\'t sell')
@@ -984,7 +1028,10 @@ function drawBuildGhost(c, t) {
 }
 function siteHint(c, o) {
   c.strokeStyle = '#ffe082'; c.lineWidth = 3; rr(c, o.x * TILE + 1, o.y * TILE + 1, o.w * TILE - 2, o.h * TILE - 2, 8); c.stroke();
-  bubble(c, (o.x + o.w / 2) * TILE, o.y * TILE - 30, 'Tap: finish now for ' + fmtMoney(rushCost(o)), { size: 12, bg: '#4a3426', fg: '#fff', stroke: '#2a1a10' });
+  var hTxt = (typeof canLendAPaw === 'function' && canLendAPaw(o))
+    ? 'Tap: 🤝 Lend a Paw to Partner (+3💛)'
+    : 'Tap: 💛 -30m Boost (5💛) or Finish (' + fmtMoney(rushCost(o)) + ')';
+  bubble(c, (o.x + o.w / 2) * TILE, o.y * TILE - 30, hTxt, { size: 11.5, bg: '#4a3426', fg: '#fff', stroke: '#2a1a10' });
 }
 
 // ---------------- particles ----------------

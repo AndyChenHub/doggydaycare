@@ -242,7 +242,7 @@ function sanitizeSettings(s) {
   s.musicVol = (typeof s.musicVol === 'number' && isFinite(s.musicVol)) ? clamp(s.musicVol, 0, 1) : def.musicVol;
   s.ambVol = (typeof s.ambVol === 'number' && isFinite(s.ambVol)) ? clamp(s.ambVol, 0, 1) : def.ambVol;
   s.sfxVol = (typeof s.sfxVol === 'number' && isFinite(s.sfxVol)) ? clamp(s.sfxVol, 0, 1) : def.sfxVol;
-  s.zoom = (typeof s.zoom === 'number' && isFinite(s.zoom)) ? clamp(s.zoom, 0.7, 1.4) : def.zoom;
+  s.zoom = (typeof s.zoom === 'number' && isFinite(s.zoom)) ? clamp(s.zoom, 0.5, 1.5) : def.zoom;
   s.standSec = (typeof s.standSec === 'number' && isFinite(s.standSec) && s.standSec >= 0.35) ? clamp(s.standSec, 0.35, 1.5) : def.standSec;
   delete s.keys;
   return s;
@@ -271,11 +271,11 @@ var COLLARS = ['#d9574a', '#3aa89a', '#f2c14e', '#5b8def', '#e07bb0', '#8e6bd6',
 
 function newState() {
   var s = {
-    version: 2, cash: window.GAME_CONFIG.startingCash, xp: 0, level: 1, rep: 3.0, day: 1, dayTime: 0, closing: false,
+    version: 2, cash: window.GAME_CONFIG.startingCash, hearts: 0, vipMagnet: false, xp: 0, level: 1, rep: 3.0, day: 1, dayTime: 0, closing: false,
     objects: [], plots: [{ id: 'base', end: 0 }], dogs: [], owners: [], poops: [], chores: [], choreT: 4, nextId: 1, arrivalTimer: 5,
     stats: newStats(3), streak: 0, bestStreak: 0, totalServed: 0, tutorial: {}, tutorialDone: false,
     upgrades: {}, dex: {}, goals: [], goalWave: 1, milestones: {}, staff: {}, staffLvl: {}, franchiseTier: 0, dailyEvent: null,
-    life: { earned: 0, served: 0, perfect: 0, complaints: 0, care: 0 }, specials: {}, playDays: 0, giftStreak: 0, lastPlayDate: null,
+    life: { earned: 0, hearts: 0, served: 0, perfect: 0, complaints: 0, care: 0 }, specials: {}, playDays: 0, giftStreak: 0, lastPlayDate: null,
     player: { x: 12.6 * TILE, y: 24.3 * TILE, dir: 'left', face: -1, carry: null, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, look: 0, stepT: 0 }, needT: 6, poopT: 30,
     created: Date.now(),
   };
@@ -283,7 +283,7 @@ function newState() {
   // Empty lawn at startup — 0 kennels and 0 dogs until the player places their first Kennel on the lawn in Step 1!
   return s;
 }
-function newStats(rep) { return { earned: 0, tips: 0, served: 0, complaints: 0, perfect: 0, repStart: rep, spent: 0, complaintList: [], pets: 0, scoops: 0, baths: 0, feeds: 0, fetches: 0, goalCash: 0, wages: 0 }; }
+function newStats(rep) { return { earned: 0, hearts: 0, tips: 0, served: 0, complaints: 0, perfect: 0, repStart: rep, spent: 0, complaintList: [], pets: 0, scoops: 0, baths: 0, feeds: 0, fetches: 0, goalCash: 0, wages: 0 }; }
 function nid() { return S.nextId++; }
 
 function kennelCount(includeBuilding) {
@@ -294,6 +294,20 @@ function kennelCount(includeBuilding) {
     if (o && o.type === 'kennel' && (includeBuilding || o.done)) n++;
   }
   return n;
+}
+function kennelSuiteLevel() {
+  if (!S || !Array.isArray(S.objects)) return 1;
+  var sum = 0, cnt = 0;
+  for (var i = 0; i < S.objects.length; i++) {
+    var o = S.objects[i];
+    if (o && o.type === 'kennel' && o.done) { sum += (o.lvl || 1); cnt++; }
+  }
+  return cnt > 0 ? (sum / cnt) : 1;
+}
+function kennelSuiteName(lvl) {
+  var lv = Math.max(1, Math.floor(lvl || 1));
+  var tiers = (typeof KENNEL_TIERS !== 'undefined' && KENNEL_TIERS.length) ? KENNEL_TIERS : ['Standard Kennel', 'Cozy Suite', 'Plush Villa', 'Deluxe Chalet', 'Royal Penthouse'];
+  return tiers[Math.min(lv - 1, tiers.length - 1)] + (lv > tiers.length ? ' +' + (lv - tiers.length) : '');
 }
 function itemCost(type) {
   var c = CAT_BY_ID[type];
@@ -319,12 +333,17 @@ function itemReqLvl(type) {
 function itemBuildTime(type) {
   var c = CAT_BY_ID[type];
   if (!c) return 10;
+  var t = c.time;
+  var kc = type === 'kennel' ? kennelCount(true) : 0;
   if (type === 'kennel') {
-    var kc = kennelCount(true);
-    if (kc <= 0) return 7200; // 2h base (2.5s during tutorial)
-    return Math.min(432000, Math.round(7200 * Math.pow(1.85, kc - 1)));
+    // Stepped post-tutorial ramp: #1 = 2.5s (tutorial), #2 = 15m, #3 = 45m, #4 = 2h, #5 = 4.5h -> scales smoothly up to 4d!
+    if (kc <= 0) t = 900;
+    else if (kc === 1) t = 900;
+    else if (kc === 2) t = 2700;
+    else t = Math.min(345600, Math.round(7200 * Math.pow(1.9, kc - 3)));
   }
-  return c.time;
+  if (S && !S.tutorialDone && c.lvl <= 1 && !(type === 'kennel' && kc >= 1)) return Math.min(t, 2.5);
+  return t;
 }
 
 function ownedYardView() {
@@ -346,10 +365,11 @@ function ownedYardView() {
   var availH = Math.max(240, vh - 210);
   var fitZ = Math.min(availW / spanW, availH / spanH);
   var bz = (typeof baseZoom === 'function') ? baseZoom() : 1;
+  var userBuildZoom = (typeof CAM !== 'undefined' && typeof CAM.buildZoom === 'number' && isFinite(CAM.buildZoom)) ? CAM.buildZoom : 1;
   return {
     cx: ((x0 + x1) / 2) * TILE,
     cy: ((y0 + y1) / 2) * TILE + 12,
-    zoomMul: clamp(fitZ / bz, 0.34, 0.88)
+    zoomMul: clamp((fitZ / bz) * userBuildZoom, 0.22, 1.5)
   };
 }
 
@@ -400,8 +420,11 @@ function addObject(type, x, y, instant, paidCost, rot) {
   var dims = objDims(c, rot);
   var baseTime = itemBuildTime(type);
   var dur = (!S.tutorialDone && !instant) ? Math.min(baseTime, 2.5) : baseTime;
+  var byId = (typeof MP !== 'undefined' && MP.playerId) ? MP.playerId : null;
+  var byName = (typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : null;
   var o = { id: nid(), type: type, x: x, y: y, w: dims.w, h: dims.h, rot: dims.rot, lvl: 1, upgrading: false, done: !!instant, buildEnd: instant ? 0 : Date.now() + dur * 1000,
-            buildDur: dur, paidCost: paidCost != null ? paidCost : c.cost, dogId: null, reservedFor: null, useAt: -99 };
+            buildDur: dur, upgradeEnd: 0, upgradeDur: 0, readyRibbon: false, startedBy: instant ? null : byId, startedByName: instant ? null : byName, helpedBy: [],
+            paidCost: paidCost != null ? paidCost : c.cost, dogId: null, reservedFor: null, useAt: -99 };
   S.objects.push(o);
   markDirty();
   return o;
@@ -462,9 +485,9 @@ function starBaseCap(rep, dayNum) {
 function boostRep(amt, px, py) {
   if (!S || !(amt > 0)) return;
   var oldCap = capacity();
-  // Comeback boost: when star rating is below 3.0★, every positive care/chore action gives 1.75x star recovery!
-  var mul = S.rep < 2.2 ? 2.0 : S.rep < 3.0 ? 1.65 : 1.0;
-  if (S.dailyEvent === 'cuddle') mul *= 1.5;
+  // Comeback boost below 3.0★, diminishing returns above 3.6★ so maintaining 4.5★-5.0★ requires top-tier care!
+  var mul = S.rep < 2.2 ? 1.85 : S.rep < 3.0 ? 1.45 : S.rep >= 4.5 ? 0.36 : S.rep >= 4.0 ? 0.55 : S.rep >= 3.6 ? 0.78 : 1.0;
+  if (S.dailyEvent === 'cuddle') mul *= 1.35;
   var gain = amt * mul;
   var prev = S.rep;
   S.rep = clamp(S.rep + gain, 0.5, 5.0);
@@ -504,9 +527,14 @@ function buildWalk() {
     var o = objs[oi], def = CAT_BY_ID[o.type], olv = o.lvl || 1;
     if (o.done && def) {
       // Number of dogs allowed is strictly equal to the number of built Kennels!
-      if (o.type === 'kennel') kennelCap += 1;
-      if (def.charm) ch += def.charm * (1 + (olv - 1) * 0.6);
-      else if (olv > 1) ch += (olv - 1) * 1.5;
+      if (o.type === 'kennel') {
+        kennelCap += 1;
+        if (olv > 1) ch += (olv - 1) * 2.5; // Upgraded Luxury Suites add +2.5 charm per upgrade level!
+      } else if (def.charm) {
+        ch += def.charm * (1 + (olv - 1) * 0.6);
+      } else if (olv > 1) {
+        ch += (olv - 1) * 1.5;
+      }
     }
     for (var oy = o.y; oy < o.y + o.h; oy++) for (var ox = o.x; ox < o.x + o.w; ox++) {
       if (ox >= 0 && oy >= 0 && ox < W && oy < H) objGrid[oy * W + ox] = o;
@@ -680,7 +708,9 @@ function spawnArrival() {
   var d = makeDog();
   var sp = pickSpecial(); if (sp) makeSpecialDog(d, sp);
   var k = freeKennel();
-  if (S.tutorialDone && S.day >= 2 && k && Math.random() < 0.3) { d.overnight = true; k.reservedFor = d.id; d.kennelId = k.id; }
+  var kAvg = kennelSuiteLevel();
+  var overnightProb = Math.min(0.65, 0.30 + Math.max(0, kAvg - 1) * 0.06);
+  if (S.tutorialDone && S.day >= 2 && k && Math.random() < overnightProb) { d.overnight = true; k.reservedFor = d.id; d.kennelId = k.id; }
   S.dogs.push(d);
   var o = makeOwner('dropoff', d);
   o.patienceMax = o.patience = 75 * patienceMul();
@@ -696,12 +726,17 @@ function scheduleArrival() {
   S.arrivalTimer = base / (repMul * charmMul * (1 + upLvl('flyers') * 0.1));
 }
 function dogPrice(d) {
-  // Earning cash is tougher and more realistic — every dollar counts! Scales with Breed Mastery, Franchise Tier & VIP Gala event.
-  var base = (d.overnight ? 16 * (1 + upLvl('nightstaff') * 0.12) : 0) + breedOf(d).price * 0.24 + Math.min(S.day, 120) * 0.18;
+  // Earning cash scales with Kennel Luxury Suites, Breed Mastery, Franchise Tier & VIP Gala event.
+  var kAvg = kennelSuiteLevel();
+  var assignedK = d && d.kennelId ? objById(d.kennelId) : null;
+  var assignedKLv = assignedK ? (assignedK.lvl || 1) : Math.max(1, Math.round(kAvg));
+  var overnightBase = d.overnight ? 16 * (1 + upLvl('nightstaff') * 0.15) * (1 + (assignedKLv - 1) * 0.12) : 0;
+  var base = overnightBase + breedOf(d).price * 0.24 + Math.min(S.day, 120) * 0.18;
+  var suiteMul = 1 + Math.max(0, kAvg - 1) * 0.08;
   var masteryMul = 1 + breedMasteryLvl(d.breed) * 0.08;
-  var franMul = 1 + franchiseTier() * 0.12;
+  var franMul = 1 + franchiseTier() * 0.15;
   var evMul = (S && S.dailyEvent === 'gala') ? 1.30 : 1;
-  return Math.max(8, Math.round(base * (1 + upLvl('webcam') * 0.10) * masteryMul * franMul * evMul * (d.special ? 2.5 : 1)));
+  return Math.max(8, Math.round(base * (1 + upLvl('webcam') * 0.12) * suiteMul * masteryMul * franMul * evMul * (d.special ? 2.5 : 1)));
 }
 function franchiseTier() { return (S && typeof S.franchiseTier === 'number') ? S.franchiseTier : 0; }
 function franchiseName(tier) {
@@ -720,11 +755,220 @@ function buyFranchiseTier() {
   S.franchiseTier = nextT;
   markDirty();
   gainXP(20 + nextT * 10);
+  gainHearts(5 + nextT * 2, S.player.x, S.player.y - 84, true);
   confetti(S.player.x, S.player.y - 50, 50);
   sfx('level');
-  toast('🏆 Promoted to ' + franchiseName(nextT) + '! (+2 Max Dog Capacity, +12% All Boarding Pay, +10 Charm!)', 'good');
-  if (typeof showBanner === 'function') showBanner('🏆 ' + franchiseName(nextT), '+2 Max Dogs · +12% Boarding Pay · +10 Yard Charm');
+  toast('🏆 Promoted to ' + franchiseName(nextT) + '! (+15% Boarding Pay, +15% Paw Hearts, +10 Charm & +2m PAWSOME Build Boost!)', 'good');
+  if (typeof showBanner === 'function') showBanner('🏆 ' + franchiseName(nextT), '+15% Boarding Pay · +15% Paw Hearts · +10 Charm · +2m Build Boost');
   if (typeof MP !== 'undefined') MP.recordAction('franchise', { name: franchiseName(nextT), icon: '🏆', cost: cost, level: nextT });
+  saveGame();
+  return true;
+}
+
+// ================= Paw Hearts (💛), Builder Crew, Active Timer Shave, Lend a Paw & Ribbons =================
+function gainHearts(amt, px, py, skipMul) {
+  if (!S || !(amt > 0)) return 0;
+  var mul = skipMul ? 1 : (1 + franchiseTier() * 0.15);
+  var add = Math.max(1, Math.round(amt * mul));
+  S.hearts = (S.hearts || 0) + add;
+  if (S.stats) S.stats.hearts = (S.stats.hearts || 0) + add;
+  if (S.life) S.life.hearts = (S.life.hearts || 0) + add;
+  var fxX = px != null ? px : (S.player ? S.player.x : 500);
+  var fxY = py != null ? py : (S.player ? S.player.y - 68 : 400);
+  float(fxX, fxY, '+' + add + '💛', '#ffe066', 1.12);
+  burst(fxX, fxY + 14, 'heart', Math.min(8, 2 + add));
+  if (typeof UI !== 'undefined') UI.heartPulse = 0.35;
+  return add;
+}
+function maxBuilders() {
+  if (!S) return 1;
+  return 1 + upLvl('builders');
+}
+function activeBuildProjects() {
+  var list = [];
+  if (!S) return list;
+  var t = Date.now();
+  (S.objects || []).forEach(function (o) {
+    if (!o.done && o.buildEnd > t) {
+      list.push({ kind: 'build', obj: o, end: o.buildEnd, dur: o.buildDur || 60, name: (CAT_BY_ID[o.type] ? CAT_BY_ID[o.type].name : o.type), x: (o.x + o.w / 2) * TILE, y: (o.y + o.h / 2) * TILE });
+    } else if (o.done && o.upgrading && o.upgradeEnd > t) {
+      list.push({ kind: 'upgrade', obj: o, end: o.upgradeEnd, dur: o.upgradeDur || 60, name: (CAT_BY_ID[o.type] ? CAT_BY_ID[o.type].name : o.type) + ' Lv' + ((o.lvl || 1) + 1), x: (o.x + o.w / 2) * TILE, y: (o.y + o.h / 2) * TILE });
+    }
+  });
+  (S.plots || []).forEach(function (pl) {
+    if (pl.end && pl.end > t) {
+      var pDef = plotById(pl.id);
+      list.push({ kind: 'plot', plot: pl, plotDef: pDef, end: pl.end, dur: pDef ? pDef.time : 3600, name: pDef ? pDef.name : pl.id, x: pDef ? (pDef.x + pDef.w / 2) * TILE : S.player.x, y: pDef ? (pDef.y + pDef.h / 2) * TILE : S.player.y });
+    }
+  });
+  list.sort(function (a, b) { return a.end - b.end; });
+  return list;
+}
+function activeBuildCount() {
+  return activeBuildProjects().length;
+}
+function canStartNewBuild() {
+  if (!S || !S.tutorialDone) return true;
+  return activeBuildCount() < maxBuilders();
+}
+function warnBuilderBusy() {
+  toast('👷 Builder busy (' + activeBuildCount() + '/' + maxBuilders() + ')! Active play shaves timers, or unlock Builder Crew in Shop → Research!', 'bad');
+  sfx('error');
+}
+function shaveActiveTimers(seconds, sourceLabel, fxX, fxY) {
+  if (!S || !(seconds > 0)) return false;
+  var projs = activeBuildProjects();
+  if (!projs.length) return false;
+  var target = projs[0]; // Shave the most urgent / soonest-finishing construction project!
+  var ms = Math.round(seconds * 1000);
+  if (target.kind === 'build') target.obj.buildEnd = Math.max(Date.now(), target.obj.buildEnd - ms);
+  else if (target.kind === 'upgrade') target.obj.upgradeEnd = Math.max(Date.now(), target.obj.upgradeEnd - ms);
+  else if (target.kind === 'plot') target.plot.end = Math.max(Date.now(), target.plot.end - ms);
+  var tag = '⏱️ -' + fmtDur(seconds) + (sourceLabel ? ' ' + sourceLabel : ' Build!');
+  float(fxX != null ? fxX : S.player.x, (fxY != null ? fxY : S.player.y) - 82, tag, '#80d8ff', 1.12);
+  if (dist(target.x, target.y, S.player.x, S.player.y) > 40) {
+    float(target.x, target.y - 36, '🔨 -' + fmtDur(seconds) + '!', '#80d8ff', 1.15);
+  }
+  burst(target.x, target.y - 12, 'sparkle', 10);
+  checkBuilds();
+  return true;
+}
+function siteTimeLeft(o) {
+  if (!o) return 0;
+  var endTs = (!o.done) ? o.buildEnd : (o.upgrading ? o.upgradeEnd : 0);
+  return Math.max(0, (endTs - Date.now()) / 1000);
+}
+function heartBoostCost() { return 5; } // 5💛 shaves 30m off a site!
+function heartBoostSite(o) {
+  if (!S || !o) return false;
+  var left = siteTimeLeft(o);
+  if (left <= 0) return false;
+  var cost = heartBoostCost();
+  if ((S.hearts || 0) < cost) { toast('Need ' + cost + '💛 Paw Hearts to boost this build!', 'bad'); sfx('error'); return false; }
+  S.hearts -= cost;
+  var shave = 1800; // 30 minutes
+  if (!o.done) o.buildEnd = Math.max(Date.now(), o.buildEnd - shave * 1000);
+  else if (o.upgrading) o.upgradeEnd = Math.max(Date.now(), o.upgradeEnd - shave * 1000);
+  var cx = (o.x + o.w / 2) * TILE, cy = (o.y + o.h / 2) * TILE;
+  var cName = CAT_BY_ID[o.type] ? CAT_BY_ID[o.type].name : o.type;
+  burst(cx, cy, 'heart', 12); burst(cx, cy, 'sparkle', 12);
+  float(cx, o.y * TILE - 18, '💛 -30m Boost!', '#ffe066', 1.25);
+  toast('💛 Boosted ' + cName + ' by 30m (-' + cost + '💛)!', 'good');
+  sfx('perfect');
+  checkBuilds();
+  if (typeof MP !== 'undefined') MP.recordAction('heartperk', { item: o.type, name: cName + ' (-30m)', icon: '💛' });
+  saveGame();
+  return true;
+}
+function canLendAPaw(objOrPlot) {
+  if (!S || !objOrPlot) return false;
+  var myId = (typeof MP !== 'undefined' && MP.playerId) ? MP.playerId : null;
+  if (!myId || !objOrPlot.startedBy || objOrPlot.startedBy === myId) return false;
+  var helped = Array.isArray(objOrPlot.helpedBy) ? objOrPlot.helpedBy : [];
+  if (helped.indexOf(myId) >= 0) return false;
+  var t = Date.now();
+  if (objOrPlot.type) {
+    return (!objOrPlot.done && objOrPlot.buildEnd > t) || (objOrPlot.done && objOrPlot.upgrading && objOrPlot.upgradeEnd > t);
+  }
+  return !!(objOrPlot.end && objOrPlot.end > t);
+}
+function lendAPaw(objOrPlot) {
+  if (!canLendAPaw(objOrPlot)) return false;
+  var myId = (typeof MP !== 'undefined' && MP.playerId) ? MP.playerId : 'partner';
+  if (!Array.isArray(objOrPlot.helpedBy)) objOrPlot.helpedBy = [];
+  objOrPlot.helpedBy.push(myId);
+  var t = Date.now(), leftSec = 0, name = 'project', cx = S.player.x, cy = S.player.y;
+  if (objOrPlot.type) {
+    var cDef = CAT_BY_ID[objOrPlot.type];
+    name = (cDef ? cDef.name : objOrPlot.type) + (objOrPlot.upgrading ? ' Lv' + ((objOrPlot.lvl || 1) + 1) : '');
+    leftSec = siteTimeLeft(objOrPlot);
+    var shaveSec = clamp(Math.round(leftSec * 0.2), 1800, 7200);
+    if (!objOrPlot.done) objOrPlot.buildEnd = Math.max(t, objOrPlot.buildEnd - shaveSec * 1000);
+    else if (objOrPlot.upgrading) objOrPlot.upgradeEnd = Math.max(t, objOrPlot.upgradeEnd - shaveSec * 1000);
+    cx = (objOrPlot.x + objOrPlot.w / 2) * TILE; cy = (objOrPlot.y + objOrPlot.h / 2) * TILE;
+  } else {
+    var pDef = plotById(objOrPlot.id);
+    name = pDef ? pDef.name : objOrPlot.id;
+    leftSec = Math.max(0, (objOrPlot.end - t) / 1000);
+    var shaveSec = clamp(Math.round(leftSec * 0.2), 1800, 7200);
+    objOrPlot.end = Math.max(t, objOrPlot.end - shaveSec * 1000);
+    cx = pDef ? (pDef.x + pDef.w / 2) * TILE : S.player.x; cy = pDef ? (pDef.y + pDef.h / 2) * TILE : S.player.y;
+  }
+  gainHearts(3, cx, cy - 42);
+  gainXP(10);
+  confetti(cx, cy - 20, 26);
+  float(cx, cy - 64, '🤝 Lent a Paw! -' + fmtDur(shaveSec), '#80d8ff', 1.25);
+  toast('🤝 Lent a Paw to ' + (objOrPlot.startedByName || 'your partner') + '\'s ' + name + ' (-' + fmtDur(shaveSec) + ' & +3💛)!', 'good');
+  sfx('perfect'); pEmote('happy', 0.6);
+  checkBuilds();
+  if (typeof MP !== 'undefined') MP.recordAction('lend_paw', { name: name, icon: '🤝' });
+  saveGame();
+  return true;
+}
+function cutRibbon(o) {
+  if (!S || !o || !o.readyRibbon) return false;
+  o.readyRibbon = false;
+  var c = CAT_BY_ID[o.type];
+  var label = o.type === 'kennel' ? kennelSuiteName(o.lvl || 1) : (c ? c.name : o.type);
+  var cx = (o.x + o.w / 2) * TILE, cy = (o.y + o.h / 2) * TILE;
+  gainHearts(3, cx, cy - 46);
+  gainXP(12);
+  confetti(cx, cy - 20, 44);
+  burst(cx, cy - 10, 'sparkle', 16);
+  float(cx, cy - 72, '🎀 ' + label + ' Grand Opening!', '#ffe66d', 1.35);
+  toast('🎀 Grand Opening! ' + label + ' Lv ' + (o.lvl || 1) + ' is officially open! (+3💛)', 'good');
+  if (typeof showBanner === 'function') showBanner('🎀 Grand Opening!', label + ' Lv ' + (o.lvl || 1) + ' · +3💛 Paw Hearts');
+  sfx('level'); pEmote('happy', 0.8);
+  if (typeof MP !== 'undefined') MP.recordAction('ribbon', { item: o.type, name: label, icon: '🎀' });
+  saveGame();
+  return true;
+}
+function cutPlotRibbon(pl) {
+  if (!S || !pl || !pl.readyRibbon) return false;
+  pl.readyRibbon = false;
+  var pDef = plotById(pl.id);
+  var name = pDef ? pDef.name : pl.id;
+  var cx = S.player.x, cy = S.player.y;
+  gainHearts(5, cx, cy - 54);
+  gainXP(25);
+  confetti(cx, cy - 30, 60);
+  toast('🎀 Welcome to ' + name + '! Grand Opening Celebration (+5💛)!', 'good');
+  if (typeof showBanner === 'function') showBanner('🎀 ' + name + ' Grand Opening!', '+5💛 Paw Hearts · New unlock pads await!');
+  sfx('level'); pEmote('happy', 0.9);
+  if (typeof MP !== 'undefined') MP.recordAction('ribbon', { item: pl.id, name: name, icon: '🎀' });
+  saveGame();
+  return true;
+}
+function buyHeartPerk(id) {
+  if (!S || typeof HEART_PERK_BY_ID === 'undefined') return false;
+  var hp = HEART_PERK_BY_ID[id];
+  if (!hp) return false;
+  if ((S.hearts || 0) < hp.hearts) { toast('Need ' + hp.hearts + '💛 Paw Hearts for ' + hp.name + '!', 'bad'); sfx('error'); return false; }
+  if (id === 'build_boost') {
+    if (!activeBuildProjects().length) { toast('No active build, upgrade, or land expansion to boost right now!', 'bad'); sfx('error'); return false; }
+    S.hearts -= hp.hearts;
+    shaveActiveTimers(3600, 'Heart Boost!', S.player.x, S.player.y);
+    toast('🔨 Builder Speed Boost! Shaved 1 full hour off your active project!', 'good');
+    sfx('perfect');
+  } else if (id === 'joy_party') {
+    S.hearts -= hp.hearts;
+    boostMoraleAndFriendships(null, true);
+    boostRep(0.20, S.player.x, S.player.y - 68);
+    confetti(S.player.x, S.player.y - 40, 48);
+    toast('🎉 Pack Joy Treat Party! Every dog is beaming at 100% happiness & +0.20★ Rating!', 'good');
+    if (typeof showBanner === 'function') showBanner('🎉 Pack Joy Party!', 'All Pups Happy · Playtime Romps · +★ Rating');
+    sfx('level');
+  } else if (id === 'vip_magnet') {
+    if (S.vipMagnet) { toast('⭐ VIP Guest Magnet is already active for your next arrival!', 'good'); return false; }
+    S.hearts -= hp.hearts;
+    S.vipMagnet = true;
+    S.lastSpecialDay = 0; // allow a special arrival today even if one visited already!
+    if (S.arrivalTimer > 5) S.arrivalTimer = 5;
+    confetti(S.player.x, S.player.y - 40, 32);
+    toast('⭐ VIP Guest Magnet active! A rare Special Guest will arrive soon!', 'good');
+    sfx('perfect');
+  }
+  if (typeof MP !== 'undefined') MP.recordAction('heartperk', { item: id, name: hp.name, icon: hp.icon });
   saveGame();
   return true;
 }
@@ -733,74 +977,79 @@ function buyFranchiseTier() {
 var SPOT_REP_EVENTS = [
   { kind: 'squirrel',  icon: '🐿️', label: 'Shoo noisy squirrel',       where: 'yard', dur: 20, cash: 15, upRep: 0.22, downRep: 0.20,
     startMsg: '🐿️ Random Event: A cheeky squirrel is riling up the dogs! Walk over to shoo it away (+0.22★) before neighbours complain (-0.20★)!',
-    winMsg:   '🐿️ Shooed the squirrel & calmed the pack! +0.22★ Reputation & +$15!',
+    winMsg:   '🐿️ Shooed the squirrel & calmed the pack! +0.22★ · +$15 · +2💛 · -15m Build!',
     loseMsg:  '🐿️ Non-stop barking at the squirrel annoyed the neighbours! -0.20★ Reputation' },
   { kind: 'reporter',  icon: '📸', label: 'Pose for Town Photographer', where: 'yard', dur: 22, cash: 25, upRep: 0.28, downRep: 0.12,
     startMsg: '📸 Random Event: A Town Gazette photographer is by the lawn! Walk over to pose (+0.28★) before they leave (-0.12★)!',
-    winMsg:   '📸 Front-page photo in the Town Gazette! +0.28★ Reputation & +$25!',
+    winMsg:   '📸 Front-page photo in the Town Gazette! +0.28★ · +$25 · +2💛 · -15m Build!',
     loseMsg:  '📸 The reporter left without getting a photo! -0.12★ Reputation' },
   { kind: 'pipe',      icon: '💦', label: 'Fix burst lawn sprinkler',   where: 'yard', dur: 18, cash: 12, upRep: 0.20, downRep: 0.22,
     startMsg: '💦 Random Event: A lawn sprinkler pipe burst! Walk over to shut the valve (+0.20★) before it floods (-0.22★)!',
-    winMsg:   '💦 Fixed the leaky sprinkler in record time! +0.20★ Reputation & +$12!',
+    winMsg:   '💦 Fixed the leaky sprinkler in record time! +0.20★ · +$12 · +2💛 · -15m Build!',
     loseMsg:  '💦 The burst sprinkler flooded the lawn into a muddy mess! -0.22★ Reputation' },
   { kind: 'neighbour', icon: '🗣️', label: 'Calm grumpy neighbour',      where: 'shop', dur: 20, cash: 10, upRep: 0.22, downRep: 0.25,
     startMsg: '🗣️ Random Event: A grumpy neighbour is at the front counter! Walk over to smooth things over (+0.22★) before they post a bad review (-0.25★)!',
-    winMsg:   '🗣️ Won over the grumpy neighbour with complimentary pup treats! +0.22★ Reputation!',
+    winMsg:   '🗣️ Won over the grumpy neighbour with complimentary pup treats! +0.22★ · +2💛 · -15m Build!',
     loseMsg:  '🗣️ The grumpy neighbour left a 1-star noise review online! -0.25★ Reputation' },
+  { kind: 'rival',     icon: '📣', label: 'Counter rival flyers',       where: 'shop', dur: 22, cash: 14, upRep: 0.18, downRep: 0.22,
+    startMsg: '📣 Random Event: A rival kennel left flyers by your door! Walk to the front shop to hand out free pup treats (+0.18★) before word spreads (-0.22★)!',
+    winMsg:   '📣 Your free pup treats won the whole street over! +0.18★ · +$14 · +2💛 · -15m Build!',
+    loseMsg:  '📣 The rival kennel\'s critical flyers swayed locals! -0.22★ Reputation' },
 ];
 function triggerRandomRepEvent(forcedKind) {
   if (!S || !S.tutorialDone) return null;
   var dogsIn = S.dogs.filter(function (d) { return d.checkedIn && d.state !== 'leaving'; });
   var avgHappy = dogsIn.length ? (dogsIn.reduce(function (acc, d) { return acc + (d.happy || 75); }, 0) / dogsIn.length) : 80;
-  var kind = forcedKind || pick(['spot', 'spot', 'inspector', 'influencer', 'review_up', 'rival_down']);
+  var kind = forcedKind || pick(['spot', 'spot', 'inspector', 'inspector', 'influencer', 'rival', 'review_up']);
 
   if (kind === 'inspector') {
-    var cleanOk = S.poops.length <= 1 && avgHappy >= 62;
+    var reqHappy = S.rep >= 4.2 ? 78 : S.rep >= 3.5 ? 70 : 62;
+    var cleanOk = S.poops.length === 0 && (S.chores || []).length <= 1 && avgHappy >= reqHappy;
     if (cleanOk) {
       S.cash += 25; S.stats.earned += 25; S.life.earned += 25;
-      boostRep(0.25, S.player.x, S.player.y - 68);
+      boostRep(0.22, S.player.x, S.player.y - 68);
+      gainHearts(2, S.player.x, S.player.y - 90);
       confetti(S.player.x, S.player.y - 50, 28); sfx('perfect');
-      toast('📋 Random Event — Surprise Health Inspection PASSED! Spotless lawn & happy pups! +0.25★ Reputation & +$25', 'good');
-      if (typeof showBanner === 'function') showBanner('📋 Surprise Inspection Passed!', '+0.25★ Reputation · +$25 Clean Award');
+      toast('📋 Random Event — Surprise Health Inspection PASSED! Spotless lawn & happy pups! +★ Reputation, +$25 & +2💛', 'good');
+      if (typeof showBanner === 'function') showBanner('📋 Surprise Inspection Passed!', '+Reputation · +$25 Clean Award · +2💛');
       saveGame();
-      return { kind: 'inspector', delta: 0.25 };
+      return { kind: 'inspector', delta: 0.22 };
     } else {
-      dropRep(0.25, '📋 Random Event — Surprise Health Inspector fined your reputation for yard mess!', S.player.x, S.player.y - 68);
-      if (typeof showBanner === 'function') showBanner('📋 Surprise Inspection Failed!', '-0.25★ Reputation — keep poop scooped & pups happy!');
+      dropRep(0.32, '📋 Random Event — Surprise Health Inspector docked your rating for yard mess or low mood!', S.player.x, S.player.y - 68);
+      if (typeof showBanner === 'function') showBanner('📋 Surprise Inspection Failed!', '-0.32★ Reputation — keep poop scooped & pups happy!');
       saveGame();
-      return { kind: 'inspector', delta: -0.25 };
+      return { kind: 'inspector', delta: -0.32 };
     }
   }
   if (kind === 'influencer') {
-    var viralGood = S.poops.length === 0 && avgHappy >= 68;
+    var viralReq = S.rep >= 4.2 ? 80 : 72;
+    var viralGood = S.poops.length === 0 && (S.chores || []).length === 0 && avgHappy >= viralReq;
     if (viralGood) {
       S.cash += 18; S.stats.earned += 18; S.life.earned += 18;
-      boostRep(0.22, S.player.x, S.player.y - 68);
+      boostRep(0.20, S.player.x, S.player.y - 68);
+      gainHearts(2, S.player.x, S.player.y - 90);
       confetti(S.player.x, S.player.y - 50, 24); sfx('coin');
-      toast('📱 Random Event — A customer\'s PupTok video of your happy dogs went viral! +0.22★ Reputation & +$18', 'good');
+      toast('📱 Random Event — A customer\'s PupTok video of your happy dogs went viral! +★ Reputation, +$18 & +2💛', 'good');
       saveGame();
-      return { kind: 'influencer', delta: 0.22 };
+      return { kind: 'influencer', delta: 0.20 };
     } else {
-      dropRep(0.18, '📱 Random Event — A passerby posted an embarrassing clip of a messy yard online!', S.player.x, S.player.y - 68);
+      dropRep(0.24, '📱 Random Event — A passerby posted a critical clip of your yard online!', S.player.x, S.player.y - 68);
       saveGame();
-      return { kind: 'influencer', delta: -0.18 };
+      return { kind: 'influencer', delta: -0.24 };
     }
   }
   if (kind === 'review_up') {
-    boostRep(0.18, S.player.x, S.player.y - 68);
+    boostRep(0.15, S.player.x, S.player.y - 68);
+    gainHearts(1, S.player.x, S.player.y - 90);
     sfx('coin');
-    toast('🌟 Random Event — A local pet blogger published a glowing 5-star review! +0.18★ Reputation', 'good');
+    toast('🌟 Random Event — A local pet blogger published a glowing review! +★ Reputation & +1💛', 'good');
     saveGame();
-    return { kind: 'review_up', delta: 0.18 };
+    return { kind: 'review_up', delta: 0.15 };
   }
-  if (kind === 'rival_down') {
-    dropRep(0.15, '📰 Random Event — A rival kennel posted critical flyers in town!', S.player.x, S.player.y - 68);
-    saveGame();
-    return { kind: 'rival_down', delta: -0.15 };
-  }
-  // Interactive timed spot event on the lawn or in the reception shop
+  // Interactive timed spot event on the lawn or in the reception shop (including 'rival' flyer counterplay!)
   if (S.repEvent) return S.repEvent;
-  var def = SPOT_REP_EVENTS.filter(function (e) { return e.kind === forcedKind; })[0] || pick(SPOT_REP_EVENTS);
+  var wantSpot = (kind === 'rival_down' ? 'rival' : kind);
+  var def = SPOT_REP_EVENTS.filter(function (e) { return e.kind === wantSpot; })[0] || pick(SPOT_REP_EVENTS);
   var wx = 12.2 * TILE, wy = 24.3 * TILE;
   if (def.where === 'yard') {
     var spots = [];
@@ -830,6 +1079,8 @@ function resolveRepEvent(success) {
   if (success) {
     if (ev.cash) { S.cash += ev.cash; S.stats.earned += ev.cash; S.life.earned += ev.cash; }
     boostRep(ev.upRep || 0.2, ev.x, ev.y - 50);
+    gainHearts(2, ev.x, ev.y - 72);
+    shaveActiveTimers(900, 'Event!', ev.x, ev.y);
     gainXP(8);
     burst(ev.x, ev.y - 16, 'sparkle', 14);
     confetti(ev.x, ev.y - 30, 24);
@@ -840,7 +1091,7 @@ function resolveRepEvent(success) {
     dropRep(ev.downRep || 0.2, ev.loseMsg, ev.x, ev.y - 50);
     if (ev.kind === 'pipe') {
       S.dogs.forEach(function (d) {
-        if (d.checkedIn && !d.need && dist(d.x, d.y, ev.x, ev.y) < 220 && hasDone('tub')) {
+        if (d.checkedIn && !d.need && dist(d.x, d.y, ev.x, ev.y) < 220 && (hasDone('tub') || hasDone('groomhouse'))) {
           d.need = { type: 'bath', t: 0 };
         }
       });
@@ -905,8 +1156,8 @@ function nextPoopDelay(d, afterMeal) { var D = dayLen(); return afterMeal ? rand
 // rare named dogs that only turn up once a hidden requirement is met (see SPECIALS in data.js)
 function pickSpecial() {
   if (!S.specials) S.specials = {};
-  // At most 1 special guest visit per day, and never while a special guest is already here
-  if (S.lastSpecialDay === S.day) return null;
+  // At most 1 special guest visit per day (unless VIP Magnet is active!), and never while a special guest is already here
+  if (S.lastSpecialDay === S.day && !S.vipMagnet) return null;
   if (S.dogs.some(function (d) { return d.special && d.state !== 'leaving'; })) return null;
   var activeSpecials = {};
   S.dogs.forEach(function (d) { if (d.special) activeSpecials[d.special] = 1; });
@@ -914,19 +1165,31 @@ function pickSpecial() {
     if (activeSpecials[sp.id]) return false;
     try { return !!sp.check(S); } catch (e) { return false; }
   });
+  if (!cands.length && S.vipMagnet) {
+    // VIP Magnet fallback: allow any special not currently on the lawn
+    cands = SPECIALS.filter(function (sp) { return !activeSpecials[sp.id]; });
+  }
   if (!cands.length) return null;
   var chosen = null;
-  // Teddy & Alfie (moraleBoost): genuinely rare special occurrences (~6% if not met yet, ~3.5% repeat)
-  var moraleFresh = cands.filter(function (sp) { return sp.moraleBoost && !S.specials[sp.id]; });
-  var moraleSeen = cands.filter(function (sp) { return sp.moraleBoost && S.specials[sp.id]; });
-  var galaMul = (S && S.dailyEvent === 'gala') ? 2.0 : 1.0;
-  if (moraleFresh.length && Math.random() < 0.06 * galaMul) chosen = pick(moraleFresh);
-  else if (moraleSeen.length && Math.random() < 0.035 * galaMul) chosen = pick(moraleSeen);
-  else {
-    var fresh = cands.filter(function (sp) { return !sp.moraleBoost && !S.specials[sp.id]; });
-    var seen = cands.filter(function (sp) { return !sp.moraleBoost && S.specials[sp.id]; });
-    if (fresh.length && Math.random() < 0.08 * galaMul) chosen = pick(fresh);
-    else if (seen.length && Math.random() < 0.03 * galaMul) chosen = pick(seen);
+  if (S.vipMagnet) {
+    S.vipMagnet = false;
+    var unseenAll = cands.filter(function (sp) { return !S.specials[sp.id]; });
+    chosen = pick(unseenAll.length ? unseenAll : cands);
+  } else {
+    // Teddy & Alfie (moraleBoost): genuinely rare special occurrences (~6% if not met yet, ~3.5% repeat)
+    // Upgraded Kennel Luxury Suites (+12% per avg suite level) & VIP Gala boost Special Guest odds!
+    var moraleFresh = cands.filter(function (sp) { return sp.moraleBoost && !S.specials[sp.id]; });
+    var moraleSeen = cands.filter(function (sp) { return sp.moraleBoost && S.specials[sp.id]; });
+    var suiteVipMul = 1 + Math.max(0, kennelSuiteLevel() - 1) * 0.12;
+    var galaMul = ((S && S.dailyEvent === 'gala') ? 2.0 : 1.0) * suiteVipMul;
+    if (moraleFresh.length && Math.random() < 0.06 * galaMul) chosen = pick(moraleFresh);
+    else if (moraleSeen.length && Math.random() < 0.035 * galaMul) chosen = pick(moraleSeen);
+    else {
+      var fresh = cands.filter(function (sp) { return !sp.moraleBoost && !S.specials[sp.id]; });
+      var seen = cands.filter(function (sp) { return !sp.moraleBoost && S.specials[sp.id]; });
+      if (fresh.length && Math.random() < 0.08 * galaMul) chosen = pick(fresh);
+      else if (seen.length && Math.random() < 0.03 * galaMul) chosen = pick(seen);
+    }
   }
   if (chosen) S.lastSpecialDay = S.day;
   return chosen;
@@ -1050,9 +1313,18 @@ function staffWages() { var w = 0; STAFF.forEach(function (s) { if (staffHired(s
 function makeNpc(id) {
   var def = STAFF_BY_ID[id] || {};
   var sp = def.spot || (id === 'receptionist' ? RECEPTION_SPOT : [YARD_ENTRY[0] + 2.5, YARD_ENTRY[1] + 0.5]);
+  var sIdx = typeof STAFF !== 'undefined' ? STAFF.indexOf(def) : -1;
   var lk = typeof def.look === 'number' ? ((def.look + (S && S.player ? S.player.look || 0 : 0) + 1) % 4) : 1;
-  return { id: id, x: sp[0] * TILE, y: sp[1] * TILE, dir: 'down', face: 1, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, carry: null,
+  return { id: id, uid: 910 + (sIdx >= 0 ? sIdx : Math.floor(Math.random() * 50)), x: sp[0] * TILE, y: sp[1] * TILE, dir: 'down', face: 1, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, carry: null,
     look: lk, path: null, route: null, idleT: rand(0.4, 1.2), task: null, say: '', sayT: 0, stepT: 0, patrolIdx: 0 };
+}
+function faceToward(e, tx, ty) {
+  if (!e) return;
+  var dx = tx - e.x, dy = ty - e.y;
+  if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+  if (Math.abs(dx) > 0.5) e.face = dx > 0 ? 1 : -1;
+  if (Math.abs(dx) >= Math.abs(dy) * 0.9) e.dir = dx > 0 ? 'right' : 'left';
+  else e.dir = dy > 0 ? 'down' : 'up';
 }
 function syncStaff() {
   if (!S.staff) S.staff = {};
@@ -1211,6 +1483,7 @@ function updateRunner(n, dt) {
       n.task = null; return;
     }
     if (dist(n.x, n.y, fd.x, fd.y) < 48) {
+      faceToward(n, fd.x, fd.y);
       n.say = 'Come on, ' + fd.name + '! Pickup time!'; n.sayT = 2.2;
       n.emote = 'happy'; n.emoteT = 0;
       startToCounter(fd);
@@ -1258,7 +1531,7 @@ function updateYardWorker(n, dt) {
       if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap')) return;
       if (!workerCanDoNeed(role, d.need.type)) return;
       if (d.need.type === 'bath') {
-        var freeTub = S.objects.some(function (o) { return o.done && o.type === 'tub' && !o.dogId; });
+        var freeTub = S.objects.some(function (o) { return o.done && (o.type === 'tub' || o.type === 'groomhouse') && !o.dogId; });
         if (!freeTub) return;
       }
       var dd = dist(n.x, n.y, d.x, d.y) - d.need.t * 30;
@@ -1305,6 +1578,7 @@ function runWorkerTask(n, dt) {
     for (var ci = 0; ci < (S.chores || []).length; ci++) if (S.chores[ci].id === t.id) ch = S.chores[ci];
     if (!ch) { n.task = null; return; }
     if (dist(n.x, n.y, ch.x, ch.y) < 34) {
+      faceToward(n, ch.x, ch.y);
       doChore(ch);
       n.emote = 'happy'; n.emoteT = 0;
       n.say = ch.icon + ' All done!'; n.sayT = 1.6;
@@ -1315,11 +1589,12 @@ function runWorkerTask(n, dt) {
   }
   if (t.kind === 'washDog') {
     var wd = dogById(t.dogId);
-    var tub = S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
+    var tub = S.objects.filter(function (o) { return o.done && (o.type === 'tub' || o.type === 'groomhouse') && !o.dogId; })[0];
     if (!wd || !tub || !wd.need || wd.need.type !== 'bath' || !(wd.state === 'idle' || wd.state === 'wander' || wd.state === 'nap')) {
       n.task = null; return;
     }
     if (dist(n.x, n.y, wd.x, wd.y) < 42) {
+      faceToward(n, wd.x, wd.y);
       wd.state = 'npcLeashed'; wd.npcHolder = n.id; wd.path = null; wd.anim = null;
       n.carry = { type: 'dog', id: wd.id };
       n.say = 'Bath time, ' + wd.name + '!'; n.sayT = 2.0;
@@ -1331,21 +1606,30 @@ function runWorkerTask(n, dt) {
   }
   if (t.kind === 'toTub') {
     var bd = dogById(t.dogId);
-    var tub2 = S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
+    var groomHouses = S.objects.filter(function (o) { return o.done && o.type === 'groomhouse' && !o.dogId; });
+    var tub2 = groomHouses[0] || S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
     if (!bd || !tub2) {
       if (bd && bd.state === 'npcLeashed') { bd.state = 'idle'; bd.npcHolder = null; }
       n.carry = null; n.task = null; return;
     }
     // Keep the leashed dog trotting right behind the Groomer
     moveTo(bd, n.x - (DIRV[n.dir] ? DIRV[n.dir][0] * 26 : 0), n.y - (DIRV[n.dir] ? DIRV[n.dir][1] * 22 : -18), 175, dt);
-    var tPad = stationPad(tub2) || { x: tub2.x * TILE, y: (tub2.y + 1) * TILE, w: tub2.w * TILE, h: TILE };
-    if (inRect(n.x, n.y, tPad) || dist(n.x, n.y, (tub2.x + tub2.w / 2) * TILE, (tub2.y + 1) * TILE) < 44) {
+    var tPad = stationPad(tub2) || { x: tub2.x * TILE, y: (tub2.y + tub2.h) * TILE, w: tub2.w * TILE, h: TILE };
+    if (inRect(n.x, n.y, tPad) || dist(n.x, n.y, (tub2.x + tub2.w / 2) * TILE, (tub2.y + tub2.h) * TILE) < 48) {
+      faceToward(n, (tub2.x + tub2.w / 2) * TILE, (tub2.y + tub2.h / 2) * TILE);
       n.carry = null;
-      var tLv = tub2.lvl || 1;
-      bd.state = 'bath'; bd.actT = Math.max(1.6, 4.2 - (tLv - 1) * 0.35); bd.objId = tub2.id; tub2.dogId = bd.id; tub2.useAt = now; bd.anim = null; bd.npcHolder = null;
-      bd.x = (tub2.x + tub2.w / 2) * TILE; bd.y = (tub2.y + 0.75) * TILE;
-      sfx('splash'); gainXP(2); S.stats.baths++;
-      n.say = 'Scrub-a-dub!'; n.sayT = 1.8; n.emote = 'happy'; n.emoteT = 0;
+      var tLv = tub2.lvl || 1, isSpa = tub2.type === 'groomhouse';
+      bd.state = 'bath'; bd.actT = isSpa ? Math.max(1.0, 2.2 - (tLv - 1) * 0.2) : Math.max(1.6, 4.2 - (tLv - 1) * 0.35);
+      bd.objId = tub2.id; tub2.dogId = bd.id; tub2.useAt = now; bd.anim = null; bd.npcHolder = null;
+      bd.x = (tub2.x + tub2.w / 2) * TILE; bd.y = (tub2.y + (isSpa ? tub2.h - 0.55 : 0.75)) * TILE;
+      if (isSpa) {
+        var spaCash = 12 + (tLv - 1) * 4;
+        S.cash += spaCash; S.stats.earned += spaCash; S.life.earned += spaCash;
+        bd.happy = 100;
+        float(bd.x, bd.y - 54, '💈 Spa Pamper! +$' + spaCash, '#b3e5fc', 1.1);
+      }
+      sfx('splash'); gainXP(isSpa ? 5 : 2); S.stats.baths++;
+      n.say = isSpa ? 'Luxury spa day!' : 'Scrub-a-dub!'; n.sayT = 1.8; n.emote = 'happy'; n.emoteT = 0;
       n.task = null; n.idleT = 0.9; n.path = null; return;
     }
     if (!n.path || n.pathT <= 0) helperWalkTo(n, [tPad.x + tPad.w / 2, tPad.y + tPad.h / 2]);
@@ -1357,10 +1641,14 @@ function runWorkerTask(n, dt) {
     var item = t.type === 'food' ? 'food' : t.type === 'treat' ? 'treat' : t.type === 'play' ? 'ball' : null;
     if (item && !(n.carry && n.carry.type === item)) { // fetch it from the station first
       if (n.carry && n.carry.type === 'poop') { t.kind = 'bin'; t.then = { kind: 'need', dogId: t.dogId, type: t.type }; return; }
-      var st = S.objects.filter(function (o) { return o.done && STATION_ITEM[o.type] === item; })[0];
+      var kitchens = (item === 'food' || item === 'treat') ? S.objects.filter(function (o) { return o.done && o.type === 'kitchen'; }) : [];
+      var st = kitchens[0] || S.objects.filter(function (o) { return o.done && STATION_ITEM[o.type] === item; })[0];
       if (!st) { n.task = null; n.idleT = 3; return; }
       var pad = stationPad(st);
-      if (inRect(n.x, n.y, pad)) { n.carry = { type: item }; st.useAt = now; n.emote = 'scoop'; n.emoteT = 0; sfx('pop'); n.path = null; return; }
+      if (inRect(n.x, n.y, pad)) {
+        faceToward(n, (st.x + st.w / 2) * TILE, (st.y + st.h / 2) * TILE);
+        n.carry = { type: item, gourmet: st.type === 'kitchen' }; st.useAt = now; n.emote = 'scoop'; n.emoteT = 0; sfx('pop'); n.path = null; return;
+      }
       if (!n.path) helperWalkTo(n, [pad.x + pad.w / 2, pad.y + pad.h / 2]);
       helperWalk(n, dt); return;
     }
@@ -1372,6 +1660,7 @@ function runWorkerTask(n, dt) {
     var pp = null; for (var i = 0; i < S.poops.length; i++) if (S.poops[i].id === t.id) pp = S.poops[i];
     if (!pp) { n.task = null; return; }
     if (dist(n.x, n.y, pp.x, pp.y) < 24) {
+      faceToward(n, pp.x, pp.y);
       S.poops.splice(S.poops.indexOf(pp), 1); burst(pp.x, pp.y, 'dust', 6); sfx('scoop'); n.emote = 'scoop'; n.emoteT = 0;
       if (n.carry && n.carry.type === 'poop') n.carry.n = (n.carry.n || 1) + 1; else n.carry = { type: 'poop', n: 1 };
       n.task = null; n.idleT = 0.6; n.path = null; return;
@@ -1384,7 +1673,10 @@ function runWorkerTask(n, dt) {
     var bin = S.objects.filter(function (o) { return o.done && o.type === 'trash'; })[0];
     if (!bin || !n.carry) { n.carry = null; n.task = t.then || null; return; }
     var bp = stationPad(bin);
-    if (inRect(n.x, n.y, bp)) { n.carry = null; bin.useAt = now; sfx('trash'); n.task = t.then || null; n.idleT = 0.5; n.path = null; return; }
+    if (inRect(n.x, n.y, bp)) {
+      faceToward(n, (bin.x + bin.w / 2) * TILE, (bin.y + bin.h / 2) * TILE);
+      n.carry = null; bin.useAt = now; sfx('trash'); n.task = t.then || null; n.idleT = 0.5; n.path = null; return;
+    }
     if (!n.path) helperWalkTo(n, [bp.x + bp.w / 2, bp.y + bp.h / 2]);
     helperWalk(n, dt); return;
   }
@@ -1412,13 +1704,15 @@ function helperWalk(n, dt) {
   if (n.moving) n.walkT += dt;
 }
 function helperServe(n, d, type) {
-  n.face = d.x > n.x ? 1 : -1; n.dir = d.x > n.x ? 'right' : 'left';
+  faceToward(n, d.x, d.y);
   var lv = staffLvl(n.id) || 1, bonusH = (lv - 1) * 4, bonusCash = lv > 1 ? (lv - 1) : 0;
+  var hasKitchen = (type === 'food' || type === 'treat') && (hasDone('kitchen') || (n.carry && n.carry.gourmet));
+  if (hasKitchen) { bonusH += 14; bonusCash += 8; }
   if (bonusCash > 0) { S.cash += bonusCash; S.stats.earned += bonusCash; S.life.earned += bonusCash; }
   if (S.life) S.life.care = (S.life.care || 0) + 1;
   if (type === 'pet') { burst(d.x, d.y - 34, 'heart', 5); sfx('pet', d); if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.2; d.path = null; } fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); setAnim(d, 'wiggle', 1.0); n.emote = 'pet'; n.emoteT = 0; }
-  else if (type === 'food') { n.carry = null; fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true)); burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); float(d.x, d.y - 48, 'Nom nom!', '#fff'); n.emote = 'pet'; n.emoteT = 0; }
-  else if (type === 'treat') { n.carry = null; fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; } setAnim(d, 'beg', 1.2); float(d.x, d.y - 48, 'Yum!', '#fff'); n.emote = 'pet'; n.emoteT = 0; }
+  else if (type === 'food') { n.carry = null; fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true)); burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); float(d.x, d.y - 48, hasKitchen ? '🍲 Chef Meal! +$' + bonusCash : 'Nom nom!', '#fff'); n.emote = 'pet'; n.emoteT = 0; }
+  else if (type === 'treat') { n.carry = null; fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; } setAnim(d, 'beg', 1.2); float(d.x, d.y - 48, hasKitchen ? '🥐 Fresh Bake! +$' + bonusCash : 'Yum!', '#fff'); n.emote = 'pet'; n.emoteT = 0; }
   else if (type === 'play') { n.carry = null; fulfillNeed(d); d.happy = Math.min(100, d.happy + bonusH); d.state = 'play'; d.actT = 3.5; d.path = null; d.playA = Math.random() * 6.28; d.anim = null; sfx('bark', d); sfx('whoosh'); burst(d.x, d.y - 24, 'star', 6); FX.parts.push({ x: n.x, y: n.y - 50, vx: (d.x - n.x) * 1.2 + rand(-40, 40), vy: -220, life: 1.1, max: 1.1, kind: 'ball', size: 7, grav: 520 }); float(d.x, d.y - 48, 'Fetch!!', '#fff'); n.emote = 'happy'; n.emoteT = 0; }
 }
 // the open end of the reception counter: a dog on the other side of it from its target trots round instead of cutting through
@@ -1450,14 +1744,16 @@ function dexSeen(d) {
   var newMastery = breedMasteryLvl(d.breed);
   if (fresh) {
     var b = breedOf(d), n = dexCount();
-    toast('📖 New breed in your glossary: ' + b.name + '!', 'good'); sfx('new_breed'); gainXP(12);
+    toast('📖 New breed in your glossary: ' + b.name + '! (+3💛)', 'good'); sfx('new_breed'); gainXP(12);
+    gainHearts(3, d.x, d.y - 68);
     if (typeof UI !== 'undefined') UI.dexNew = (UI.dexNew || 0) + 1;
     if (n % 5 === 0) { var bonus = n * 20; S.cash += bonus; toast('🏅 ' + n + ' breeds met  +' + fmtMoney(bonus), 'good'); confetti(S.player.x, S.player.y - 50, 40); }
   } else if (newMastery > oldMastery) {
     var b2 = breedOf(d), mBonus = newMastery * 30;
     S.cash += mBonus; S.stats.earned += mBonus; S.life.earned += mBonus;
     gainXP(10 * newMastery);
-    toast('⭐ Breed Mastery! ' + b2.name + ' reached Mastery Lv ' + newMastery + ' (+' + (newMastery * 8) + '% boarding pay)  +' + fmtMoney(mBonus), 'good');
+    gainHearts(2, d.x, d.y - 68);
+    toast('⭐ Breed Mastery! ' + b2.name + ' reached Mastery Lv ' + newMastery + ' (+' + (newMastery * 8) + '% boarding pay)  +' + fmtMoney(mBonus) + ' · +2💛', 'good');
     confetti(d.x, d.y - 40, 32); sfx('perfect');
   }
 }
@@ -1537,7 +1833,9 @@ function checkGoals() {
   S.goals.forEach(function (g) {
     if (g.done || !goalDef(g.id) || goalProgress(g) < g.n) return;
     g.done = true; S.cash += g.reward; S.stats.goalCash += g.reward; completed = true;
-    toast('🎯 Goal complete: ' + goalText(g) + '  +' + fmtMoney(g.reward), 'good'); sfx('goal'); gainXP(10);
+    gainHearts(2, S.player.x, S.player.y - 76);
+    var shavedG = shaveActiveTimers(300, 'Goal!', S.player.x, S.player.y);
+    toast('🎯 Goal complete: ' + goalText(g) + '  +' + fmtMoney(g.reward) + ' · +2💛' + (shavedG ? ' · -5m Build!' : ''), 'good'); sfx('goal'); gainXP(10);
     confetti(S.player.x, S.player.y - 50, 30);
   });
   // Endless Goal Waves: completing all 3 goals immediately awards a Wave Jackpot and rolls the next wave!
@@ -1546,8 +1844,10 @@ function checkGoals() {
     var wBonus = Math.round(45 * wNum * (S.dailyEvent === 'zoomies' ? 1.35 : 1));
     S.cash += wBonus; S.stats.goalCash += wBonus; S.life.earned += wBonus;
     gainXP(15 * wNum);
+    gainHearts(5, S.player.x, S.player.y - 94);
+    var shavedW = shaveActiveTimers(1800, 'Wave Bonus!', S.player.x, S.player.y);
     rollGoals(true);
-    toast('🌊 Goal Wave ' + wNum + ' Complete! +' + fmtMoney(wBonus) + ' Wave Bonus — Wave ' + S.goalWave + ' unlocked!', 'good');
+    toast('🌊 Goal Wave ' + wNum + ' Complete! +' + fmtMoney(wBonus) + ' · +5💛' + (shavedW ? ' · -30m Build!' : '') + ' — Wave ' + S.goalWave + ' unlocked!', 'good');
     confetti(S.player.x, S.player.y - 60, 48);
     completed = true;
   }
@@ -1808,9 +2108,9 @@ function tutorialGuidance() {
 }
 function assignNeed(d) {
   var ph = dayPhase().id;
-  var canFood = hasAnyType('foodbin') || S.tutorial.pet;
+  var canFood = hasAnyType('foodbin') || hasAnyType('kitchen') || S.tutorial.pet;
   var canPlay = hasAnyType('toybox') || S.tutorial.feed;
-  var canBath = hasAnyType('tub') || S.tutorial.build_toy;
+  var canBath = hasAnyType('tub') || hasAnyType('groomhouse') || S.tutorial.build_toy;
   var w = {
     food: canFood ? (ph === 'midday' ? 2.3 : 1.1) : 0.15,
     play: canPlay ? (ph === 'midday' ? 2.1 : ph === 'morning' ? 1.4 : 0.9) : 0,
@@ -1850,7 +2150,12 @@ function fulfillNeed(d, how) {
   var n = d.need; if (!n) return;
   d.happy = Math.min(100, d.happy + (how === 'self' ? 16 : 28));
   var favMap = { pet: 'pets', play: 'play', food: 'food', treat: 'treat', bath: 'bath' };
-  if (how !== 'self' && d.fav === favMap[n.type]) { d.happy = Math.min(100, d.happy + 10); float(d.x, d.y - 70, '★ Favourite!', '#ffd54a'); burst(d.x, d.y - 36, 'star', 6); }
+  if (how !== 'self' && d.fav === favMap[n.type]) {
+    d.happy = Math.min(100, d.happy + 10);
+    float(d.x, d.y - 70, '★ Favourite!', '#ffd54a');
+    burst(d.x, d.y - 36, 'star', 6);
+    gainHearts(1, d.x, d.y - 90);
+  }
   d.need = null; d.anim = null; d.seekObj = null; d.needCool = (S.clock || 0) + 55; // a dog you just helped stays content for a while
   if (d.state === 'idle') d.idleT = rand(1, 2.5);
   burst(d.x, d.y - 34, 'heart', how === 'self' ? 3 : 6); d.mood = 1.2;
@@ -1913,7 +2218,14 @@ function updateChores(dt) {
   if (!S) return;
   if (!Array.isArray(S.chores)) S.chores = [];
   if (!S.tutorialDone) { S.chores.length = 0; return; }
-  for (var i = 0; i < S.chores.length; i++) S.chores[i].age += dt;
+  for (var i = S.chores.length - 1; i >= 0; i--) {
+    var ch = S.chores[i];
+    ch.age += dt;
+    if (ch.age > 34) {
+      S.chores.splice(i, 1);
+      dropRep(0.09, ch.icon + ' Ignored task (' + ch.label + ') lowered your Star Rating!', ch.x, ch.y - 40);
+    }
+  }
   // Spawn chores faster when star rating is low (<3.0★) or when waiting for dogs/owners!
   var fast = S.rep < 3.0 || S.dogs.every(function (d) { return !d.need; });
   S.choreT = (S.choreT == null ? 4 : S.choreT) - dt;
@@ -1930,6 +2242,7 @@ function doChore(ch) {
   S.cash += cashGain; S.stats.earned += cashGain; S.life.earned += cashGain;
   if (S.life) S.life.care = (S.life.care || 0) + 1;
   gainXP(ch.xp || 3);
+  gainHearts(1, ch.x, ch.y - 72);
   boostRep(ch.rep || 0.05, ch.x, ch.y - 54);
   burst(ch.x, ch.y - 10, 'sparkle', 10);
   coinFly(ch.x, ch.y - 20, 3);
@@ -2017,7 +2330,7 @@ function stationPad(o) {
   return pad;
 }
 function inRect(x, y, r) { return r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
-var STATION_ITEM = { foodbin: 'food', toybox: 'ball', treatjar: 'treat' };
+var STATION_ITEM = { foodbin: 'food', kitchen: 'food', toybox: 'ball', treatjar: 'treat' };
 function dwellTime(kind) {
   var b = (settings && settings.standSec) || (window.GAME_CONFIG && window.GAME_CONFIG.standSeconds) || 0.55;
   if (kind === 'poop') return b * 0.75;
@@ -2131,7 +2444,12 @@ function updateUnlockPads(dt) {
   }
   if (!hit) { PAD_FILL.id = null; PAD_FILL.prog = 0; PAD_FILL.warnId = null; return; }
   if (hit.kind === 'plot') {
-    if (hit.pending) { PAD_FILL.id = hit.id; PAD_FILL.prog = 0; return; }
+    if (hit.pending) {
+      if (canLendAPaw(hit.pending)) {
+        lendAPaw(hit.pending);
+      }
+      PAD_FILL.id = hit.id; PAD_FILL.prog = 0; return;
+    }
     if (S.level < hit.lvl) {
       if (PAD_FILL.warnId !== hit.id) {
         PAD_FILL.warnId = hit.id;
@@ -2139,6 +2457,13 @@ function updateUnlockPads(dt) {
       }
       PAD_FILL.id = hit.id; PAD_FILL.prog = 0; return;
     }
+  }
+  if ((hit.kind === 'obj' || hit.kind === 'plot') && !canStartNewBuild()) {
+    if (PAD_FILL.warnId !== hit.id) {
+      PAD_FILL.warnId = hit.id;
+      warnBuilderBusy();
+    }
+    PAD_FILL.id = hit.id; PAD_FILL.prog = 0; return;
   }
   if (S.cash < hit.cost) {
     if (hit.kind === 'plot' && PAD_FILL.warnId !== hit.id) {
@@ -2166,7 +2491,7 @@ function updateUnlockPads(dt) {
       S.builtPads[hit.id] = true;
       var o = addObject(hit.type, hit.x, hit.y, false);
       var ox = (o.x + o.w / 2) * TILE, oy = (o.y + o.h / 2) * TILE;
-      if (!c.floor && !canStand(p.x, p.y)) { p.y = (o.y + o.h + 0.45) * TILE; }
+      unstuckPlayer(p, true);
       S.dogs.forEach(function (d) {
         if (d.state === 'leashed' || d.state === 'bath' || d.state === 'kennel' || d.state === 'leaving' || d.state === 'arriving') return;
         var tx = tileOf(d.x), ty = tileOf(d.y);
@@ -2236,12 +2561,12 @@ function currentZone() {
   S.objects.forEach(function (o) {
     if (!o.done) return;
     var t = o.type, it = STATION_ITEM[t];
-    if (!it && t !== 'trash' && t !== 'tub' && t !== 'kennel') return;
+    if (!it && t !== 'trash' && t !== 'tub' && t !== 'groomhouse' && t !== 'kennel') return;
     var pad = stationPad(o); if (!inRect(p.x, p.y, pad)) return;
     var z = { key: 'obj' + o.id, kind: t === 'trash' ? 'trash' : 'station', rect: pad, obj: o, prio: 2 };
     if (it) {
       var maxS = stackCap();
-      var itemTitle = it === 'food' ? 'food bowl' : it === 'ball' ? 'ball' : 'treat';
+      var itemTitle = t === 'kitchen' ? 'gourmet meal' : it === 'food' ? 'food bowl' : it === 'ball' ? 'ball' : 'treat';
       if (!car || (car.type === it && (car.n || 1) < maxS)) {
         var nextN = (car && car.type === it ? (car.n || 1) : 0) + 1;
         z.label = 'Stack ' + itemTitle + ' (' + nextN + '/' + maxS + ')';
@@ -2260,10 +2585,11 @@ function currentZone() {
       if (car && car.type === 'poop') { z.label = 'Toss poop away'; z.run = function () { o.useAt = now; doTrash(); }; }
       else if (car && car.type !== 'dog') { z.label = 'Clear ' + carryLabel(car); z.run = function () { o.useAt = now; S.player.carry = null; sfx('trash'); }; }
       else { z.label = 'Poop Bin'; z.disabled = true; z.quiet = true; }
-    } else if (t === 'tub') {
-      if (o.dogId) { var bd = dogById(o.dogId); z.label = (bd ? bd.name : 'A dog') + ' is getting scrubbed…'; z.disabled = true; z.quiet = true; }
-      else if (car && car.type === 'dog') { z.label = 'Give ' + dogById(car.id).name + ' a bath'; z.run = function () { doWash(o); }; }
-      else { z.label = 'Bath Tub — walk a muddy dog here'; z.disabled = true; z.quiet = true; }
+    } else if (t === 'tub' || t === 'groomhouse') {
+      var gTitle = t === 'groomhouse' ? 'Grooming House' : 'Bath Tub';
+      if (o.dogId) { var bd = dogById(o.dogId); z.label = (bd ? bd.name : 'A dog') + (t === 'groomhouse' ? ' is getting a spa groom…' : ' is getting scrubbed…'); z.disabled = true; z.quiet = true; }
+      else if (car && car.type === 'dog') { z.label = (t === 'groomhouse' ? '💈 Spa Groom ' : 'Give ') + dogById(car.id).name + (t === 'groomhouse' ? ' (+$12 · 2× faster)' : ' a bath'); z.run = function () { doWash(o); }; }
+      else { z.label = gTitle + ' — walk a muddy dog here'; z.disabled = true; z.quiet = true; }
     } else if (t === 'kennel') {
       if (car && car.type === 'dog') {
         var kd = dogById(car.id);
@@ -2329,6 +2655,41 @@ function currentZone() {
       label: ch.icon + ' ' + ch.label + ' (+' + fmtMoney(ch.cash) + ' · +★)',
       run: function () { doChore(ch); }
     });
+  });
+  // Grand Opening Ribbon-Cutting & Partner "Lend a Paw" on buildings / upgrades / newly opened land plots!
+  var pPlot = plotAt(tileOf(p.x), tileOf(p.y));
+  if (pPlot && pPlot.id !== 'base') {
+    for (var pli = 0; pli < (S.plots || []).length; pli++) {
+      if (S.plots[pli].id === pPlot.id && S.plots[pli].readyRibbon) {
+        cutPlotRibbon(S.plots[pli]);
+        break;
+      }
+    }
+  }
+  S.objects.forEach(function (o) {
+    if (o.readyRibbon) {
+      var rx0 = (o.x - 0.85) * TILE, ry0 = (o.y - 0.85) * TILE, rx1 = (o.x + o.w + 0.85) * TILE, ry1 = (o.y + o.h + 0.85) * TILE;
+      if (p.x >= rx0 && p.x <= rx1 && p.y >= ry0 && p.y <= ry1) {
+        var rDef = CAT_BY_ID[o.type];
+        offer({
+          key: 'rib' + o.id, kind: 'station', prio: 5.2,
+          label: '🎀 Cut Ribbon on ' + (o.type === 'kennel' ? kennelSuiteName(o.lvl || 1) : (rDef ? rDef.name : o.type)) + '! (+3💛)',
+          run: function () { cutRibbon(o); }
+        });
+      }
+    }
+    if (canLendAPaw(o)) {
+      var lx0 = (o.x - 0.9) * TILE, ly0 = (o.y - 0.9) * TILE, lx1 = (o.x + o.w + 0.9) * TILE, ly1 = (o.y + o.h + 0.9) * TILE;
+      if (p.x >= lx0 && p.x <= lx1 && p.y >= ly0 && p.y <= ly1) {
+        var lDef = CAT_BY_ID[o.type];
+        var lLeft = siteTimeLeft(o), lShave = clamp(Math.round(lLeft * 0.2), 1800, 7200);
+        offer({
+          key: 'paw' + o.id, kind: 'station', prio: 4.9,
+          label: '🤝 Lend a Paw to ' + (o.startedByName || 'Partner') + '\'s ' + (lDef ? lDef.name : o.type) + ' (-' + fmtDur(lShave) + ' · +3💛)',
+          run: function () { lendAPaw(o); }
+        });
+      }
+    }
   });
   // poop — instant walk-over scoop!
   if (!car || car.type !== 'dog') S.poops.forEach(function (pp) {
@@ -2458,17 +2819,18 @@ function doFeed(d, isBonus) {
   if (!d) return;
   consumeCarryItem();
   d.careCd = (S.clock || 0) + 10;
-  if (hasTrait(d, 'picky')) float(d.x, d.y - 62, 'Hmph. Kibble again?', '#ffe0b2');
-  if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) { fulfillNeed(d); if (hasTrait(d, 'picky') && d.need == null) d.happy -= 8; }
+  var hasKit = hasDone('kitchen'), kitLv = stationLvl('kitchen');
+  if (hasTrait(d, 'picky') && !hasKit) float(d.x, d.y - 62, 'Hmph. Kibble again?', '#ffe0b2');
+  if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) { fulfillNeed(d); if (hasTrait(d, 'picky') && !hasKit && d.need == null) d.happy -= 8; }
   else d.happy = Math.min(100, d.happy + 7);
-  var bonus = upLvl('kibble') * 5 + (stationLvl('foodbin') - 1) * 3 + (S.dailyEvent === 'feast' ? 6 : 0);
+  var bonus = upLvl('kibble') * 5 + (stationLvl('foodbin') - 1) * 3 + (hasKit ? 15 + (kitLv - 1) * 4 : 0) + (S.dailyEvent === 'feast' ? 6 : 0);
   if (bonus > 0) d.happy = Math.min(100, d.happy + bonus);
-  var fPay = (isBonus ? 2 : 0) + (S.dailyEvent === 'feast' ? 4 : 0);
+  var fPay = (isBonus ? 2 : 0) + (hasKit ? 8 + (kitLv - 1) * 3 : 0) + (S.dailyEvent === 'feast' ? 4 : 0);
   if (fPay > 0) { S.cash += fPay; S.stats.earned += fPay; S.life.earned += fPay; }
-  boostRep(0.025, d.x, d.y - 68);
+  boostRep(hasKit ? 0.04 : 0.025, d.x, d.y - 68);
   d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true));
-  burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); gainXP(S.dailyEvent === 'feast' ? 4 : 2); tut('build_food'); tut('feed'); S.stats.feeds++; if (S.life) S.life.care = (S.life.care || 0) + 1;
-  float(d.x, d.y - 48, fPay ? ('+$' + fPay + ' Feast!') : 'Nom nom!', '#fff'); pEmote('pet', 0.35);
+  burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); gainXP((S.dailyEvent === 'feast' ? 4 : 2) + (hasKit ? 2 : 0)); tut('build_food'); tut('feed'); S.stats.feeds++; if (S.life) S.life.care = (S.life.care || 0) + 1;
+  float(d.x, d.y - 48, hasKit ? ('🍲 Chef Meal! +$' + fPay) : fPay ? ('+$' + fPay + ' Feast!') : 'Nom nom!', '#fff'); pEmote('pet', 0.35);
   if (typeof MP !== 'undefined') MP.recordAction('feed', { dogName: d.name });
   saveGame();
 }
@@ -2476,16 +2838,17 @@ function doTreat(d, isBonus) {
   if (!d) return;
   consumeCarryItem();
   d.careCd = (S.clock || 0) + 10;
-  var tBonus = (stationLvl('treatjar') - 1) * 4 + (S.dailyEvent === 'feast' ? 6 : 0);
+  var hasKit = hasDone('kitchen'), kitLv = stationLvl('kitchen');
+  var tBonus = (stationLvl('treatjar') - 1) * 4 + (hasKit ? 12 + (kitLv - 1) * 3 : 0) + (S.dailyEvent === 'feast' ? 6 : 0);
   if (d.need && (d.need.type === 'food' || d.need.type === 'treat')) fulfillNeed(d); else d.happy = Math.min(100, d.happy + 10 + tBonus);
   if (tBonus > 0) d.happy = Math.min(100, d.happy + tBonus);
-  var trPay = (isBonus ? 2 : 0) + (S.dailyEvent === 'feast' ? 4 : 0);
+  var trPay = (isBonus ? 2 : 0) + (hasKit ? 8 + (kitLv - 1) * 3 : 0) + (S.dailyEvent === 'feast' ? 4 : 0);
   if (trPay > 0) { S.cash += trPay; S.stats.earned += trPay; S.life.earned += trPay; }
-  boostRep(0.03, d.x, d.y - 68);
-  burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); gainXP(S.dailyEvent === 'feast' ? 4 : 2); tut('feed'); S.stats.feeds++; if (S.life) S.life.care = (S.life.care || 0) + 1;
+  boostRep(hasKit ? 0.045 : 0.03, d.x, d.y - 68);
+  burst(d.x, d.y - 28, 'heart', 6); sfx('munch'); gainXP((S.dailyEvent === 'feast' ? 4 : 2) + (hasKit ? 2 : 0)); tut('feed'); S.stats.feeds++; if (S.life) S.life.care = (S.life.care || 0) + 1;
   if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; }
   setAnim(d, 'beg', 1.2);
-  float(d.x, d.y - 48, trPay ? ('+$' + trPay + ' Good trick!') : 'Yum!', '#fff'); pEmote('pet', 0.35);
+  float(d.x, d.y - 48, hasKit ? ('🥐 Fresh Bake! +$' + trPay) : trPay ? ('+$' + trPay + ' Good trick!') : 'Yum!', '#fff'); pEmote('pet', 0.35);
   if (typeof MP !== 'undefined') MP.recordAction('treat', { dogName: d.name });
   saveGame();
 }
@@ -2526,12 +2889,18 @@ function doTrash() {
 function doWash(ob) {
   var d = S.player.carry ? dogById(S.player.carry.id) : null; S.player.carry = null;
   if (!d) { saveGame(); return; }
-  var tLv = (ob && ob.lvl) || 1;
-  d.state = 'bath'; d.actT = Math.max(1.6, 4.2 - (tLv - 1) * 0.35); d.objId = ob.id; ob.dogId = d.id; ob.useAt = now; d.anim = null; d.autoRelease = false; d.leashedBy = null;
-  d.x = (ob.x + ob.w / 2) * TILE; d.y = (ob.y + 0.75) * TILE;
-  if (S.dailyEvent === 'muddy') { S.cash += 6; S.stats.earned += 6; S.life.earned += 6; float(d.x, d.y - 62, '+$6 Muddy Bath Bonus!', '#80d8ff'); }
-  boostRep(0.035, d.x, d.y - 45);
-  sfx('splash'); gainXP(Math.round((2 + tLv) * (S.dailyEvent === 'muddy' ? 1.5 : 1))); S.stats.baths++; if (S.life) S.life.care = (S.life.care || 0) + 1; tut('build_tub');
+  var tLv = (ob && ob.lvl) || 1, isSpa = ob && ob.type === 'groomhouse';
+  d.state = 'bath'; d.actT = isSpa ? Math.max(1.0, 2.2 - (tLv - 1) * 0.2) : Math.max(1.6, 4.2 - (tLv - 1) * 0.35);
+  d.objId = ob.id; ob.dogId = d.id; ob.useAt = now; d.anim = null; d.autoRelease = false; d.leashedBy = null;
+  d.x = (ob.x + ob.w / 2) * TILE; d.y = (ob.y + (isSpa ? ob.h - 0.55 : 0.75)) * TILE;
+  var spaPay = (isSpa ? 12 + (tLv - 1) * 4 : 0) + (S.dailyEvent === 'muddy' ? 6 : 0);
+  if (spaPay > 0) {
+    S.cash += spaPay; S.stats.earned += spaPay; S.life.earned += spaPay;
+    float(d.x, d.y - 62, isSpa ? ('💈 +$' + spaPay + ' Spa Groom!') : '+$6 Muddy Bath Bonus!', '#80d8ff');
+  }
+  if (isSpa) d.happy = 100;
+  boostRep(isSpa ? 0.055 : 0.035, d.x, d.y - 45);
+  sfx('splash'); gainXP(Math.round((2 + tLv + (isSpa ? 3 : 0)) * (S.dailyEvent === 'muddy' ? 1.5 : 1))); S.stats.baths++; if (S.life) S.life.care = (S.life.care || 0) + 1; tut('build_tub');
   if (typeof MP !== 'undefined') MP.recordAction('wash', { dogName: d.name });
   saveGame();
 }
@@ -2566,15 +2935,34 @@ function doReturn(o) {
   var e = S.dex[d.breed]; if (e) e.best = Math.max(e.best || 0, Math.round(h));
   if (complaint) {
     var why = (d.need && NEED_INFO[d.need.type]) ? NEED_INFO[d.need.type].complaint : (d.lastNeed && NEED_INFO[d.lastNeed]) ? NEED_INFO[d.lastNeed].complaint : 'was unhappy';
-    fileComplaint(o.name + ': "' + d.name + ' ' + why + '!"', 0.45);
+    fileComplaint(o.name + ': "' + d.name + ' ' + why + '!"', 0.55);
     o.say = 'I\'m filing a complaint!'; o.sayT = 3; o.emote = 'angry'; o.emoteT = 0;
   } else {
-    var g = h >= 90 ? 0.08 : h >= 75 ? 0.04 : h >= 55 ? 0.02 : 0;
-    S.rep = Math.min(5, S.rep + g);
-    if (h >= 90) { S.stats.perfect++; S.life.perfect++; float(o.x, o.y - 120, 'PAWSOME! ★', '#ff8ad8', 1.6); confetti(o.x, o.y - 50, 30); sfx('perfect'); o.emote = 'happy'; o.emoteT = 0; pEmote('happy', 0.8); }
-    else sfx('coin');
-    o.say = pick(h >= 75 ? ['Wow, so happy!', 'Best daycare ever!', 'Look at that tail go!', 'Five stars!'] : ['Thanks.', 'Okay, see you.', 'Hmm, alright.']); o.sayT = 2.5;
-    if (S.streak >= 2) float(p.x, p.y - 110, 'Happy streak x' + S.streak + '!', '#80d8ff', 1.2);
+    var expectedH = S.rep >= 4.4 ? 78 : S.rep >= 3.8 ? 70 : 60;
+    if (o.angry || h < expectedH) {
+      var lukeDrop = o.angry ? 0.24 : (S.rep >= 4.3 ? 0.16 : 0.11);
+      dropRep(lukeDrop, '⭐ ' + o.name + ' left a lukewarm review (' + d.name + ' expected more attention)', o.x, o.y - 115);
+      o.say = pick(['Expected better for ' + S.rep.toFixed(1) + ' stars.', 'Hmm, three stars today.', 'A bit underwhelming.']); o.sayT = 2.6;
+      sfx('coin');
+    } else {
+      var g = h >= 92 ? 0.08 : h >= 80 ? 0.04 : 0.02;
+      boostRep(g, o.x, o.y - 115);
+      if (h >= 90) {
+        S.stats.perfect++; S.life.perfect++;
+        float(o.x, o.y - 120, 'PAWSOME! ★', '#ff8ad8', 1.6);
+        confetti(o.x, o.y - 50, 30); sfx('perfect'); o.emote = 'happy'; o.emoteT = 0; pEmote('happy', 0.8);
+        gainHearts(2, o.x, o.y - 144);
+        var shaveSec = 600 + franchiseTier() * 120;
+        shaveActiveTimers(shaveSec, 'PAWSOME!', o.x, o.y - 60);
+      } else sfx('coin');
+      if (d.overnight) {
+        var stayK = d.kennelId ? objById(d.kennelId) : null;
+        var stayKLv = stayK ? (stayK.lvl || 1) : Math.floor(kennelSuiteLevel());
+        if (stayKLv >= 2) gainHearts(stayKLv - 1, o.x + 26, o.y - 112);
+      }
+      o.say = pick(h >= 80 ? ['Wow, so happy!', 'Best daycare ever!', 'Look at that tail go!', 'Five stars!'] : ['Thanks!', 'Good job today.', 'See you next time!']); o.sayT = 2.5;
+      if (S.streak >= 2) float(p.x, p.y - 110, 'Happy streak x' + S.streak + '!', '#80d8ff', 1.2);
+    }
   }
   gainXP(5 + Math.round(h / 18));
   d.state = 'leaving'; d.ownerId = o.id; d.anim = null; d.need = null; d.route = null; d.leashedBy = null;
@@ -2628,8 +3016,6 @@ function canPlace(type, x, y, rot) {
     for (var i = 0; i < KEEP_CLEAR.length; i++) if (KEEP_CLEAR[i][0] === tx && KEEP_CLEAR[i][1] === ty) return false;
   }
   if (!c.floor || true) { if (!keepsConnected(x, y, w, h)) return false; }
-  var p = S.player, r = 13;
-  if (p.x + r > x * TILE && p.x - r < (x + w) * TILE && p.y + 5 > y * TILE && p.y - 11 < (y + h) * TILE) return false;
   return true;
 }
 // would blocking this rectangle cut off part of the yard from the yard door?
@@ -2660,7 +3046,7 @@ function keepsConnected(x, y, w, h) {
 }
 function canMoveObject(o, nx, ny, rot) {
   if (!o) return false;
-  if (o.type === 'tub' && o.dogId) return false; // wait until bath finishes
+  if ((o.type === 'tub' || o.type === 'groomhouse') && o.dogId) return false; // wait until bath finishes
   var dims = objDims(o.type, rot != null ? rot : o.rot), nw = dims.w, nh = dims.h;
   for (var ty = ny; ty < ny + nh; ty++) for (var tx = nx; tx < nx + nw; tx++) {
     if (baseKind(tx, ty) !== 'yard') return false;
@@ -2719,7 +3105,7 @@ function moveObject(o, nx, ny, rot) {
     var kd = dogById(o.dogId);
     if (kd && kd.state === 'kennel') { kd.x = (o.x + o.w / 2) * TILE; kd.y = (o.y + o.h - 0.3) * TILE; }
   }
-  if (!c.floor && !canStand(S.player.x, S.player.y)) { S.player.y = (o.y + o.h + 0.45) * TILE; }
+  unstuckPlayer(S.player, true);
   S.dogs.forEach(function (d) {
     if (d.state === 'leashed' || d.state === 'bath' || d.state === 'kennel' || d.state === 'leaving' || d.state === 'arriving') return;
     var tx = tileOf(d.x), ty = tileOf(d.y);
@@ -2760,9 +3146,11 @@ function rotateObjectInPlace(o) {
 function placeBuild(type, x, y, rot) {
   var c = CAT_BY_ID[type];
   var cost = itemCost(type), reqLvl = itemReqLvl(type);
+  if (!canStartNewBuild()) { warnBuilderBusy(); return false; }
   if (!c || S.level < reqLvl || S.cash < cost || !canPlace(type, x, y, rot)) { sfx('error'); return false; }
   S.cash -= cost; S.stats.spent += cost;
   var o = addObject(type, x, y, false, cost, rot);
+  unstuckPlayer(S.player, true);
   // push dogs out of the new footprint
   S.dogs.forEach(function (d) {
     if (d.state === 'leashed' || d.state === 'bath' || d.state === 'kennel' || d.state === 'leaving' || d.state === 'arriving') return;
@@ -2781,7 +3169,7 @@ function placeBuild(type, x, y, rot) {
 
 
 function rushCost(o) {
-  var left = Math.max(0, (o.buildEnd - Date.now()) / 1000);
+  var left = siteTimeLeft(o);
   return Math.max(15, Math.ceil(Math.pow(left / 60, 0.72) * 3.8) + 15);
 }
 function objUpgradeCost(o) {
@@ -2790,7 +3178,8 @@ function objUpgradeCost(o) {
 }
 function objUpgradeTime(o) {
   var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
-  return Math.max(7200, Math.round((c ? c.time : 7200) * Math.pow(1.35, lv)));
+  var baseT = c ? c.time : 1200;
+  return Math.min(345600, Math.max(1200, Math.round(baseT * 0.75 * Math.pow(1.45, lv - 1))));
 }
 function objUpgradeReqLvl(o) {
   var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
@@ -2798,18 +3187,26 @@ function objUpgradeReqLvl(o) {
 }
 function upgradeObject(o) {
   var c = o && CAT_BY_ID[o.type];
-  if (!o || !c || !o.done) { sfx('error'); return false; }
+  if (!o || !c || !o.done || o.upgrading) { sfx('error'); return false; }
+  if (!canStartNewBuild()) { warnBuilderBusy(); return false; }
   var cost = objUpgradeCost(o), req = objUpgradeReqLvl(o), dur = objUpgradeTime(o);
   if (S.level < req || S.cash < cost) { sfx('error'); return false; }
   S.cash -= cost; S.stats.spent += cost;
   var nextLv = (o.lvl || 1) + 1;
-  o.done = false; o.upgrading = true; o.buildDur = dur; o.buildEnd = Date.now() + dur * 1000;
+  // Non-blocking upgrade: keep o.done = true so stations & kennels remain 100% usable while upgrading!
+  o.upgrading = true;
+  o.upgradeDur = dur;
+  o.upgradeEnd = Date.now() + dur * 1000;
+  o.startedBy = (typeof MP !== 'undefined' && MP.playerId) ? MP.playerId : null;
+  o.startedByName = (typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : null;
+  o.helpedBy = [];
   markDirty();
   var cx = (o.x + o.w / 2) * TILE, cy = o.y * TILE;
+  var title = o.type === 'kennel' ? kennelSuiteName(nextLv) : (c.name + ' Lv ' + nextLv);
   float(cx, cy - 12, '-' + fmtMoney(cost), '#ff8a80');
   burst(cx, (o.y + o.h / 2) * TILE, 'dust', 14); sfx('place');
-  toast('⬆️ Upgrading ' + c.name + ' to Lv ' + nextLv + ' (' + fmtDur(dur) + ')', 'good');
-  if (typeof MP !== 'undefined') MP.recordAction('upgrade_obj', { item: o.type, name: c.name + ' Lv ' + nextLv, icon: c.icon, cost: cost, x: o.x, y: o.y, level: nextLv });
+  toast('⬆️ Upgrading to ' + title + ' (' + fmtDur(dur) + ' · still usable while upgrading!)', 'good');
+  if (typeof MP !== 'undefined') MP.recordAction('upgrade_obj', { item: o.type, name: title, icon: c.icon, cost: cost, x: o.x, y: o.y, level: nextLv });
   saveGame();
   return true;
 }
@@ -2845,9 +3242,12 @@ function plotAdjacent(p) {
   });
 }
 function buyPlot(p) {
+  if (!canStartNewBuild()) { warnBuilderBusy(); return; }
   if (!p || S.cash < p.cost || S.level < p.lvl || plotOwned(p) || plotPending(p) || !plotAdjacent(p)) { sfx('error'); return; }
   S.cash -= p.cost; S.stats.spent += p.cost;
-  S.plots.push({ id: p.id, end: Date.now() + p.time * 1000 });
+  var byId = (typeof MP !== 'undefined' && MP.playerId) ? MP.playerId : null;
+  var byName = (typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : null;
+  S.plots.push({ id: p.id, end: Date.now() + p.time * 1000, startedBy: byId, startedByName: byName, helpedBy: [], readyRibbon: false });
   sfx('buy');
   var unlTxt = (p.unlocks && p.unlocks.length) ? ' · Unlocks: ' + p.unlocks.join(', ') : '';
   toast('🚜 Expanding ' + p.name + ' — ready in ' + fmtDur(p.time) + unlTxt, 'good');
@@ -2872,33 +3272,49 @@ function checkBuilds() {
   var t = Date.now(), changed = false;
   S.objects.forEach(function (o) {
     if (!o.done && t >= o.buildEnd) {
-      var wasUpg = !!o.upgrading;
-      if (wasUpg) { o.lvl = (o.lvl || 1) + 1; o.upgrading = false; }
-      o.done = true; markDirty(); changed = true;
+      o.done = true; o.buildEnd = 0; o.startedBy = null; o.startedByName = null; o.helpedBy = [];
+      var ribbonWorthy = (o.buildDur || 0) >= 300;
+      if (ribbonWorthy) o.readyRibbon = true;
+      markDirty(); changed = true;
       var c = CAT_BY_ID[o.type];
       if (c) {
         var cx = (o.x + o.w / 2) * TILE, cy = (o.y + o.h / 2) * TILE;
-        var msg = wasUpg ? (c.name + ' Lv ' + (o.lvl || 1) + '!') : (c.name + ' built!');
-        confetti(cx, cy, 30); float(cx, o.y * TILE - 10, msg, '#b9f6ca', 1.3);
-        toast((wasUpg ? '⬆️ ' : '🏗️ ') + msg, 'good'); sfx('built'); gainXP(Math.round(c.cost * (o.lvl || 1) / 30) + 4);
+        var msg = c.name + ' built!' + (ribbonWorthy ? ' 🎀 Walk over to cut ribbon!' : '');
+        confetti(cx, cy, 30); float(cx, o.y * TILE - 10, c.name + ' built!', '#b9f6ca', 1.3);
+        toast('🏗️ ' + msg, 'good'); sfx('built'); gainXP(Math.round(c.cost * (o.lvl || 1) / 30) + 4);
       }
       checkStationTut(o.type);
+    } else if (o.done && o.upgrading && t >= (o.upgradeEnd || 0)) {
+      o.lvl = (o.lvl || 1) + 1;
+      o.upgrading = false; o.upgradeEnd = 0; o.startedBy = null; o.startedByName = null; o.helpedBy = [];
+      if ((o.upgradeDur || 0) >= 300) o.readyRibbon = true;
+      markDirty(); changed = true;
+      var c2 = CAT_BY_ID[o.type];
+      if (c2) {
+        var cx2 = (o.x + o.w / 2) * TILE, cy2 = (o.y + o.h / 2) * TILE;
+        var uName = o.type === 'kennel' ? kennelSuiteName(o.lvl) : (c2.name + ' Lv ' + o.lvl);
+        confetti(cx2, cy2, 34); float(cx2, o.y * TILE - 10, '⬆️ ' + uName + '!', '#ffe66d', 1.3);
+        toast('⬆️ ' + uName + ' finished! 🎀 Walk over to cut the ribbon for +3💛!', 'good'); sfx('built'); gainXP(Math.round(c2.cost * o.lvl / 30) + 6);
+      }
     }
   });
   S.plots.forEach(function (pl) {
     if (pl.end && t >= pl.end && !pl.announced) {
-      pl.announced = true; changed = true;
+      pl.announced = true; pl.readyRibbon = true; pl.startedBy = null; pl.startedByName = null; pl.helpedBy = []; changed = true;
       var p = PLOTS.filter(function (q) { return q.id === pl.id; })[0];
       if (p) {
         markDirty(p);
         var unlMsg = (p.unlocks && p.unlocks.length) ? ' New unlock boxes ready: ' + p.unlocks.join(' · ') : ' More room to build!';
-        toast('🗺️ ' + p.name + ' is open!' + unlMsg, 'good');
-        if (typeof showBanner === 'function') showBanner('🗺️ ' + p.name + ' Expanded!', (p.unlocks && p.unlocks.length) ? 'Unlocked: ' + p.unlocks.join(' · ') : 'New buildable land & unlock boxes!');
+        toast('🗺️ ' + p.name + ' is open! Walk onto it for a +5💛 Grand Opening!' + unlMsg, 'good');
+        if (typeof showBanner === 'function') showBanner('🗺️ ' + p.name + ' Expanded!', (p.unlocks && p.unlocks.length) ? 'Unlocked: ' + p.unlocks.join(' · ') : 'Step onto your new land for +5💛!');
         sfx('built'); confetti((p.x + p.w / 2) * TILE, (p.y + p.h / 2) * TILE, 55);
       } else markDirty(true);
     }
   });
-  if (changed) saveGame();
+  if (changed) {
+    if (S && S.player) unstuckPlayer(S.player, true);
+    saveGame();
+  }
 }
 
 // ================= Smart Business Advisor & Employee Hints =================
@@ -2917,7 +3333,7 @@ function currentAdvisorHint() {
   if ((S.poops.length >= 2 || (S.chores && S.chores.length >= 2)) && !staffHired('cleaner') && S.totalServed >= 1) {
     return { id: 'hire_clean', act: 'staff', text: '💡 Yard mess is piling up — think about hiring a 🧹 Grounds Keeper!' };
   }
-  if (S.dogs.some(function (d) { return d.need && d.need.type === 'bath' && d.need.t > 6; }) && !staffHired('groomer') && hasDone('tub')) {
+  if (S.dogs.some(function (d) { return d.need && d.need.type === 'bath' && d.need.t > 6; }) && !staffHired('groomer') && (hasDone('tub') || hasDone('groomhouse'))) {
     return { id: 'hire_groom', act: 'staff', text: '💡 Muddy pups waiting for baths? Hire a 🛁 Pet Groomer to bathe them automatically!' };
   }
   if (S.dogs.filter(function (d) { return d.need && (d.need.type === 'food' || d.need.type === 'treat'); }).length >= 2 && !staffHired('feeder')) {
@@ -3002,7 +3418,14 @@ function update(dt) {
   n = S.dogs.length; _iterDogs.length = n;
   for (i = 0; i < n; i++) _iterDogs[i] = S.dogs[i];
   for (i = 0; i < n; i++) updateDog(_iterDogs[i], dt);
-  for (i = 0; i < S.poops.length; i++) S.poops[i].age += dt;
+  for (i = 0; i < S.poops.length; i++) {
+    var pp = S.poops[i];
+    pp.age += dt;
+    if (S.tutorialDone && pp.age > 20 && now - (pp.repHitAt || -99) >= 14) {
+      pp.repHitAt = now;
+      dropRep(0.09, '💩 Customers noticed unscooped poop on the lawn!', pp.x, pp.y - 32);
+    }
+  }
   checkGoals();
   if (S.closing) {
     var pending = S.owners.length > 0, dueOvernight = false;
@@ -3017,8 +3440,70 @@ function update(dt) {
   updateFX(dt);
 }
 
+function unstuckPlayer(p, checkReachable) {
+  if (!p || !S) return false;
+  if (!walkGrid || _gridState !== S) buildWalk();
+  var b = null, entryOk = false;
+  function getBfs() {
+    if (!b) {
+      b = bfs(YARD_ENTRY[0], YARD_ENTRY[1]);
+      entryOk = b && b.dist[YARD_ENTRY[1] * W + YARD_ENTRY[0]] >= 0;
+    }
+    return b;
+  }
+  function isPosReachable(wx, wy) {
+    if (!canStand(wx, wy)) return false;
+    var tx = tileOf(wx), ty = tileOf(wy);
+    if (ty > MAP.yard.y1) return true; // inside shop / sidewalk
+    getBfs();
+    if (!entryOk) return true;
+    return b.dist[ty * W + tx] >= 0;
+  }
+  var standingOk = canStand(p.x, p.y);
+  if (standingOk && (!checkReachable || isPosReachable(p.x, p.y))) return false;
+  // 1. Check nearby radial pixel offsets so slight edge overlaps slide out imperceptibly
+  var radii = [4, 8, 12, 16, 22, 28, 36, 48, 64];
+  for (var ri = 0; ri < radii.length; ri++) {
+    var rad = radii[ri];
+    for (var ai = 0; ai < 16; ai++) {
+      var ang = ai * Math.PI / 8;
+      var nx = p.x + Math.cos(ang) * rad, ny = p.y + Math.sin(ang) * rad;
+      if (isPosReachable(nx, ny)) {
+        p.x = nx; p.y = ny;
+        if (typeof UI !== 'undefined') UI.touchTarget = null;
+        return true;
+      }
+    }
+  }
+  // 2. Search all walkable tiles sorted by distance to player
+  var bestPos = null, bestDist = 1e9, fallbackPos = null, fallbackDist = 1e9;
+  for (var ty = 3; ty < H - 2; ty++) {
+    for (var tx = 2; tx < W - 2; tx++) {
+      var samples = [
+        [(tx + 0.5) * TILE, (ty + 0.5) * TILE],
+        [(tx + 0.5) * TILE, (ty + 0.72) * TILE],
+        [(tx + 0.5) * TILE, (ty + 0.28) * TILE]
+      ];
+      for (var si = 0; si < samples.length; si++) {
+        var wx = samples[si][0], wy = samples[si][1];
+        if (!canStand(wx, wy)) continue;
+        var d2 = dist(p.x, p.y, wx, wy);
+        if (d2 < fallbackDist) { fallbackDist = d2; fallbackPos = [wx, wy]; }
+        if (isPosReachable(wx, wy) && d2 < bestDist) {
+          bestDist = d2; bestPos = [wx, wy];
+        }
+      }
+    }
+  }
+  var chosen = bestPos || fallbackPos || [(YARD_ENTRY[0] + 0.5) * TILE, (YARD_ENTRY[1] + 0.5) * TILE];
+  p.x = chosen[0]; p.y = chosen[1];
+  if (typeof UI !== 'undefined') UI.touchTarget = null;
+  return true;
+}
+
 function updatePlayer(dt) {
   var p = S.player, mx = 0, my = 0, analog = false;
+  if (!canStand(p.x, p.y)) unstuckPlayer(p, true);
   if (UI.mode === 'play' || UI.mode === 'build') {
     if (typeof UI !== 'undefined' && UI.joy && UI.joy.active && (UI.joy.dx || UI.joy.dy)) {
       mx = UI.joy.dx; my = UI.joy.dy; analog = true; UI.touchTarget = null;
@@ -3071,6 +3556,7 @@ function canStand(nx, ny) {
   return true;
 }
 function movePlayer(p, dx, dy) {
+  if (!canStand(p.x, p.y)) unstuckPlayer(p, true);
   if (!canStand(p.x + dx, p.y + dy)) return false;
   p.x += dx; p.y += dy; return true;
 }
@@ -3088,7 +3574,10 @@ function moveTo(e, tx, ty, sp, dt) {
   var s = Math.min(d, sp * dt);
   e.x += dx / d * s; e.y += dy / d * s; e.moving = true; e.curSpeed = sp; e.walkDist = (e.walkDist || 0) + s;
   if (Math.abs(dx) > 0.5) e.face = dx > 0 ? 1 : -1;
-  if (e.look) { if (Math.abs(dx) >= Math.abs(dy)) e.dir = dx > 0 ? 'right' : 'left'; else e.dir = dy > 0 ? 'down' : 'up'; }
+  if (e.look !== undefined || e.dir !== undefined) {
+    if (Math.abs(dx) >= Math.abs(dy) * 0.92) e.dir = dx > 0 ? 'right' : 'left';
+    else e.dir = dy > 0 ? 'down' : 'up';
+  }
   return s >= d - 0.01;
 }
 function playerOnMat() { return inRect(S.player.x, S.player.y, ACTION_BOX); }
@@ -3159,15 +3648,21 @@ function updateOwner(o, dt) {
     o.moving = false;
     o.patience -= dt;
     var pf = o.patience / o.patienceMax;
+    if (pf < 0.45 && !o.impatientHit && !o.angry && S.tutorialDone) {
+      o.impatientHit = true;
+      o.emote = 'impatient'; o.emoteT = 0;
+      o.say = 'Taking a while…'; o.sayT = 2.2;
+      dropRep(0.10, '⏱️ ' + o.name + ' is getting impatient waiting at the counter!', o.x, o.y - 76);
+    }
     if (pf < 0.3 && !o.emote && !o.angry) { o.emote = 'impatient'; o.emoteT = 0; }
     if (o.patience <= 0 && !o.angry) {
       if (o.state === 'waitCheckin') {
-        fileComplaint(o.name + ' gave up waiting at the counter', 0.25);
+        fileComplaint(o.name + ' gave up waiting at the counter', 0.38);
         o.state = 'walkOut'; o.slot = null; o.route = exitRoute(o); o.say = 'Forget it!'; o.sayT = 2.5; o.emote = 'angry'; o.emoteT = 0;
         if (d) { d.state = 'leaving'; if (d.kennelId) { var k = objById(d.kennelId); if (k) k.reservedFor = null; } }
       } else {
         o.angry = true; o.say = 'I\'ve been waiting forever!'; o.sayT = 3; o.emote = 'angry'; o.emoteT = 0;
-        fileComplaint(o.name + ' waited too long for ' + (d ? d.name : 'their dog'), 0.35);
+        fileComplaint(o.name + ' waited too long for ' + (d ? d.name : 'their dog'), 0.48);
       }
     }
   }
@@ -3196,13 +3691,23 @@ function updateDog(d, dt) {
   if (d.need) {
     d.need.t += dt;
     if (d.need.self === 'zone' && zone && (zone === 'playzone' || zone === 'agility' || zone === 'pool')) { d.need.zoneT = (d.need.zoneT || 0) + dt; if (d.need.zoneT > 5) fulfillNeed(d, 'self'); }
-    if (d.need && d.need.t > NEED_GRACE && d.state !== 'kennel' && d.state !== 'bath') d.happy -= 1.0 * k * (hasTrait(d, 'diva') ? 1.4 : 1) * (mb ? Math.max(0.45, 1 - mb * 0.25) : 1) * dt;
+    if (d.need && d.need.t > NEED_GRACE && d.state !== 'kennel' && d.state !== 'bath') {
+      d.happy -= 1.15 * k * (hasTrait(d, 'diva') ? 1.45 : 1) * (mb ? Math.max(0.45, 1 - mb * 0.25) : 1) * dt;
+      if (S.tutorialDone && !d.need.self && now - (d.need.repHitAt || -99) >= 14) {
+        d.need.repHitAt = now;
+        dropRep(0.08, '🐾 ' + d.name + ' has been waiting too long for care!', d.x, d.y - 54);
+      }
+    }
     if (d.need && d.need.self && d.need.t > 40) d.need.self = null; // gave up on the facility: now it needs you
   } else if (d.state !== 'leashed') {
     var gain = 0.22 + mb * 0.45;
     if (zone === 'playzone' || zone === 'agility' || zone === 'sandpit') gain += 0.5;
     if (zone === 'pool') gain += hasTrait(d, 'water') ? 1 : 0.4;
-    if (zone === 'napmat' || d.state === 'kennel') gain += 0.3;
+    if (zone === 'napmat') gain += 0.3;
+    if (d.state === 'kennel') {
+      var rk = d.objId ? objById(d.objId) : null;
+      gain += 0.3 + Math.max(0, ((rk && rk.lvl) || 1) - 1) * 0.25;
+    }
     if ((hasTrait(d, 'social') || mb > 0) && S.dogs.some(function (o) { return o !== d && o.checkedIn && dist(o.x, o.y, d.x, d.y) < 130; })) gain += 0.15 + mb * 0.15;
     d.happy = Math.min(mb > 0 ? 100 : 96, d.happy + gain * dt);
   }
@@ -3438,7 +3943,9 @@ function endDay() {
       if (S.player.carry && S.player.carry.id === d.id) S.player.carry = null;
       if (k) { if (k.dogId && k.dogId !== d.id) { var other = dogById(k.dogId); if (other) { other.state = 'idle'; other.objId = null; } } k.dogId = d.id; d.objId = k.id; d.state = 'kennel'; d.x = (k.x + k.w / 2) * TILE; d.y = (k.y + k.h - 0.3) * TILE; }
       d.anim = null; d.path = null; d.need = null;
-      d.happy = hasUp('nightstaff') ? 95 : Math.max(d.happy, 70);
+      var kLv = k ? (k.lvl || 1) : 1;
+      var wakeH = Math.min(100, (hasUp('nightstaff') ? 95 : 72) + (kLv - 1) * 8);
+      d.happy = Math.max(d.happy, wakeH);
     }
   });
   if (S.player.carry && S.player.carry.type !== 'dog') S.player.carry = null;
@@ -3448,7 +3955,7 @@ function endDay() {
   if (wages) { S.cash = Math.max(0, S.cash - wages); S.stats.wages = wages; }
   S.life.bestPerfectDay = Math.max(S.life.bestPerfectDay || 0, S.stats.perfect);
   NPCS.forEach(function (n) { n.carry = null; n.task = null; n.path = null; });
-  if (leftover >= 3) { S.rep = Math.max(0, S.rep - 0.1 * Math.min(leftover, 6)); }
+  if (leftover >= 1) { S.rep = Math.max(0.5, S.rep - 0.12 * Math.min(leftover, 6)); }
   UI.summary = JSON.parse(JSON.stringify(S.stats)); UI.summary.day = S.day; UI.summary.repEnd = S.rep;
   UI.summary.goals = S.goals.map(function (g) { return { text: goalText(g), done: g.done, reward: g.reward }; });
   S.day++; S.dayTime = 0; S.closing = false; S._lastPhase = 'morning'; S.stats = newStats(S.rep); S.arrivalTimer = 5; S.needT = 10; S.goalWave = 1; markDirty();
@@ -3518,6 +4025,8 @@ function sanitizeAndMigrateState(s) {
   var startCash = (window.GAME_CONFIG && _isnum(window.GAME_CONFIG.startingCash)) ? window.GAME_CONFIG.startingCash : 300;
   s.version = 2;
   s.cash = _isnum(s.cash) ? Math.max(0, Math.floor(s.cash)) : startCash;
+  s.hearts = _isnum(s.hearts) ? Math.max(0, Math.floor(s.hearts)) : 0;
+  s.vipMagnet = !!s.vipMagnet;
   s.xp = _isnum(s.xp) ? Math.max(0, Math.floor(s.xp)) : 0;
   s.level = (_isnum(s.level) && s.level >= 1) ? Math.floor(s.level) : 1;
   s.rep = _isnum(s.rep) ? clamp(s.rep, 0, 5) : 3.0;
@@ -3552,7 +4061,7 @@ function sanitizeAndMigrateState(s) {
     }
   }
 
-  var defLife = { earned: 0, served: 0, perfect: 0, complaints: 0, overnights: 0, bestPerfectDay: 0, care: 0 };
+  var defLife = { earned: 0, hearts: 0, served: 0, perfect: 0, complaints: 0, overnights: 0, bestPerfectDay: 0, care: 0 };
   if (!s.life || typeof s.life !== 'object') s.life = defLife;
   else {
     for (var lk in defLife) s.life[lk] = _isnum(s.life[lk]) ? s.life[lk] : defLife[lk];
@@ -3615,10 +4124,14 @@ function sanitizeAndMigrateState(s) {
     cleanPlots.push({
       id: pl.id,
       end: _isnum(pl.end) ? pl.end : 0,
-      announced: !!pl.announced || !_isnum(pl.end) || Date.now() >= pl.end
+      announced: !!pl.announced || !_isnum(pl.end) || Date.now() >= pl.end,
+      readyRibbon: !!pl.readyRibbon,
+      startedBy: typeof pl.startedBy === 'string' ? pl.startedBy : null,
+      startedByName: typeof pl.startedByName === 'string' ? pl.startedByName : null,
+      helpedBy: Array.isArray(pl.helpedBy) ? pl.helpedBy.filter(function (x) { return typeof x === 'string'; }) : []
     });
   }
-  if (!seenPlots.base) cleanPlots.unshift({ id: 'base', end: 0, announced: true });
+  if (!seenPlots.base) cleanPlots.unshift({ id: 'base', end: 0, announced: true, readyRibbon: false, startedBy: null, startedByName: null, helpedBy: [] });
   s.plots = cleanPlots;
 
   // Objects
@@ -3644,8 +4157,21 @@ function sanitizeAndMigrateState(s) {
     var olv = (_isnum(o.lvl) && o.lvl >= 1) ? Math.floor(o.lvl) : 1;
     var buildDur = (_isnum(o.buildDur) && o.buildDur > 0) ? o.buildDur : (cDef.time || 10);
     var buildEnd = _isnum(o.buildEnd) ? o.buildEnd : 0;
-    var isDone = !!o.done || buildEnd <= 0 || Date.now() >= buildEnd;
-    if (isDone && o.upgrading && buildEnd > 0 && Date.now() >= buildEnd) olv++;
+    var upgradeDur = (_isnum(o.upgradeDur) && o.upgradeDur > 0) ? o.upgradeDur : 0;
+    var upgradeEnd = _isnum(o.upgradeEnd) ? o.upgradeEnd : 0;
+    var isUpgrading = !!o.upgrading;
+    // Migrate legacy blocking upgrades (done:false, upgrading:true, buildEnd>0) to non-blocking upgrades!
+    if (isUpgrading && !o.done && upgradeEnd <= 0 && buildEnd > 0) {
+      upgradeEnd = buildEnd;
+      upgradeDur = buildDur;
+      buildEnd = 0;
+    }
+    var isDone = !!o.done || isUpgrading || buildEnd <= 0 || Date.now() >= buildEnd;
+    if (isUpgrading && (upgradeEnd <= 0 || Date.now() >= upgradeEnd)) {
+      olv++;
+      isUpgrading = false;
+      upgradeEnd = 0;
+    }
     cleanObjects.push({
       id: oid,
       type: o.type,
@@ -3655,10 +4181,16 @@ function sanitizeAndMigrateState(s) {
       h: odims.h,
       rot: odims.rot,
       lvl: olv,
-      upgrading: !isDone && !!o.upgrading,
+      upgrading: isUpgrading,
       done: isDone,
       buildEnd: isDone ? 0 : buildEnd,
       buildDur: buildDur,
+      upgradeEnd: isUpgrading ? upgradeEnd : 0,
+      upgradeDur: isUpgrading ? (upgradeDur || buildDur) : 0,
+      readyRibbon: !!o.readyRibbon,
+      startedBy: typeof o.startedBy === 'string' ? o.startedBy : null,
+      startedByName: typeof o.startedByName === 'string' ? o.startedByName : null,
+      helpedBy: Array.isArray(o.helpedBy) ? o.helpedBy.filter(function (x) { return typeof x === 'string'; }) : [],
       paidCost: _isnum(o.paidCost) ? Math.floor(o.paidCost) : cDef.cost,
       dogId: _isnum(o.dogId) ? Math.floor(o.dogId) : null,
       reservedFor: _isnum(o.reservedFor) ? Math.floor(o.reservedFor) : null,
@@ -3880,11 +4412,11 @@ function sanitizeAndMigrateState(s) {
   markDirty(true);
   buildWalk();
 
-  // Reconcile object <-> dog references (tubs & kennels)
+  // Reconcile object <-> dog references (tubs, grooming houses & kennels)
   s.objects.forEach(function (o) {
     if (o.dogId != null) {
       var occ = dogMap[o.dogId];
-      var expectedState = o.type === 'tub' ? 'bath' : o.type === 'kennel' ? 'kennel' : null;
+      var expectedState = (o.type === 'tub' || o.type === 'groomhouse') ? 'bath' : o.type === 'kennel' ? 'kennel' : null;
       if (!occ || !o.done || !expectedState || occ.state !== expectedState || occ.objId !== o.id) {
         o.dogId = null;
       }

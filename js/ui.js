@@ -14,11 +14,15 @@ function initAudio() { audioInit(); if (!UI.volApplied && typeof AC !== 'undefin
 
 // ---------------- modes ----------------
 function setMode(m) {
+  var wasMode = UI.mode;
   UI.mode = m;
   document.body.classList.toggle('building', m === 'build');
   document.body.classList.toggle('title', !!UI.inTitle);
   if (m !== 'build') { UI.buildSel = null; UI.buildTool = null; UI.moveObj = null; UI.dragPos = null; UI.buildRot = 0; UI.moveRot = 0; CAM.panX = 0; CAM.panY = 0; }
   if (m !== 'play') { UI.joy = null; UI.touchTarget = null; }
+  if (m === 'play' && S && S.player && typeof unstuckPlayer === 'function') {
+    unstuckPlayer(S.player, true);
+  }
   if (m === 'build') {
     UI.buildSel = null;
     UI.buildTool = null;
@@ -26,8 +30,11 @@ function setMode(m) {
     UI.dragPos = null;
     UI.buildRot = 0;
     UI.moveRot = 0;
-    CAM.panX = 0;
-    CAM.panY = 0;
+    if (wasMode !== 'confirm') {
+      CAM.panX = 0;
+      CAM.panY = 0;
+      if (!CAM.buildZoom) CAM.buildZoom = 1;
+    }
     if (S && !S.tutorialDone && typeof tutorialRequiredBuildType === 'function') {
       var reqType = tutorialRequiredBuildType();
       if (reqType && CAT_BY_ID[reqType]) {
@@ -143,7 +150,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Tap 🔨 Shop at the bottom to select and place your first Kennel on the lawn!', 'good');
   if (!isJoiningRoom) saveGame();
 }
-var CURRENT_ASSET_VER = '23';
+var CURRENT_ASSET_VER = '25';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();
@@ -206,13 +213,16 @@ function dailyGift() {
   S.giftStreak = S.lastPlayDate === ykey ? (S.giftStreak || 0) + 1 : 1;
   S.lastPlayDate = key; S.playDays = (S.playDays || 0) + 1;
   var amount = 25 + 15 * Math.min(S.giftStreak, 7);
-  S.cash += amount; saveGame();
-  return { amount: amount, streak: S.giftStreak, days: S.playDays };
+  var hearts = 4 + Math.min(S.giftStreak, 7);
+  S.cash += amount; S.hearts = (S.hearts || 0) + hearts;
+  if (S.life) S.life.hearts = (S.life.hearts || 0) + hearts;
+  saveGame();
+  return { amount: amount, hearts: hearts, streak: S.giftStreak, days: S.playDays };
 }
 function showGift(g) {
   if (UI.inTitle || !S) return;
-  var next = g.streak < 7 ? 'Come back tomorrow for ' + fmtMoney(25 + 15 * Math.min(g.streak + 1, 7)) + '.' : 'You are at the top gift — keep the streak going!';
-  openModal('<h2>🎁 Daily gift</h2><p style="text-align:center">Welcome back! The regulars chipped in:</p><div class="rating"><b class="money">+' + fmtMoney(g.amount) + '</b></div>' +
+  var next = g.streak < 7 ? 'Come back tomorrow for ' + fmtMoney(25 + 15 * Math.min(g.streak + 1, 7)) + ' & +' + (4 + Math.min(g.streak + 1, 7)) + '💛.' : 'You are at the top gift — keep the streak going!';
+  openModal('<h2>🎁 Daily gift</h2><p style="text-align:center">Welcome back! The regulars chipped in:</p><div class="rating"><b class="money">+' + fmtMoney(g.amount) + '</b> &nbsp; <b style="color:#d48b1c">+' + (g.hearts || 5) + '💛</b></div>' +
     '<p style="text-align:center">' + (g.streak > 1 ? '🔥 ' + g.streak + ' days in a row' : 'Day ' + g.days + ' of running Paws & Play') + ' · ' + next + '</p>' +
     '<div class="row"><button data-act="back" class="primary">Thanks!</button></div>', 'gift');
   bindModalButtons(); sfx('coin'); confetti(S.player.x, S.player.y - 50, 30);
@@ -297,14 +307,14 @@ var MODAL_ACTS = {
   moveobj: function () {
     var o = UI.actionObj; closeModal();
     if (!o) return;
-    if (o.type === 'tub' && o.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
+    if ((o.type === 'tub' || o.type === 'groomhouse') && o.dogId) { toast('Wait for the bath to finish before moving ' + CAT_BY_ID[o.type].name, 'bad'); sfx('error'); return; }
     setMode('build'); UI.buildTool = 'move'; UI.buildSel = null; UI.moveObj = o; UI.moveRot = o.rot || 0; UI.dragPos = { x: o.x, y: o.y }; renderBuildPanel();
     toast('↔️ Drag ' + CAT_BY_ID[o.type].name + ' anywhere on the lawn (or tap 🔄 Rotate)!', '');
   },
   rotobj: function () {
     var o = UI.actionObj; closeModal();
     if (!o) return;
-    if (o.type === 'tub' && o.dogId) { toast('Wait for the bath to finish before rotating the Bath Tub', 'bad'); sfx('error'); return; }
+    if ((o.type === 'tub' || o.type === 'groomhouse') && o.dogId) { toast('Wait for the bath to finish before rotating ' + CAT_BY_ID[o.type].name, 'bad'); sfx('error'); return; }
     if (typeof rotateObjectInPlace === 'function' && rotateObjectInPlace(o)) {
       renderBuildPanel();
       return;
@@ -314,7 +324,35 @@ var MODAL_ACTS = {
   },
   upgobj: function () {
     var o = UI.actionObj; closeModal();
-    if (o) promptUpgradeObject(o);
+    if (o) {
+      if (o.upgrading) promptRushSite(o);
+      else promptUpgradeObject(o);
+    }
+  },
+  cutrib: function () {
+    var o = UI.actionObj; closeModal();
+    if (o && typeof cutRibbon === 'function') { cutRibbon(o); renderBuildPanel(); }
+  },
+  boostsite: function () {
+    var o = UI.actionObj; closeModal();
+    if (o && typeof heartBoostSite === 'function') { heartBoostSite(o); renderBuildPanel(); }
+  },
+  lendpaw: function () {
+    var o = UI.actionObj; closeModal();
+    if (o && typeof lendAPaw === 'function') { lendAPaw(o); renderBuildPanel(); }
+  },
+  rushsite: function () {
+    var o = UI.actionObj; closeModal();
+    if (!o) return;
+    var c2 = rushCost(o), cName = CAT_BY_ID[o.type] ? CAT_BY_ID[o.type].name : o.type;
+    if (S.cash < c2) { toast('Finishing now costs ' + fmtMoney(c2) + ' — not enough cash', 'bad'); sfx('error'); return; }
+    if (!o.done || o.upgrading) {
+      S.cash -= c2; S.stats.spent += c2;
+      if (!o.done) o.buildEnd = Date.now();
+      else if (o.upgrading) o.upgradeEnd = Date.now();
+      sfx('buy'); checkBuilds(); saveGame(); renderBuildPanel();
+      if (typeof MP !== 'undefined') MP.recordAction('rush', { item: o.type, name: cName, icon: CAT_BY_ID[o.type].icon, cost: c2 });
+    }
   },
   trainstaff: function () {
     var sid = UI.actionStaff; closeModal();
@@ -483,8 +521,9 @@ function showSummary() {
   openModal('<h2>🌙 Day ' + s.day + ' complete</h2><div class="rating">' + rating + '</div>' +
     '<div class="stats"><div><span>Dogs returned</span><b>' + s.served + '</b></div><div><span>Earned</span><b class="money">' + fmtMoney(s.earned) + '</b></div>' +
     '<div><span>Tips</span><b class="money">' + fmtMoney(s.tips) + '</b></div><div><span>PAWSOME pickups</span><b>' + s.perfect + '</b></div>' +
-    '<div><span>Goal rewards</span><b class="money">' + fmtMoney(s.goalCash || 0) + '</b></div><div><span>Spent</span><b>' + fmtMoney(s.spent) + '</b></div>' +
-    (s.wages ? '<div><span>Staff wages</span><b class="bad">−' + fmtMoney(s.wages) + '</b></div>' : '') +
+    '<div><span>Paw Hearts</span><b style="color:#d48b1c">+' + (s.hearts || 0) + '💛</b></div><div><span>Goal rewards</span><b class="money">' + fmtMoney(s.goalCash || 0) + '</b></div>' +
+    '<div><span>Spent</span><b>' + fmtMoney(s.spent) + '</b></div>' +
+    (s.wages ? '<div><span>Staff wages</span><b class="bad">−' + fmtMoney(s.wages) + '</b></div>' : '<div><span>Day</span><b>#' + s.day + '</b></div>') +
     '<div><span>Complaints</span><b class="' + (s.complaints ? 'bad' : '') + '">' + s.complaints + '</b></div><div><span>Poop left</span><b class="' + (s.leftoverPoop >= 3 ? 'bad' : '') + '">' + (s.leftoverPoop || 0) + '</b></div>' +
     '<div style="grid-column:1/3"><span>Reputation</span><b>' + stars(s.repEnd) + ' <small class="' + (dr >= 0 ? 'good' : 'bad') + '">' + (dr >= 0 ? '+' : '') + dr.toFixed(2) + '</small></b></div></div>' +
     (s.goals && s.goals.length ? '<div class="goalsum">' + s.goals.map(function (g) { return '<div class="' + (g.done ? 'good' : '') + '">' + (g.done ? '✅' : '⬜') + ' ' + esc(g.text) + '</div>'; }).join('') + '</div>' : '') +
@@ -567,7 +606,7 @@ function renderBuildPanel() {
       hMin = '<div class="bp-min-bar">' +
         '<div class="ic">' + (sUrl ? '<img src="' + sUrl + '">' : sDef.icon) + '</div>' +
         '<div class="tx"><b>Placing ' + esc(sDef.name) + ' (' + fmtMoney(sCost) + ' · ⏱ ' + fmtDur(effT) + ')</b>' +
-        '<small>Drag building anywhere on the stagnant lawn (' + bDims.w + '×' + bDims.h + ' · ' + ROT_LABELS[bRot] + ')</small></div>' +
+        '<small>Hold &amp; drag building to move it · 1 finger pans map · 2 fingers zoom (' + bDims.w + '×' + bDims.h + ' · ' + ROT_LABELS[bRot] + ')</small></div>' +
         '<button id="bpConfirmPlace" class="bp-ok-btn" aria-label="Place">✓ Place</button>' +
         '<button id="bpRotateObj" class="bp-rot-btn" aria-label="Rotate">🔄</button>' +
         '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
@@ -581,7 +620,7 @@ function renderBuildPanel() {
       hMin = '<div class="bp-min-bar">' +
         '<div class="ic">' + (mUrl ? '<img src="' + mUrl + '">' : mDef.icon) + '</div>' +
         '<div class="tx"><b>↔️ Moving ' + esc(mDef.name) + ' (' + mDims.w + '×' + mDims.h + ' · ' + ROT_LABELS[mRot] + ')</b>' +
-        '<small>Drag building anywhere on the stagnant lawn to relocate</small></div>' +
+        '<small>Hold &amp; drag building to move it · 1 finger pans map · 2 fingers zoom</small></div>' +
         '<button id="bpConfirmPlace" class="bp-ok-btn" aria-label="Place">✓ Place</button>' +
         '<button id="bpRotateObj" class="bp-rot-btn" aria-label="Rotate">🔄</button>' +
         '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
@@ -590,7 +629,7 @@ function renderBuildPanel() {
       hMin = '<div class="bp-min-bar">' +
         '<div class="ic">↔️</div>' +
         '<div class="tx"><b>↔️ Move &amp; Rotate Mode</b>' +
-        '<small>Touch &amp; drag any building on the lawn to move or rotate it!</small></div>' +
+        '<small>Hold any building to drag it · 1 finger pans map · 2 fingers zoom!</small></div>' +
         '<button id="bpCancelPlace" class="bp-cancel-x" aria-label="Cancel">✕</button>' +
       '</div>';
     } else if (UI.buildTool === 'upgrade') {
@@ -613,7 +652,10 @@ function renderBuildPanel() {
     return;
   }
   var tabs = [['care', 'Care'], ['fun', 'Fun'], ['decor', 'Decor'], ['land', 'Land'], ['biz', 'Research & Staff']];
-  var h = '<div class="bp-head"><span>🔨 Shop</span><button id="moveBtn" class="' + (UI.buildTool === 'move' ? 'on' : '') + '">↔️ Move</button><button id="upgBtn" class="' + (UI.buildTool === 'upgrade' ? 'on' : '') + '">⬆️ Upgrade</button><button id="sellBtn" class="' + (UI.buildTool === 'sell' ? 'on' : '') + '">💸 Sell</button><button id="bpClose">Done</button></div>' +
+  var bBusy = typeof activeBuildCount === 'function' ? activeBuildCount() : 0;
+  var bMax = typeof maxBuilders === 'function' ? maxBuilders() : 1;
+  var bChip = '<small class="bp-builders' + (bBusy >= bMax ? ' full' : '') + '">👷 ' + bBusy + '/' + bMax + '</small>';
+  var h = '<div class="bp-head"><span>🔨 Shop ' + bChip + '</span><button id="moveBtn" class="' + (UI.buildTool === 'move' ? 'on' : '') + '">↔️ Move</button><button id="upgBtn" class="' + (UI.buildTool === 'upgrade' ? 'on' : '') + '">⬆️ Upgrade</button><button id="sellBtn" class="' + (UI.buildTool === 'sell' ? 'on' : '') + '">💸 Sell</button><button id="bpClose">Done</button></div>' +
     '<div class="tabs">' + tabs.map(function (t) { return '<button data-tab="' + t[0] + '" class="' + (UI.buildTab === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div><div class="items">';
   if (UI.buildTab === 'land') {
     h += '<div class="bp-sub">Stand on the golden 🗺️ box at the yard border or tap below to expand!</div>';
@@ -629,24 +671,31 @@ function renderBuildPanel() {
     var fCostL = typeof franchiseCost === 'function' ? franchiseCost() : 750;
     var fReqL = typeof franchiseReqLvl === 'function' ? franchiseReqLvl() : 2;
     var fLockedL = S.level < fReqL;
-    h += '<div class="bp-sub">🏆 Endless Franchise Certification — expand capacity &amp; pay forever!</div>';
-    h += '<div class="item' + (fLockedL ? ' locked' : '') + (S.cash < fCostL && !fLockedL ? ' poor' : '') + '" data-franchise="1" style="grid-column:1/-1"><div class="ic">🏆</div><div class="tx"><b>' + esc(franchiseName(fTierL + 1)) + ' <span style="color:#8e6bd6">Tier ' + (fTierL + 1) + '</span></b><small>Permanent +2 Max Dog Capacity, +12% All Boarding Pay &amp; +10 Yard Charm (Current: ' + esc(franchiseName(fTierL)) + ')</small></div><div class="pr">' +
+    h += '<div class="bp-sub">🏆 Endless Franchise Certification — boost boarding pay, Hearts &amp; build speed forever!</div>';
+    h += '<div class="item' + (fLockedL ? ' locked' : '') + (S.cash < fCostL && !fLockedL ? ' poor' : '') + '" data-franchise="1" style="grid-column:1/-1"><div class="ic">🏆</div><div class="tx"><b>' + esc(franchiseName(fTierL + 1)) + ' <span style="color:#8e6bd6">Tier ' + (fTierL + 1) + '</span></b><small>+15% Boarding Pay, +15% Paw Hearts, +10 Yard Charm &amp; +2m PAWSOME Build Boost (Current: ' + esc(franchiseName(fTierL)) + ')</small></div><div class="pr">' +
       (fLockedL ? '🔒 Lv ' + fReqL : '⬆️ ' + fmtMoney(fCostL)) + '</div></div>';
   } else if (UI.buildTab === 'biz') {
-    h += '<div class="bp-sub">⭐ Boost Star Rating (' + S.rep.toFixed(1) + '★ → Max ' + capacity() + ' dogs)</div>';
+    h += '<div class="bp-sub">💛 Paw Heart Rewards (You have ' + (S.hearts || 0) + '💛 · earn from PAWSOME pickups, chores &amp; co-op!)</div>';
+    if (typeof HEART_PERKS !== 'undefined') {
+      HEART_PERKS.forEach(function (hp) {
+        var poorH = (S.hearts || 0) < hp.hearts;
+        h += '<div class="item' + (poorH ? ' poor' : '') + '" data-heartperk="' + hp.id + '" style="grid-column:1/-1"><div class="ic">' + hp.icon + '</div><div class="tx"><b>' + esc(hp.name) + '</b><small>' + esc(hp.desc) + '</small></div><div class="pr" style="color:' + (poorH ? '#d9574a' : '#c77d0a') + '">' + hp.hearts + '💛</div></div>';
+      });
+    }
+    h += '<div class="bp-sub">⭐ Boost Star Rating (' + S.rep.toFixed(1) + '★ · ' + capacity() + ' Kennel slot' + (capacity() === 1 ? '' : 's') + ')</div>';
     h += '<div class="item' + (S.cash < 35 ? ' poor' : '') + '" data-repboost="social"><div class="ic">🍪</div><div class="tx"><b>Pup Cup Social</b><small>Instant +0.35★ Star Rating &amp; happy pups</small></div><div class="pr">$35</div></div>';
-    h += '<div class="item' + (S.cash < 95 ? ' poor' : '') + '" data-repboost="ad"><div class="ic">📸</div><div class="tx"><b>Pet Magazine Ad</b><small>Instant +0.80★ Star Rating &amp; more dogs</small></div><div class="pr">$95</div></div>';
+    h += '<div class="item' + (S.cash < 95 ? ' poor' : '') + '" data-repboost="ad"><div class="ic">📸</div><div class="tx"><b>Pet Magazine Ad</b><small>Instant +0.80★ Star Rating &amp; faster arrivals</small></div><div class="pr">$95</div></div>';
     var fTier = typeof franchiseTier === 'function' ? franchiseTier() : 0;
     var fCost = typeof franchiseCost === 'function' ? franchiseCost() : 750;
     var fReq = typeof franchiseReqLvl === 'function' ? franchiseReqLvl() : 2;
     var fLocked = S.level < fReq;
-    h += '<div class="item' + (fLocked ? ' locked' : '') + (S.cash < fCost && !fLocked ? ' poor' : '') + '" data-franchise="1" style="grid-column:1/-1"><div class="ic">🏆</div><div class="tx"><b>' + esc(franchiseName(fTier + 1)) + ' <span style="color:#8e6bd6">Tier ' + (fTier + 1) + '</span></b><small>Endless Empire Rank: +2 Max Dog Capacity, +12% Boarding Pay &amp; +10 Charm per Tier</small></div><div class="pr">' +
+    h += '<div class="item' + (fLocked ? ' locked' : '') + (S.cash < fCost && !fLocked ? ' poor' : '') + '" data-franchise="1" style="grid-column:1/-1"><div class="ic">🏆</div><div class="tx"><b>' + esc(franchiseName(fTier + 1)) + ' <span style="color:#8e6bd6">Tier ' + (fTier + 1) + '</span></b><small>Endless Empire Rank: +15% Boarding Pay, +15% Paw Hearts, +10 Charm &amp; +2m PAWSOME Build Boost</small></div><div class="pr">' +
       (fLocked ? '🔒 Lv ' + fReq : '⬆️ ' + fmtMoney(fCost)) + '</div></div>';
     h += '<div class="bp-sub">Endless Research Perks — upgradeable forever!</div>';
     UPGRADES.forEach(function (u) {
       var curLv = upLvl(u.id), reqLv = upgReqLvl(u), cost = upgCost(u);
       var locked = S.level < reqLv, poor = S.cash < cost;
-      h += '<div class="item' + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-upg="' + u.id + '"><div class="ic">' + u.icon + '</div><div class="tx"><b>' + u.name + (curLv ? ' <span style="color:#8e6bd6">Lv' + curLv + '</span>' : '') + '</b><small>' + u.desc + '</small></div><div class="pr">' +
+      h += '<div class="item' + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-upg="' + u.id + '" style="grid-column:1/-1"><div class="ic">' + u.icon + '</div><div class="tx"><b>' + u.name + (curLv ? ' <span style="color:#8e6bd6">Lv' + curLv + '</span>' : '') + '</b><small>' + u.desc + '</small></div><div class="pr">' +
         (locked ? '🔒 Lv' + reqLv : '⬆️ ' + fmtMoney(cost)) + '</div></div>';
     });
     h += '<div class="bp-sub">Staff — hire &amp; train infinitely (Lv 1 → Lv ∞) for faster speed &amp; bonus pay!</div>';
@@ -669,7 +718,7 @@ function renderBuildPanel() {
       var lockLabel = (c.id === 'kennel' && !S.tutorialDone && kCount >= 1) ? '🔒 Tut' : ('🔒 Lv' + cReq);
       var titleSuffix = c.id === 'kennel' ? (' <small style="color:#58b368">(#' + (kCount + 1) + ' → ' + (kCount + 1) + ' Dog' + (kCount + 1 > 1 ? 's' : '') + ')</small>') : '';
       h += '<div class="item' + (UI.buildSel === c.id ? ' sel' : '') + (locked ? ' locked' : '') + (poor && !locked ? ' poor' : '') + '" data-item="' + c.id + '"' + (isTut ? ' style="box-shadow:0 0 0 3px #ffe66d"' : '') + '>' +
-        '<div class="ic">' + (url ? '<img src="' + url + '">' : c.icon) + '</div><div class="tx"><b>' + c.name + titleSuffix + (isTut ? ' <span style="color:#d9574a">🎓 Place Now</span>' : '') + '</b><small>⏱ ' + fmtDur(!S.tutorialDone ? Math.min(cTime, 2.5) : cTime) + (c.charm >= 1 ? ' · 🌸+' + c.charm : '') + (c.cap ? ' · 🐕+' + c.cap + ' allowed' : '') + '</small></div>' +
+        '<div class="ic">' + (url ? '<img src="' + url + '">' : c.icon) + '</div><div class="tx"><b>' + c.name + titleSuffix + (isTut ? ' <span style="color:#d9574a">🎓 Place Now</span>' : '') + '</b><small>⏱ ' + fmtDur(cTime) + (c.charm >= 1 ? ' · 🌸+' + c.charm : '') + (c.cap ? ' · 🐕+' + c.cap + ' allowed' : '') + '</small></div>' +
         '<div class="pr">' + (locked ? lockLabel : fmtMoney(cCost)) + '</div></div>';
     });
   }
@@ -680,16 +729,19 @@ function renderBuildPanel() {
   bpShowDesc('');
   UI.bpSig = buildSig();
 }
-var BP_HELP = 'Tap any building in the yard to Move, Upgrade, or Sell it, or pick a new item below.';
+var BP_HELP = '1 finger drags map · 2 fingers zoom · Hold any building to move it, or tap to Upgrade / Sell.';
 function bpShowDesc(txt) {
   var el = $('bpDesc');
-  if (el) el.textContent = txt || (UI.buildTool === 'move' ? (UI.moveObj ? 'Moving ' + CAT_BY_ID[UI.moveObj.type].name + ' — tap any open green spot in the yard to place it!' : 'Move mode: tap any building or item in the yard to relocate it for free.') : UI.buildTool === 'sell' ? 'Sell mode: tap a building in the yard to sell it.' : UI.buildTool === 'upgrade' ? 'Upgrade mode: tap any building in the yard to level it up!' : UI.buildSel ? 'Tap any green tile in the yard to build ' + CAT_BY_ID[UI.buildSel].name + ' (⏱ ' + fmtDur(CAT_BY_ID[UI.buildSel].time) + ')' : BP_HELP);
+  if (el) el.textContent = txt || (UI.buildTool === 'move' ? (UI.moveObj ? 'Moving ' + CAT_BY_ID[UI.moveObj.type].name + ' — tap any open green spot in the yard to place it!' : 'Move mode: tap any building or item in the yard to relocate it for free.') : UI.buildTool === 'sell' ? 'Sell mode: tap a building in the yard to sell it.' : UI.buildTool === 'upgrade' ? 'Upgrade mode: tap any building in the yard to level it up!' : UI.buildSel ? 'Tap any green tile in the yard to build ' + CAT_BY_ID[UI.buildSel].name + ' (⏱ ' + fmtDur(typeof itemBuildTime === 'function' ? itemBuildTime(UI.buildSel) : CAT_BY_ID[UI.buildSel].time) + ')' : BP_HELP);
 }
 (function () {
   var bp = $('buildpanel');
-  bp.addEventListener('pointerdown', function (ev) {
-    if (!ev.target.closest) return;
-    var t = ev.target.closest('#bpClose,#bpCancelPlace,#bpConfirmPlace,#bpRotateObj,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise]'); if (!t) return;
+  var SHOP_SEL = '#bpClose,#bpCancelPlace,#bpConfirmPlace,#bpRotateObj,#moveBtn,#sellBtn,#upgBtn,[data-tab],[data-item],[data-plot],[data-upg],[data-staff],[data-repboost],[data-franchise],[data-heartperk]';
+  var tapState = null;
+  var lastHandledAt = 0;
+
+  function handleShopAction(t) {
+    if (!t) return;
     initAudio();
     if (t.id === 'bpClose') { setMode('play'); sfx('ui_close'); return; }
     if (t.id === 'bpConfirmPlace') {
@@ -725,16 +777,16 @@ function bpShowDesc(txt) {
     if (t.id === 'bpCancelPlace') {
       UI.buildSel = null; UI.moveObj = null; UI.buildTool = null; UI.dragPos = null;
       UI.buildRot = 0; UI.moveRot = 0;
-      CAM.panX = 0; CAM.panY = 0;
       sfx('ui_close');
       renderBuildPanel();
       return;
     }
     if (t.hasAttribute('data-repboost')) { runRepCampaign(t.getAttribute('data-repboost')); renderBuildPanel(); return; }
+    if (t.hasAttribute('data-heartperk')) { if (typeof buyHeartPerk === 'function') buyHeartPerk(t.getAttribute('data-heartperk')); renderBuildPanel(); return; }
     if (t.hasAttribute('data-franchise')) { buyFranchiseTier(); renderBuildPanel(); return; }
-    if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
-    if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
-    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; CAM.panX = 0; CAM.panY = 0; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'moveBtn') { UI.buildTool = UI.buildTool === 'move' ? null : 'move'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'sellBtn') { UI.buildTool = UI.buildTool === 'sell' ? null : 'sell'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; renderBuildPanel(); sfx('click'); return; }
+    if (t.id === 'upgBtn') { UI.buildTool = UI.buildTool === 'upgrade' ? null : 'upgrade'; UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; renderBuildPanel(); sfx('click'); return; }
     if (t.hasAttribute('data-tab')) { UI.buildTab = t.getAttribute('data-tab'); UI.buildSel = null; UI.moveObj = null; UI.dragPos = null; sfx('click'); renderBuildPanel(); var it = bp.querySelector('.items'); if (it) it.scrollTop = 0; return; }
     if (t.hasAttribute('data-item')) {
       var id = t.getAttribute('data-item'), c = CAT_BY_ID[id];
@@ -744,9 +796,13 @@ function bpShowDesc(txt) {
         else toast('🔒 Reach Daycare Level ' + reqL + ' to build another ' + c.name, 'bad');
         sfx('error'); return;
       }
+      if (typeof canStartNewBuild === 'function' && !canStartNewBuild()) {
+        warnBuilderBusy();
+        return;
+      }
       UI.buildSel = UI.buildSel === id ? null : id; UI.buildRot = 0; UI.buildTool = null; UI.moveObj = null;
       UI.dragPos = (UI.buildSel && typeof defaultBuildSpot === 'function') ? defaultBuildSpot(UI.buildSel, 0) : null;
-      CAM.panX = 0; CAM.panY = 0; sfx('click'); renderBuildPanel(); return;
+      sfx('click'); renderBuildPanel(); return;
     }
     if (t.hasAttribute('data-staff')) {
       var sid = t.getAttribute('data-staff'), sd = STAFF_BY_ID[sid];
@@ -773,30 +829,126 @@ function bpShowDesc(txt) {
       if (S.cash < cost) { toast('Not enough cash for ' + u.name + ' Lv ' + nextLv + ' (' + fmtMoney(cost) + ')', 'bad'); sfx('error'); return; }
       confirmBox('Upgrade <b>' + u.name + '</b> to <b>Lv ' + nextLv + '</b> for ' + fmtMoney(cost) + '?<br>' + u.desc, function () { buyUpgrade(u); renderBuildPanel(); });
     }
+  }
+
+  var lastScrollAt = 0;
+
+  function shopTargetKey(el) {
+    if (!el) return '';
+    if (el.id) return '#' + el.id;
+    var attrs = ['data-tab', 'data-item', 'data-plot', 'data-upg', 'data-staff', 'data-repboost', 'data-franchise', 'data-heartperk'];
+    for (var i = 0; i < attrs.length; i++) {
+      if (el.hasAttribute && el.hasAttribute(attrs[i])) return attrs[i] + ':' + el.getAttribute(attrs[i]);
+    }
+    return '';
+  }
+
+  bp.addEventListener('scroll', function () {
+    lastScrollAt = Date.now();
+    if (tapState) tapState.moved = true;
+    UI.shopTouching = false;
+  }, true);
+
+  bp.addEventListener('pointerdown', function (ev) {
+    if (!ev.target || !ev.target.closest) return;
+    var t = ev.target.closest(SHOP_SEL);
+    if (!t) { tapState = null; return; }
+    var scEl = bp.querySelector('.items');
+    UI.shopTouching = true;
+    tapState = {
+      id: ev.pointerId,
+      target: t,
+      key: shopTargetKey(t),
+      x0: ev.clientX,
+      y0: ev.clientY,
+      scroll0: scEl ? scEl.scrollTop : 0,
+      moved: false
+    };
+  });
+
+  bp.addEventListener('pointermove', function (ev) {
+    if (!tapState || (ev.pointerId != null && tapState.id != null && ev.pointerId !== tapState.id)) return;
+    var dx = ev.clientX - tapState.x0, dy = ev.clientY - tapState.y0;
+    var scEl = bp.querySelector('.items');
+    var dScroll = scEl ? Math.abs(scEl.scrollTop - tapState.scroll0) : 0;
+    if (Math.sqrt(dx * dx + dy * dy) > 10 || dScroll > 3) {
+      tapState.moved = true;
+    }
+  });
+
+  bp.addEventListener('pointercancel', function () {
+    tapState = null;
+    UI.shopTouching = false;
+  });
+
+  bp.addEventListener('pointerup', function (ev) {
+    UI.shopTouching = false;
+    if (!tapState) return;
+    var st = tapState;
+    tapState = null;
+    if (ev.pointerId != null && st.id != null && ev.pointerId !== st.id) return;
+    var scEl = bp.querySelector('.items');
+    var dScroll = scEl ? Math.abs(scEl.scrollTop - st.scroll0) : 0;
+    var dx = ev.clientX - st.x0, dy = ev.clientY - st.y0;
+    if (st.moved || Math.sqrt(dx * dx + dy * dy) > 10 || dScroll > 3 || Date.now() - lastScrollAt < 160) return;
+    var upTarget = (ev.target && ev.target.closest) ? ev.target.closest(SHOP_SEL) : st.target;
+    if (!upTarget) return;
+    if (upTarget !== st.target && shopTargetKey(upTarget) !== st.key) return;
+    lastHandledAt = Date.now();
+    handleShopAction(upTarget);
+  });
+
+  bp.addEventListener('click', function (ev) {
+    if (Date.now() - lastHandledAt < 450 || Date.now() - lastScrollAt < 220) return;
+    if (!ev.target || !ev.target.closest) return;
+    var t = ev.target.closest(SHOP_SEL);
+    if (!t) return;
+    handleShopAction(t);
   });
 })();
 function buildSig() {
   var pend = UI.buildTab === 'land' && S.plots.some(function (p) { return Date.now() < p.end + 1000; });
   var stSig = STAFF.map(function (s) { return staffLvl(s.id) + ':' + (S.cash >= staffTrainCost(s.id) ? 1 : 0); }).join(',');
   var catSig = CATALOG.map(function (c) { var cost = typeof itemCost === 'function' ? itemCost(c.id) : c.cost; return (S.cash >= cost ? 1 : 0); }).join('');
-  return catSig + ':' + (typeof kennelCount === 'function' ? kennelCount(true) : 0) + '|' + PLOTS.map(function (p) { return S.cash >= p.cost ? 1 : 0; }).join('') + UPGRADES.map(function (u) { return upLvl(u.id) + ':' + (S.cash >= upgCost(u) ? 1 : 0); }).join(',') + '|' + stSig + '|' + franchiseTier() + ':' + (S.cash >= franchiseCost() ? 1 : 0) + '|' + S.level + '|' + S.plots.length + '|' + (pend ? Math.floor(Date.now() / 1000) : '');
+  var bCnt = typeof activeBuildCount === 'function' ? activeBuildCount() : 0;
+  var bMax = typeof maxBuilders === 'function' ? maxBuilders() : 1;
+  return catSig + ':' + (typeof kennelCount === 'function' ? kennelCount(true) : 0) + '|' + PLOTS.map(function (p) { return S.cash >= p.cost ? 1 : 0; }).join('') + UPGRADES.map(function (u) { return upLvl(u.id) + ':' + (S.cash >= upgCost(u) ? 1 : 0); }).join(',') + '|' + stSig + '|' + franchiseTier() + ':' + (S.cash >= franchiseCost() ? 1 : 0) + '|' + S.level + '|' + S.plots.length + '|' + (S.hearts || 0) + '|' + bCnt + '/' + bMax + '|' + (pend ? Math.floor(Date.now() / 1000) : '');
 }
 function tryBuyPlot(p) {
-  if (plotOwned(p) || plotPending(p)) return;
+  if (plotOwned(p)) return;
+  var pend = plotPending(p);
+  if (pend) {
+    if (typeof canLendAPaw === 'function' && canLendAPaw(pend)) {
+      lendAPaw(pend);
+      renderBuildPanel();
+    }
+    return;
+  }
+  if (typeof canStartNewBuild === 'function' && !canStartNewBuild()) { warnBuilderBusy(); return; }
   if (S.level < p.lvl) { toast('🔒 Reach level ' + p.lvl + ' to expand ' + p.name, 'bad'); sfx('error'); return; }
   if (!plotAdjacent(p)) { toast(p.name + ' does not touch your land yet — unlock a neighbouring plot first', 'bad'); sfx('error'); return; }
   if (S.cash < p.cost) { toast('Not enough cash for ' + p.name + ' (' + fmtMoney(p.cost) + ')', 'bad'); sfx('error'); return; }
   var unlHtml = (p.unlocks && p.unlocks.length) ? '<br><small>🎁 Unlocks in this area: <b>' + p.unlocks.join(' · ') + '</b></small>' : '';
-  confirmBox('Expand into <b>' + p.name + '</b> for ' + fmtMoney(p.cost) + '?<br><small>⏱ Clearing takes ' + fmtDur(p.time) + ' in real time.</small>' + unlHtml, function () { buyPlot(p); renderBuildPanel(); });
+  confirmBox('Expand into <b>' + p.name + '</b> for ' + fmtMoney(p.cost) + '?<br><small>⏱ Clearing takes ' + fmtDur(p.time) + ' in real time (PAWSOME pickups, Goals &amp; Partner Lend-a-Paw shave time!).</small>' + unlHtml, function () { buyPlot(p); renderBuildPanel(); });
 }
 function promptObjectActions(o) {
   var c = CAT_BY_ID[o.type], lv = o.lvl || 1, nextLv = lv + 1, cost = objUpgradeCost(o), req = objUpgradeReqLvl(o);
   UI.actionObj = o;
-  var upgLabel = S.level < req ? ('⬆️ Upgrade Lv ' + nextLv + ' (🔒 Lv ' + req + ')') : ('⬆️ Upgrade to Lv ' + nextLv + ' (' + fmtMoney(cost) + ')');
+  var dispName = (o.type === 'kennel' && typeof kennelSuiteName === 'function') ? kennelSuiteName(lv) : c.name;
+  var upgLabel = o.upgrading
+    ? ('⬆️ Upgrading to Lv ' + nextLv + ' (' + fmtDur(siteTimeLeft(o)) + ') — Boost!')
+    : S.level < req
+      ? ('⬆️ Upgrade to ' + (o.type === 'kennel' ? kennelSuiteName(nextLv) : 'Lv ' + nextLv) + ' (🔒 Lv ' + req + ')')
+      : ('⬆️ Upgrade to ' + (o.type === 'kennel' ? kennelSuiteName(nextLv) : 'Lv ' + nextLv) + ' (' + fmtMoney(cost) + ')');
+  var ribBtn = o.readyRibbon ? '<button data-act="cutrib" class="primary">🎀 Cut Grand Opening Ribbon (+3💛)</button>' : '';
   var sellBtn = canSell(o) ? '<button data-act="sellobj" class="flat">💸 Sell (' + fmtMoney(sellValue(o)) + ')</button>' : '';
-  openModal('<h2>' + c.icon + ' ' + esc(c.name) + ' <small>Lv ' + lv + '</small></h2>' +
-    '<p style="text-align:center">' + esc(c.desc) + '</p>' +
+  var extraNote = o.type === 'kennel'
+    ? ('<br><small style="color:#8a5a12"><b>Luxury Suite Lv ' + lv + ':</b> +' + ((lv - 1) * 8) + '% boarding pay · +' + ((lv - 1) * 12) + '% overnight pay · +' + Math.round((lv - 1) * 2.5 * 10) / 10 + ' Charm</small>')
+    : '';
+  openModal('<h2>' + c.icon + ' ' + esc(dispName) + ' <small>Lv ' + lv + '</small></h2>' +
+    '<p style="text-align:center">' + esc(c.desc) + extraNote + '</p>' +
     '<div class="row col">' +
+    ribBtn +
     '<button data-act="moveobj" class="primary">↔️ Move to Another Spot</button>' +
     '<button data-act="rotobj" class="wood">🔄 Rotate 90° (' + ROT_LABELS[((o.rot || 0) + 1) % 4] + ')</button>' +
     '<button data-act="upgobj">' + upgLabel + '</button>' +
@@ -806,23 +958,35 @@ function promptObjectActions(o) {
   bindModalButtons();
 }
 function promptRushSite(o) {
-  var cost = rushCost(o), cName = CAT_BY_ID[o.type].name;
-  var what = o.upgrading ? (cName + ' Lv ' + ((o.lvl || 1) + 1) + ' upgrade') : cName;
-  if (S.cash < cost) { toast('Rushing costs ' + fmtMoney(cost) + ' — not enough cash', 'bad'); sfx('error'); return; }
-  confirmBox('Finish the <b>' + what + '</b> right now for ' + fmtMoney(cost) + '?', function () {
-    var c2 = rushCost(o);
-    if (S.cash >= c2 && !o.done) {
-      S.cash -= c2; S.stats.spent += c2; o.buildEnd = Date.now(); sfx('buy'); saveGame();
-      if (typeof MP !== 'undefined') MP.recordAction('rush', { item: o.type, name: cName, icon: CAT_BY_ID[o.type].icon, cost: c2 });
-    }
-  });
+  var c = CAT_BY_ID[o.type], cName = c ? c.name : o.type;
+  var what = o.upgrading
+    ? (o.type === 'kennel' ? kennelSuiteName((o.lvl || 1) + 1) : (cName + ' Lv ' + ((o.lvl || 1) + 1) + ' upgrade'))
+    : cName;
+  var left = typeof siteTimeLeft === 'function' ? siteTimeLeft(o) : Math.max(0, (o.buildEnd - Date.now()) / 1000);
+  var cashCost = rushCost(o), hCost = typeof heartBoostCost === 'function' ? heartBoostCost() : 5;
+  var canPaw = typeof canLendAPaw === 'function' && canLendAPaw(o);
+  UI.actionObj = o;
+  var pawBtn = canPaw ? '<button data-act="lendpaw" class="primary">🤝 Lend a Paw to ' + esc(o.startedByName || 'Partner') + ' (Free · +3💛)</button>' : '';
+  var heartBtn = '<button data-act="boostsite" class="wood">💛 Speed Up -30m (' + hCost + '💛 · You have ' + (S.hearts || 0) + '💛)</button>';
+  var rushBtn = '<button data-act="rushsite" class="primary">⚡ Finish Now (' + fmtMoney(cashCost) + ')</button>';
+  openModal('<h2>' + (c ? c.icon : '🔨') + ' ' + esc(what) + '</h2>' +
+    '<p style="text-align:center">⏱ <b>' + fmtDur(left) + '</b> remaining.<br><small>PAWSOME pickups (-10m+), Goals (-5m/-30m), Spot Events (-15m) &amp; Partner Lend-a-Paw also speed this up!</small></p>' +
+    '<div class="row col">' + pawBtn + heartBtn + rushBtn + '<button data-act="back" class="flat">Keep Waiting</button></div>', 'confirm', 'narrow');
+  bindModalButtons();
 }
 function promptUpgradeObject(o) {
+  if (o.upgrading) { promptRushSite(o); return; }
+  if (typeof canStartNewBuild === 'function' && !canStartNewBuild()) { warnBuilderBusy(); return; }
   var c = CAT_BY_ID[o.type], nextLv = (o.lvl || 1) + 1, req = objUpgradeReqLvl(o), cost = objUpgradeCost(o), dur = objUpgradeTime(o);
-  if (S.level < req) { toast('🔒 Reach Daycare Level ' + req + ' to upgrade ' + c.name + ' to Lv ' + nextLv, 'bad'); sfx('error'); return; }
-  if (S.cash < cost) { toast('Not enough cash to upgrade ' + c.name + ' to Lv ' + nextLv + ' (' + fmtMoney(cost) + ')', 'bad'); sfx('error'); return; }
-  var perkTxt = c.cap ? ('+Capacity every 2 levels & +Charm') : c.charm ? ('+' + Math.round(c.charm * 0.6 * 10) / 10 + ' extra Charm') : '+Care bonus, speed & Charm';
-  confirmBox('Upgrade <b>' + c.name + '</b> to <b>Lv ' + nextLv + '</b> for ' + fmtMoney(cost) + '?<br><small>⏱ Takes ' + fmtDur(dur) + ' · ' + perkTxt + '</small>', function () {
+  var targetName = (o.type === 'kennel' && typeof kennelSuiteName === 'function') ? kennelSuiteName(nextLv) : (c.name + ' Lv ' + nextLv);
+  if (S.level < req) { toast('🔒 Reach Daycare Level ' + req + ' to upgrade to ' + targetName, 'bad'); sfx('error'); return; }
+  if (S.cash < cost) { toast('Not enough cash for ' + targetName + ' (' + fmtMoney(cost) + ')', 'bad'); sfx('error'); return; }
+  var perkTxt = o.type === 'kennel'
+    ? ('+8% boarding pay, +12% overnight pay, happier wake-ups, +12% VIP odds & +2.5 Charm (1 Kennel = 1 Dog)')
+    : c.charm
+      ? ('+' + Math.round(c.charm * 0.6 * 10) / 10 + ' extra Charm')
+      : '+Care bonus, faster action & +1.5 Charm';
+  confirmBox('Upgrade <b>' + esc(c.name) + '</b> to <b>' + esc(targetName) + '</b> for ' + fmtMoney(cost) + '?<br><small>⏱ Takes ' + fmtDur(dur) + ' (stays 100% usable while upgrading!) · ' + perkTxt + '</small>', function () {
     upgradeObject(o); renderBuildPanel();
   });
 }
@@ -859,6 +1023,10 @@ function confirmDraggedBuildOrMove() {
       UI.moveObj = null;
       UI.moveRot = 0;
       UI.dragPos = null;
+      if (UI.autoMoveTool) {
+        UI.buildTool = null;
+        UI.autoMoveTool = false;
+      }
       renderBuildPanel();
       return true;
     }
@@ -874,13 +1042,13 @@ function confirmDraggedBuildOrMove() {
     var bCost = typeof itemCost === 'function' ? itemCost(UI.buildSel) : def.cost;
     var bReq = typeof itemReqLvl === 'function' ? itemReqLvl(UI.buildSel) : def.lvl;
     if (S.level < bReq) { toast('🔒 Reach Level ' + bReq + ' to build another ' + def.name, 'bad'); sfx('error'); return false; }
+    if (typeof canStartNewBuild === 'function' && !canStartNewBuild()) { warnBuilderBusy(); return false; }
     if (S.cash < bCost) { toast('Not enough cash for a ' + def.name + ' (' + fmtMoney(bCost) + ')', 'bad'); sfx('error'); return false; }
     if (!canPlace(UI.buildSel, x, y, bDims.rot)) { toast('Drag ' + def.name + ' onto an open green spot on the lawn', 'bad'); sfx('error'); return false; }
-    placeBuild(UI.buildSel, x, y, bDims.rot);
+    if (!placeBuild(UI.buildSel, x, y, bDims.rot)) return false;
     UI.buildSel = null;
     UI.buildRot = 0;
     UI.dragPos = null;
-    CAM.panX = 0; CAM.panY = 0;
     if (!S.tutorialDone) {
       setMode('play');
       return true;
@@ -902,7 +1070,7 @@ function handleBuildTap(clientX, clientY) {
   }
   if (UI.buildTool === 'move') {
     if (site) {
-      if (site.type === 'tub' && site.dogId) { toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error'); return; }
+      if ((site.type === 'tub' || site.type === 'groomhouse') && site.dogId) { toast('Wait for the bath to finish before moving ' + CAT_BY_ID[site.type].name, 'bad'); sfx('error'); return; }
       UI.moveObj = site; UI.moveRot = site.rot || 0; UI.dragPos = { x: site.x, y: site.y }; sfx('click'); renderBuildPanel();
       toast('↔️ Drag ' + CAT_BY_ID[site.type].name + ' anywhere on the lawn (or tap 🔄 Rotate)!', '');
     } else {
@@ -921,7 +1089,12 @@ function handleBuildTap(clientX, clientY) {
     confirmBox('Sell the ' + CAT_BY_ID[o.type].name + ' (Lv ' + (o.lvl || 1) + ') for ' + fmtMoney(sellValue(o)) + '?', function () { sellObject(o); renderBuildPanel(); });
     return;
   }
-  if (o && !o.done) {
+  if (o && o.readyRibbon && !UI.buildTool) {
+    cutRibbon(o);
+    renderBuildPanel();
+    return;
+  }
+  if (o && (!o.done || o.upgrading) && UI.buildTool !== 'move' && UI.buildTool !== 'sell') {
     promptRushSite(o);
     return;
   }
@@ -931,36 +1104,90 @@ function handleBuildTap(clientX, clientY) {
     return;
   }
   var p = plotAt(tx, ty);
-  if (p && !plotOwned(p) && !plotPending(p)) tryBuyPlot(p);
+  if (p && !plotOwned(p)) tryBuyPlot(p);
 }
 
 // ---------------- iPhone Touch & My Mini Mart Dynamic Virtual Joystick ----------------
 function _touchDist(a, b) { var dx = a.clientX - b.clientX, dy = a.clientY - b.clientY; return Math.sqrt(dx * dx + dy * dy); }
+
+function _touchHitsActiveBuilding(clientX, clientY) {
+  if (!S || (!UI.buildSel && !UI.moveObj)) return false;
+  var mw = screenToWorld(clientX, clientY), wx = mw.x / TILE, wy = mw.y / TILE;
+  var type = UI.moveObj ? UI.moveObj.type : UI.buildSel;
+  var rot = UI.moveObj ? (UI.moveRot != null ? UI.moveRot : (UI.moveObj.rot || 0)) : (UI.buildRot || 0);
+  var dims = typeof objDims === 'function' ? objDims(type, rot) : (CAT_BY_ID[type] || { w: 1, h: 1 });
+  var pos = UI.dragPos || (UI.moveObj ? { x: UI.moveObj.x, y: UI.moveObj.y } : (typeof defaultBuildSpot === 'function' ? defaultBuildSpot(type, rot) : { x: 24, y: 24 }));
+  var pad = 1.15;
+  return wx >= pos.x - pad && wx <= pos.x + dims.w + pad && wy >= pos.y - pad && wy <= pos.y + dims.h + pad;
+}
+
+function _clearBuildHoldTimer() {
+  if (UI.touchBuild && UI.touchBuild.holdTimer) {
+    clearTimeout(UI.touchBuild.holdTimer);
+    UI.touchBuild.holdTimer = null;
+  }
+}
 
 function _startPointerOrTouch(id, clientX, clientY) {
   initAudio();
   if (UI.mode === 'play') {
     UI.joy = { id: id, ox: clientX, oy: clientY, cx: clientX, cy: clientY, dx: 0, dy: 0, active: false, moved: false, t0: performance.now() };
   } else if (UI.mode === 'build') {
+    _clearBuildHoldTimer();
     UI.mouse.sx = clientX; UI.mouse.sy = clientY; UI.mouse.in = true;
     var startSite = null;
     if (S) {
       var mw0 = screenToWorld(clientX, clientY);
       startSite = objAt(tileOf(mw0.x), tileOf(mw0.y));
     }
-    // In Move mode, touching a building immediately grabs it so you can drag it in one continuous motion across the stagnant background!
+    var draggingBuilding = false;
+    var freshlyGrabbed = false;
+    // In Move mode, touching a building immediately grabs it so you can drag only the building
     if (UI.buildTool === 'move' && !UI.moveObj && startSite) {
-      if (startSite.type === 'tub' && startSite.dogId) {
-        toast('Wait for the bath to finish before moving the Bath Tub', 'bad'); sfx('error');
+      if ((startSite.type === 'tub' || startSite.type === 'groomhouse') && startSite.dogId) {
+        toast('Wait for the bath to finish before moving ' + CAT_BY_ID[startSite.type].name, 'bad'); sfx('error');
       } else {
         UI.moveObj = startSite; UI.moveRot = startSite.rot || 0; UI.dragPos = { x: startSite.x, y: startSite.y };
+        draggingBuilding = true; freshlyGrabbed = true;
         sfx('click'); renderBuildPanel();
       }
-    }
-    if (UI.buildSel || UI.moveObj) {
+    } else if ((UI.buildSel || UI.moveObj) && _touchHitsActiveBuilding(clientX, clientY)) {
+      draggingBuilding = true;
       updateDragPosFromScreen(clientX, clientY);
     }
-    UI.touchBuild = { id: id, ox: clientX, oy: clientY, lx: clientX, ly: clientY, moved: false, grabbedSite: startSite };
+    var tb = {
+      id: id, ox: clientX, oy: clientY, lx: clientX, ly: clientY,
+      moved: false, pannedMap: false, grabbedSite: startSite,
+      draggingBuilding: draggingBuilding, freshlyGrabbed: freshlyGrabbed, holdTimer: null
+    };
+    UI.touchBuild = tb;
+    // Holding a building (without panning the map) grabs that building and moves ONLY the building!
+    if (!draggingBuilding && (startSite || UI.buildSel || UI.moveObj) && UI.buildTool !== 'sell' && UI.buildTool !== 'upgrade') {
+      tb.holdTimer = setTimeout(function () {
+        if (!UI.touchBuild || UI.touchBuild !== tb || tb.pannedMap || UI.mode !== 'build') return;
+        tb.holdTimer = null;
+        if (startSite && !UI.buildSel && !UI.moveObj) {
+          if ((startSite.type === 'tub' || startSite.type === 'groomhouse') && startSite.dogId) {
+            toast('Wait for the bath to finish before moving ' + CAT_BY_ID[startSite.type].name, 'bad'); sfx('error');
+            return;
+          }
+          UI.autoMoveTool = !UI.buildTool;
+          UI.buildTool = 'move';
+          UI.moveObj = startSite;
+          UI.moveRot = startSite.rot || 0;
+          UI.dragPos = { x: startSite.x, y: startSite.y };
+          tb.draggingBuilding = true;
+          tb.freshlyGrabbed = true;
+          sfx('click');
+          renderBuildPanel();
+          toast('↔️ Holding ' + CAT_BY_ID[startSite.type].name + ' — drag to move!', '');
+        } else if (UI.buildSel || UI.moveObj) {
+          tb.draggingBuilding = true;
+          updateDragPosFromScreen(tb.lx, tb.ly);
+          sfx('click');
+        }
+      }, 210);
+    }
   }
 }
 
@@ -984,25 +1211,26 @@ function _movePointerOrTouch(id, clientX, clientY) {
       UI.joy.dy = dy / maxR;
     }
   } else if (UI.mode === 'build' && UI.touchBuild && UI.touchBuild.id === id) {
+    var tb = UI.touchBuild;
     UI.mouse.sx = clientX; UI.mouse.sy = clientY; UI.mouse.in = true;
-    var bdx = clientX - UI.touchBuild.ox, bdy = clientY - UI.touchBuild.oy;
-    if (Math.sqrt(bdx * bdx + bdy * bdy) > 8) UI.touchBuild.moved = true;
-    // If dragging an existing building on the lawn while no tool/item is selected, automatically grab and drag that building!
-    if (UI.touchBuild.moved && !UI.buildSel && !UI.moveObj && !UI.buildTool && UI.touchBuild.grabbedSite) {
-      var gs = UI.touchBuild.grabbedSite;
-      if (!(gs.type === 'tub' && gs.dogId)) {
-        UI.buildTool = 'move';
-        UI.moveObj = gs;
-        UI.moveRot = gs.rot || 0;
-        UI.dragPos = { x: gs.x, y: gs.y };
-        renderBuildPanel();
+    var bdx = clientX - tb.ox, bdy = clientY - tb.oy;
+    var stepDx = clientX - tb.lx, stepDy = clientY - tb.ly;
+    if (Math.sqrt(bdx * bdx + bdy * bdy) > 8) tb.moved = true;
+    if (tb.draggingBuilding) {
+      // Holding/dragging a building: ONLY move the building while the map stays 100% stationary!
+      if (UI.buildSel || UI.moveObj) {
+        updateDragPosFromScreen(clientX, clientY);
       }
+    } else if (tb.moved) {
+      // One-finger drag on the map (when not holding a building): pan the camera around the yard!
+      _clearBuildHoldTimer();
+      tb.pannedMap = true;
+      var z = Math.max(0.2, CAM.zoom || 1);
+      var maxPanX = W * TILE * 0.48, maxPanY = H * TILE * 0.48;
+      CAM.panX = clamp((CAM.panX || 0) - stepDx / z, -maxPanX, maxPanX);
+      CAM.panY = clamp((CAM.panY || 0) - stepDy / z, -maxPanY, maxPanY);
     }
-    // Keep the background 100% STAGNANT and drag the building directly to wherever the finger moves!
-    if (UI.buildSel || UI.moveObj) {
-      updateDragPosFromScreen(clientX, clientY);
-    }
-    UI.touchBuild.lx = clientX; UI.touchBuild.ly = clientY;
+    tb.lx = clientX; tb.ly = clientY;
   }
 }
 
@@ -1020,12 +1248,16 @@ function _endPointerOrTouch(id, clientX, clientY) {
     UI.joy = null;
   }
   if (UI.touchBuild && UI.touchBuild.id === id) {
+    var tb = UI.touchBuild;
+    _clearBuildHoldTimer();
     if (UI.mode === 'build') {
       UI.mouse.sx = clientX; UI.mouse.sy = clientY; UI.mouse.in = true;
-      if (UI.buildSel || UI.moveObj) {
+      if (tb.draggingBuilding && (UI.buildSel || UI.moveObj)) {
         updateDragPosFromScreen(clientX, clientY);
-        confirmDraggedBuildOrMove();
-      } else if (!UI.touchBuild.moved) {
+        if (tb.moved || !tb.freshlyGrabbed) {
+          confirmDraggedBuildOrMove();
+        }
+      } else if (!tb.moved && !tb.pannedMap) {
         handleBuildTap(clientX, clientY);
       }
     }
@@ -1037,9 +1269,11 @@ canvas.addEventListener('touchstart', function (ev) {
   if (UI.mode !== 'play' && UI.mode !== 'build') return;
   ev.preventDefault();
   if (ev.touches.length >= 2) {
+    _clearBuildHoldTimer();
     UI.joy = null; UI.touchBuild = null;
     var t0 = ev.touches[0], t1 = ev.touches[1];
-    UI.pinch = { d0: Math.max(10, _touchDist(t0, t1)), z0: settings.zoom || 1, mx: (t0.clientX + t1.clientX) / 2, my: (t0.clientY + t1.clientY) / 2 };
+    var zStart = UI.mode === 'build' ? (CAM.buildZoom || 1) : (settings.zoom || 1);
+    UI.pinch = { d0: Math.max(10, _touchDist(t0, t1)), z0: zStart, mx: (t0.clientX + t1.clientX) / 2, my: (t0.clientY + t1.clientY) / 2 };
     return;
   }
   var t = ev.changedTouches[0];
@@ -1051,16 +1285,36 @@ canvas.addEventListener('touchmove', function (ev) {
   ev.preventDefault();
   if (ev.touches.length >= 2 && UI.pinch) {
     var t0 = ev.touches[0], t1 = ev.touches[1], d = Math.max(10, _touchDist(t0, t1));
-    settings.zoom = clamp(Math.round(UI.pinch.z0 * (d / UI.pinch.d0) * 10) / 10, 0.7, 1.4);
+    var ratio = d / UI.pinch.d0;
     var mx = (t0.clientX + t1.clientX) / 2, my = (t0.clientY + t1.clientY) / 2;
-    if (UI.mode === 'build') { CAM.panX -= (mx - UI.pinch.mx) / CAM.zoom; CAM.panY -= (my - UI.pinch.my) / CAM.zoom; }
+    if (UI.mode === 'build') {
+      CAM.buildZoom = clamp(Math.round(UI.pinch.z0 * ratio * 100) / 100, 0.42, 2.0);
+      var z = Math.max(0.2, CAM.zoom || 1);
+      var maxPanX = W * TILE * 0.48, maxPanY = H * TILE * 0.48;
+      CAM.panX = clamp((CAM.panX || 0) - (mx - UI.pinch.mx) / z, -maxPanX, maxPanX);
+      CAM.panY = clamp((CAM.panY || 0) - (my - UI.pinch.my) / z, -maxPanY, maxPanY);
+    } else {
+      settings.zoom = clamp(Math.round(UI.pinch.z0 * ratio * 20) / 20, 0.5, 1.5);
+      clearTimeout(UI.zoomSave); UI.zoomSave = setTimeout(saveSettings, 600);
+    }
     UI.pinch.mx = mx; UI.pinch.my = my;
-    clearTimeout(UI.zoomSave); UI.zoomSave = setTimeout(saveSettings, 600);
     return;
   }
   for (var i = 0; i < ev.touches.length; i++) {
     var t = ev.touches[i];
     _movePointerOrTouch(t.identifier, t.clientX, t.clientY);
+  }
+}, { passive: false });
+
+canvas.addEventListener('wheel', function (ev) {
+  if (UI.mode !== 'play' && UI.mode !== 'build') return;
+  ev.preventDefault();
+  var factor = ev.deltaY < 0 ? 1.1 : 0.9;
+  if (UI.mode === 'build') {
+    CAM.buildZoom = clamp(Math.round((CAM.buildZoom || 1) * factor * 100) / 100, 0.42, 2.0);
+  } else {
+    settings.zoom = clamp(Math.round((settings.zoom || 1) * factor * 20) / 20, 0.5, 1.5);
+    clearTimeout(UI.zoomSave); UI.zoomSave = setTimeout(saveSettings, 600);
   }
 }, { passive: false });
 
@@ -1099,6 +1353,9 @@ function updateHUD(dt) {
   setText('cash', fmtMoney(Math.round(UI.cashShown)));
   UI.cashPulse = Math.max(0, UI.cashPulse - dt);
   setStyle('cashbox', 'transform', UI.cashPulse > 0 ? 'scale(' + (1 + Math.round(UI.cashPulse * 10) / 20) + ')' : '');
+  setText('hearts', String(Math.floor(S.hearts || 0)));
+  UI.heartPulse = Math.max(0, (UI.heartPulse || 0) - dt);
+  setStyle('heartbox', 'transform', UI.heartPulse > 0 ? 'scale(' + (1 + Math.round(UI.heartPulse * 10) / 20) + ')' : '');
   if (!UI.cashRect || now - (UI.cashRectT || 0) > 1 || now < (UI.cashRectT || 0)) { UI.cashRect = $('cashbox').getBoundingClientRect(); UI.cashRectT = now; }
   UI.cashWorld = screenToWorld(UI.cashRect.left + 18, UI.cashRect.top + UI.cashRect.height / 2);
   var rep = stars(S.rep); if (UI.repHTML !== rep) { UI.repHTML = rep; $('rep').innerHTML = rep; }
@@ -1148,7 +1405,7 @@ function updateHUD(dt) {
     if (canDrop) setText('touchDropBtn', '🐾 ' + qa2.label);
   }
   UI.hudT = (UI.hudT || 0) + dt;
-  if (UI.hudT - UI.lastRoster > 0.45 || UI.hudT < UI.lastRoster) { UI.lastRoster = UI.hudT; renderTasks(); renderRoster(); if (UI.mode === 'build' && UI.bpSig !== buildSig()) renderBuildPanel(); }
+  if (UI.hudT - UI.lastRoster > 0.45 || UI.hudT < UI.lastRoster) { UI.lastRoster = UI.hudT; renderTasks(); renderRoster(); if (UI.mode === 'build' && !UI.shopTouching && UI.bpSig !== buildSig()) renderBuildPanel(); }
 }
 
 function renderTasks() {
@@ -1244,13 +1501,13 @@ function frame(ts) {
       var building = UI.mode === 'build' || (UI.mode === 'confirm' && UI.prevMode === 'build');
       if (building) {
         if (typeof ownedYardView === 'function') {
-          // Keep the background 100% stagnant in build mode so players can drag buildings cleanly without the lawn moving!
           var yv = ownedYardView();
-          tx = yv.cx;
-          ty = yv.cy;
+          var maxPanX = W * TILE * 0.48, maxPanY = H * TILE * 0.48;
+          CAM.panX = clamp(CAM.panX || 0, -maxPanX, maxPanX);
+          CAM.panY = clamp(CAM.panY || 0, -maxPanY, maxPanY);
+          tx = yv.cx + CAM.panX;
+          ty = yv.cy + CAM.panY;
           zm = yv.zoomMul;
-          CAM.panX = 0;
-          CAM.panY = 0;
         }
       }
       UI.bakeAll = !CAM.ready; updateCamera(dt, tx, ty, zm, !CAM.ready || building); CAM.ready = true;
@@ -1299,7 +1556,12 @@ $('dexBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mo
 if ($('repPill')) $('repPill').onclick = function () {
   if (!S) return;
   initAudio(); sfx('click');
-  toast('⭐ ' + S.rep.toFixed(1) + '★ Rating attracts up to ' + capacity() + ' dogs! Complete yard chores (🍂💧🦴✨), cuddle/play with dogs, or run a Pup Cup Social in Shop to boost stars!', 'good');
+  toast('⭐ ' + S.rep.toFixed(1) + '★ Rating boosts arrival speed & tips! (' + capacity() + ' Kennel slot' + (capacity() === 1 ? '' : 's') + ' · Luxury Suite Avg Lv ' + kennelSuiteLevel().toFixed(1) + ')', 'good');
+};
+if ($('heartbox')) $('heartbox').onclick = function () {
+  if (!S) return;
+  initAudio(); sfx('click');
+  toast('💛 ' + (S.hearts || 0) + ' Paw Hearts — earned from PAWSOME pickups, chores, breeds, ribbons & co-op! Spend in 🔨 Shop → Research & Staff or tap any build to shave 30m!', 'good');
 };
 if ($('touchDropBtn')) $('touchDropBtn').onclick = function () { initAudio(); if (UI.mode === 'play') { var qa = qAction(); if (qa && !qa.disabled) qa.run(); } };
 $('hint').addEventListener('pointerdown', function (ev) {

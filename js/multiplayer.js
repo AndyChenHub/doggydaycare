@@ -57,6 +57,7 @@ var MP = (function () {
   var lastResetTs = 0;
   var joiningWaitUntil = 0;
   var lastKnownCash = null;
+  var lastKnownHearts = null;
   var prevSentX = null, prevSentY = null, prevSentAt = 0;
   var lastSentMoving = false, lastSentDir = 'down', lastSentCarrySig = '';
   var lastPingSentAt = 0, peerLatencyMs = 0;
@@ -932,6 +933,15 @@ var MP = (function () {
     }
     lastKnownCash = S.cash;
 
+    // Shared Paw Hearts: mirror concurrent delta merge so partner heart gains/spends aren't clobbered
+    if (concurrentLocalEdit && remoteAct && typeof remoteAct.heartsDelta === 'number' && isFinite(remoteAct.heartsDelta) && remoteAct.heartsDelta !== 0) {
+      S.hearts = clamp(Math.floor((S.hearts || 0) + remoteAct.heartsDelta), 0, 1e9);
+    } else if (typeof incoming.hearts === 'number' && isFinite(incoming.hearts)) {
+      S.hearts = clamp(Math.floor(incoming.hearts), 0, 1e9);
+    }
+    lastKnownHearts = S.hearts || 0;
+    if ('vipMagnet' in incoming) S.vipMagnet = !!(incoming.vipMagnet || (concurrentLocalEdit && S.vipMagnet));
+
     if (typeof incoming.xp === 'number' && isFinite(incoming.xp)) S.xp = concurrentLocalEdit ? Math.max(S.xp || 0, clamp(Math.floor(incoming.xp), 0, 1e9)) : clamp(Math.floor(incoming.xp), 0, 1e9);
     if (typeof incoming.level === 'number' && isFinite(incoming.level)) S.level = Math.max(concurrentLocalEdit ? (S.level || 1) : 1, clamp(Math.floor(incoming.level), 1, 999));
     if (typeof incoming.rep === 'number' && isFinite(incoming.rep)) S.rep = clamp(incoming.rep, 0.5, 5.0);
@@ -1091,6 +1101,15 @@ var MP = (function () {
     } else if (act.kind === 'rush') {
       toast('⚡ ' + partnerName + ' finished building ' + (act.name || 'a structure') + ' early!', 'good');
       if (typeof sfx === 'function') sfx('built');
+    } else if (act.kind === 'lend_paw') {
+      toast('🤝 ' + partnerName + ' lent a paw on ' + (act.name || 'a project') + '!', 'good');
+      if (typeof sfx === 'function') sfx('perfect');
+    } else if (act.kind === 'ribbon') {
+      toast('🎀 ' + partnerName + ' cut the ribbon on ' + (act.name || 'a new build') + '!', 'good');
+      if (typeof sfx === 'function') sfx('built');
+    } else if (act.kind === 'heartperk') {
+      toast((act.icon || '💛') + ' ' + partnerName + ' used ' + (act.name || 'a Paw Heart boost') + '!', 'good');
+      if (typeof sfx === 'function') sfx('perfect');
     } else if (act.kind === 'move' || act.kind === 'rotate') {
       var mx = typeof act.x === 'number' ? (act.x + 1) * TILE : px;
       var my = typeof act.y === 'number' ? (act.y + 1) * TILE : py;
@@ -1143,6 +1162,7 @@ var MP = (function () {
       type: 'live_tick',
       rev: rev,
       cash: S.cash,
+      hearts: S.hearts || 0,
       rep: Math.round(S.rep * 100) / 100,
       level: S.level,
       xp: S.xp,
@@ -1168,6 +1188,7 @@ var MP = (function () {
   function applyLiveTick(tick) {
     if (!tick || !S) return;
     if (typeof tick.cash === 'number' && isFinite(tick.cash)) { S.cash = clamp(Math.floor(tick.cash), 0, 1e9); lastKnownCash = S.cash; }
+    if (typeof tick.hearts === 'number' && isFinite(tick.hearts)) { S.hearts = clamp(Math.floor(tick.hearts), 0, 1e9); lastKnownHearts = S.hearts; }
     if (typeof tick.rep === 'number' && isFinite(tick.rep)) S.rep = clamp(tick.rep, 0.5, 5.0);
     if (typeof tick.level === 'number' && isFinite(tick.level)) S.level = Math.max(S.level || 1, clamp(Math.floor(tick.level), 1, 999));
     if (typeof tick.xp === 'number' && isFinite(tick.xp)) S.xp = clamp(Math.floor(tick.xp), 0, 1e9);
@@ -1338,7 +1359,9 @@ var MP = (function () {
     rev++;
     var cashDelta = (typeof lastKnownCash === 'number' && isFinite(lastKnownCash)) ? (S.cash - lastKnownCash) : 0;
     lastKnownCash = S.cash;
-    var act = Object.assign({ kind: kind, day: S.day, cashDelta: cashDelta }, details || {});
+    var heartsDelta = (typeof lastKnownHearts === 'number' && isFinite(lastKnownHearts)) ? ((S.hearts || 0) - lastKnownHearts) : 0;
+    lastKnownHearts = S.hearts || 0;
+    var act = Object.assign({ kind: kind, day: S.day, cashDelta: cashDelta, heartsDelta: heartsDelta }, details || {});
     var st = serializeSharedState();
     roomState = st;
 
@@ -1436,6 +1459,8 @@ var MP = (function () {
     var builtIcons = {};
     var plotsUnlocked = [];
     var upgradesBought = [];
+    var pawsLent = [];
+    var ribbonsCut = [];
     var staffChanges = [];
     var dogsCheckedIn = [];
     var dogsReturned = 0;
@@ -1461,6 +1486,15 @@ var MP = (function () {
           break;
         case 'rush':
           cashSpent += e.cost || 0;
+          break;
+        case 'lend_paw':
+          if (e.name && pawsLent.indexOf(e.name) < 0) pawsLent.push(e.name);
+          break;
+        case 'ribbon':
+          if (e.name && ribbonsCut.indexOf(e.name) < 0) ribbonsCut.push(e.name);
+          break;
+        case 'heartperk':
+          if (e.name && upgradesBought.indexOf(e.name) < 0) upgradesBought.push((e.icon ? e.icon + ' ' : '💛 ') + e.name);
           break;
         case 'plot':
           if (e.name && plotsUnlocked.indexOf(e.name) < 0) plotsUnlocked.push(e.name);
@@ -1556,6 +1590,12 @@ var MP = (function () {
     }
     if (plotsUnlocked.length) {
       parts.push('expanded the yard with <b>' + plotsUnlocked.map(esc).join(', ') + '</b>');
+    }
+    if (pawsLent.length) {
+      parts.push('lent a paw to speed up <b>' + pawsLent.map(esc).join(', ') + '</b>');
+    }
+    if (ribbonsCut.length) {
+      parts.push('cut the grand-opening ribbon on <b>' + ribbonsCut.map(esc).join(', ') + '</b>');
     }
     if (upgradesBought.length) {
       parts.push('unlocked <b>' + upgradesBought.map(esc).join(', ') + '</b>');
@@ -1719,6 +1759,7 @@ var MP = (function () {
     if (S) {
       S.player.look = playerLook;
       lastKnownCash = S.cash;
+      lastKnownHearts = S.hearts || 0;
     }
     // Offset second player slightly so they don't stand on the exact same pixel at start
     if (S && slot === 2 && dist(S.player.x, S.player.y, PLAYER_START[0] * TILE, PLAYER_START[1] * TILE) < 5) {

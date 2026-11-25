@@ -31,10 +31,10 @@ MAP.shop.furniture.forEach(function (f) { FURN[f[0] + ',' + f[1]] = f[2]; });
 // yard land. 'base' is owned from the start. Walk onto the border expansion box or use the Land tab to expand!
 var PLOTS = [
   { id: 'base',      name: 'Starter Yard',   x: 18, y: 18, w: 14, h: 14, cost: 0,    lvl: 1,  time: 0,      unlocks: [] },
-  { id: 'north',     name: 'North Lawn',     x: 18, y: 6,  w: 14, h: 12, cost: 450,  lvl: 2,  time: 21600,  padX: 21, padY: 18, unlocks: ['🏖️ Sand Pit', '🥣 Kennel Chef Pad', '🧺 Picnic Table', '🚧 Agility Course'] },
-  { id: 'east',      name: 'East Meadow',    x: 32, y: 18, w: 13, h: 14, cost: 1200, lvl: 4,  time: 86400,  padX: 30, padY: 23, unlocks: ['🏊 Splash Pool', '🛁 Pet Groomer Pad', '🎾 Play Trainer Pad', '🤖 Auto-Feeder'] },
-  { id: 'northeast', name: 'Orchard Corner', x: 32, y: 6,  w: 13, h: 12, cost: 3200, lvl: 7,  time: 172800, padX: 30, padY: 11, unlocks: ['🦮 Pickup Runner Pad', '🪷 Lily Pond', '⛲ Fountain', '🦴 Golden Bone'] },
-  { id: 'far',       name: 'Lakeside Field', x: 45, y: 6,  w: 12, h: 26, cost: 7500, lvl: 10, time: 345600, padX: 43, padY: 22, unlocks: ['🏛️ Royal Gazebo', '🏊 Lakeside Pool', '🚧 Agility Arena'] },
+  { id: 'north',     name: 'North Lawn',     x: 18, y: 6,  w: 14, h: 12, cost: 450,  lvl: 2,  time: 10800,  padX: 21, padY: 18, unlocks: ['🏖️ Sand Pit', '🍳 Doggy Kitchen', '🥣 Kennel Chef Pad', '🧺 Picnic Table', '🚧 Agility Course'] },
+  { id: 'east',      name: 'East Meadow',    x: 32, y: 18, w: 13, h: 14, cost: 1200, lvl: 4,  time: 43200,  padX: 30, padY: 23, unlocks: ['💈 Grooming House', '🏊 Splash Pool', '🛁 Pet Groomer Pad', '🎾 Play Trainer Pad', '🤖 Auto-Feeder'] },
+  { id: 'northeast', name: 'Orchard Corner', x: 32, y: 6,  w: 13, h: 12, cost: 3200, lvl: 7,  time: 86400,  padX: 30, padY: 11, unlocks: ['🦮 Pickup Runner Pad', '🪷 Lily Pond', '⛲ Fountain', '🦴 Golden Bone'] },
+  { id: 'far',       name: 'Lakeside Field', x: 45, y: 6,  w: 12, h: 26, cost: 7500, lvl: 10, time: 172800, padX: 43, padY: 22, unlocks: ['🏛️ Royal Gazebo', '🏊 Lakeside Pool', '🚧 Agility Arena'] },
 ];
 // tiles that must stay free so the yard door is never blocked
 var KEEP_CLEAR = [[18, 23], [18, 24]];
@@ -86,47 +86,55 @@ var OWNER_NAMES = ['Alex','Sam','Priya','Jordan','Maria','Chen','Taylor','Omar',
   'Liam','Zoe','Marcus','Ines','Kai','Nora','Raj','Elena','Theo','Maya','Hugo','Lena','Felix','Sofia','Ivy','Leo','Ruth'];
 
 // ---------- buildables ----------
-// time = real-life seconds to build (continues in real time while app is closed, Clash of Clans style).
-// Every placed building can also be upgraded infinitely (Lv 1 -> Lv 2 -> Lv 3...) for higher capacity, charm & care bonus.
+// time = real-life seconds to build (continues in real time while app is closed; active play & partner "Lend a Paw" shave timers!).
+// Stepped progression ramp: 15m-45m for early post-tutorial stations -> hours/days for mid & endgame attractions.
+// Every placed building can be upgraded infinitely without blocking use!
+var KENNEL_TIERS = ['Standard Kennel', 'Cozy Suite', 'Plush Villa', 'Deluxe Chalet', 'Royal Penthouse'];
 var CATALOG = [
-  { id: 'kennel',     cat: 'care',  name: 'Kennel',          icon: '🏠', w: 2, h: 2, cost: 50,   time: 7200,   lvl: 1,  cap: 1, solid: true,
-    desc: 'Each Kennel allows 1 dog in your daycare (1 Kennel = 1 Dog allowed) and unlocks overnight stays. Unlock more Kennels as you level up!' },
-  { id: 'foodbin',    cat: 'care',  name: 'Food Bin',        icon: '🍖', w: 1, h: 1, cost: 60,   time: 7200,   lvl: 1,  solid: true, desc: 'Stack bowls of kibble. Upgrade for +care bonus & charm.' },
-  { id: 'toybox',     cat: 'care',  name: 'Toy Box',         icon: '🎾', w: 1, h: 1, cost: 65,   time: 9000,   lvl: 1,  solid: true, desc: 'Stack balls for fetch. Upgrade for +care bonus & charm.' },
-  { id: 'trash',      cat: 'care',  name: 'Poop Bin',        icon: '🗑️', w: 1, h: 1, cost: 40,   time: 5400,   lvl: 1,  solid: true, desc: 'Toss scooped poop away. Upgrade for +XP & charm.' },
-  { id: 'tub',        cat: 'care',  name: 'Bath Tub',        icon: '🛁', w: 2, h: 1, cost: 110,  time: 14400,  lvl: 1,  solid: true, desc: 'Wash muddy dogs. Upgrade for faster baths & +charm.' },
-  { id: 'waterbowl',  cat: 'care',  name: 'Water Fountain',  icon: '💧', w: 1, h: 1, cost: 55,   time: 7200,   lvl: 1,  solid: true, desc: 'Fresh drinking fountain! Thirsty dogs trot over for a drink and +happiness.' },
-  { id: 'treatjar',   cat: 'care',  name: 'Treat Jar',       icon: '🍪', w: 1, h: 1, cost: 420,  time: 28800,  lvl: 3,  solid: true, desc: 'Stack gourmet dog treats. Upgrade for bigger mood boosts.' },
-  { id: 'autofeeder', cat: 'care',  name: 'Auto-Feeder',     icon: '🤖', w: 1, h: 1, cost: 3200, time: 345600, lvl: 10, solid: true, desc: 'Hungry dogs walk over and feed themselves automatically.' },
-  { id: 'playzone',   cat: 'fun',   name: 'Play Zone',       icon: '🛝', w: 3, h: 3, cost: 520,  time: 43200,  lvl: 3,  charm: 4, floor: true, desc: 'Dogs inside play and stay happy on their own. +4 charm.' },
-  { id: 'napmat',     cat: 'fun',   name: 'Nap Mat',         icon: '🛏️', w: 2, h: 1, cost: 320,  time: 28800,  lvl: 4,  charm: 3, floor: true, desc: 'Dogs resting here lose needs slower and nap happily. +3 charm.' },
-  { id: 'sandpit',    cat: 'fun',   name: 'Sand Pit',        icon: '🏖️', w: 2, h: 2, cost: 640,  time: 86400,  lvl: 5,  charm: 5, floor: true, desc: 'Great fun to dig in. +5 charm.' },
-  { id: 'pool',       cat: 'fun',   name: 'Splash Pool',     icon: '🏊', w: 3, h: 2, cost: 1350, time: 172800, lvl: 6,  charm: 8, floor: true, desc: 'Fun and cooling. Water Babies adore it. +8 charm.' },
-  { id: 'agility',    cat: 'fun',   name: 'Agility Course',  icon: '🚧', w: 4, h: 2, cost: 2400, time: 259200, lvl: 8,  charm: 12, floor: true, desc: 'High-energy obstacle course (3-day build). +12 charm.' },
-  { id: 'path',       cat: 'decor', name: 'Stone Path',      icon: '🪨', w: 1, h: 1, cost: 20,   time: 1800,   lvl: 1,  charm: 0.25, floor: true, desc: 'A tidy stepping-stone path.' },
-  { id: 'flowers',    cat: 'decor', name: 'Flower Bed',      icon: '🌷', w: 1, h: 1, cost: 45,   time: 3600,   lvl: 1,  charm: 1, floor: true, desc: '+1 charm (upgradeable).' },
-  { id: 'hydrant',    cat: 'decor', name: 'Fire Hydrant',    icon: '🧯', w: 1, h: 1, cost: 75,   time: 7200,   lvl: 1,  charm: 1, solid: true, desc: '+1 charm (upgradeable).' },
-  { id: 'bush',       cat: 'decor', name: 'Berry Bush',      icon: '🌿', w: 1, h: 1, cost: 95,   time: 9000,   lvl: 2,  charm: 2, solid: true, desc: '+2 charm (upgradeable).' },
-  { id: 'bench',      cat: 'decor', name: 'Garden Bench',    icon: '🪑', w: 2, h: 1, cost: 150,  time: 14400,  lvl: 2,  charm: 2, solid: true, desc: '+2 charm (upgradeable).' },
-  { id: 'lamp',       cat: 'decor', name: 'Lamp Post',       icon: '💡', w: 1, h: 1, cost: 180,  time: 21600,  lvl: 3,  charm: 2, solid: true, desc: '+2 charm. Glows at dusk.' },
-  { id: 'tree',       cat: 'decor', name: 'Apple Tree',      icon: '🌳', w: 1, h: 1, cost: 240,  time: 28800,  lvl: 3,  charm: 3, solid: true, desc: '+3 charm (upgradeable).' },
-  { id: 'birdbath',   cat: 'decor', name: 'Bird Bath',       icon: '🐦', w: 1, h: 1, cost: 310,  time: 43200,  lvl: 4,  charm: 3, solid: true, desc: '+3 charm (upgradeable).' },
-  { id: 'topiary',    cat: 'decor', name: 'Dog Topiary',     icon: '🐩', w: 1, h: 1, cost: 460,  time: 64800,  lvl: 5,  charm: 4, solid: true, desc: '+4 charm. Shaped like a very good dog.' },
-  { id: 'picnic',     cat: 'decor', name: 'Picnic Table',    icon: '🧺', w: 2, h: 2, cost: 580,  time: 86400,  lvl: 6,  charm: 5, solid: true, desc: '+5 charm (upgradeable).' },
-  { id: 'statue',     cat: 'decor', name: 'Golden Bone',     icon: '🦴', w: 1, h: 1, cost: 850,  time: 129600, lvl: 7,  charm: 7, solid: true, desc: '+7 charm (upgradeable).' },
-  { id: 'pond',       cat: 'decor', name: 'Lily Pond',       icon: '🪷', w: 3, h: 2, cost: 1600, time: 172800, lvl: 9,  charm: 10, solid: true, desc: '+10 charm (upgradeable).' },
-  { id: 'fountain',   cat: 'decor', name: 'Fountain',        icon: '⛲', w: 2, h: 2, cost: 2200, time: 259200, lvl: 10, charm: 12, solid: true, desc: '+12 charm (upgradeable).' },
-  { id: 'gazebo',     cat: 'decor', name: 'Gazebo',          icon: '🏛️', w: 3, h: 3, cost: 4800, time: 432000, lvl: 12, charm: 20, solid: true, desc: '+20 charm. The crown jewel of the daycare.' },
+  { id: 'kennel',     cat: 'care',  name: 'Kennel',          icon: '🏠', w: 2, h: 2, cost: 50,   time: 900,    lvl: 1,  cap: 1, solid: true,
+    desc: '1 Kennel = 1 Dog allowed & unlocks overnight stays. Upgrade into Luxury Suites for +8% boarding pay, happier overnights, VIP guest odds & +2.5 charm!' },
+  { id: 'foodbin',    cat: 'care',  name: 'Food Bin',        icon: '🍖', w: 1, h: 1, cost: 60,   time: 1200,   lvl: 1,  solid: true, desc: 'Stack bowls of kibble. Upgrade for +care bonus & charm.' },
+  { id: 'toybox',     cat: 'care',  name: 'Toy Box',         icon: '🎾', w: 1, h: 1, cost: 65,   time: 1800,   lvl: 1,  solid: true, desc: 'Stack balls for fetch. Upgrade for +care bonus & charm.' },
+  { id: 'trash',      cat: 'care',  name: 'Poop Bin',        icon: '🗑️', w: 1, h: 1, cost: 40,   time: 900,    lvl: 1,  solid: true, desc: 'Toss scooped poop away. Upgrade for +XP & charm.' },
+  { id: 'tub',        cat: 'care',  name: 'Bath Tub',        icon: '🛁', w: 2, h: 1, cost: 110,  time: 2700,   lvl: 1,  solid: true, desc: 'Wash muddy dogs. Upgrade for faster baths & +charm.' },
+  { id: 'waterbowl',  cat: 'care',  name: 'Water Fountain',  icon: '💧', w: 1, h: 1, cost: 55,   time: 1200,   lvl: 1,  solid: true, desc: 'Fresh drinking fountain! Thirsty dogs trot over for a drink and +happiness.' },
+  { id: 'treatjar',   cat: 'care',  name: 'Treat Jar',       icon: '🍪', w: 1, h: 1, cost: 420,  time: 10800,  lvl: 3,  solid: true, desc: 'Stack gourmet dog treats. Upgrade for bigger mood boosts.' },
+  { id: 'kitchen',    cat: 'care',  name: 'Doggy Kitchen',   icon: '🍳', w: 3, h: 2, cost: 1450, time: 64800,  lvl: 4,  charm: 6, solid: true,
+    desc: 'Cooks fresh gourmet meals & treats! Stand on the pad for a 🍲 Gourmet Meal (+15 happiness, +$8 chef bonus & +★ on every feed/treat). +6 charm (18h build).' },
+  { id: 'groomhouse', cat: 'care',  name: 'Grooming House',  icon: '💈', w: 3, h: 2, cost: 2100, time: 86400,  lvl: 5,  charm: 9, solid: true,
+    desc: 'Luxury doggy spa cottage! Bathe & pamper dogs 2× faster for 100% happiness, +$12 spa bonus & extra ★. Pet Groomer staff use it too! +9 charm (24h build).' },
+  { id: 'autofeeder', cat: 'care',  name: 'Auto-Feeder',     icon: '🤖', w: 1, h: 1, cost: 3200, time: 129600, lvl: 10, solid: true, desc: 'Hungry dogs walk over and feed themselves automatically.' },
+  { id: 'playzone',   cat: 'fun',   name: 'Play Zone',       icon: '🛝', w: 3, h: 3, cost: 520,  time: 18000,  lvl: 3,  charm: 4, floor: true, desc: 'Dogs inside play and stay happy on their own. +4 charm.' },
+  { id: 'napmat',     cat: 'fun',   name: 'Nap Mat',         icon: '🛏️', w: 2, h: 1, cost: 320,  time: 10800,  lvl: 4,  charm: 3, floor: true, desc: 'Dogs resting here lose needs slower and nap happily. +3 charm.' },
+  { id: 'sandpit',    cat: 'fun',   name: 'Sand Pit',        icon: '🏖️', w: 2, h: 2, cost: 640,  time: 28800,  lvl: 5,  charm: 5, floor: true, desc: 'Great fun to dig in. +5 charm.' },
+  { id: 'pool',       cat: 'fun',   name: 'Splash Pool',     icon: '🏊', w: 3, h: 2, cost: 1350, time: 64800,  lvl: 6,  charm: 8, floor: true, desc: 'Fun and cooling. Water Babies adore it. +8 charm.' },
+  { id: 'agility',    cat: 'fun',   name: 'Agility Course',  icon: '🚧', w: 4, h: 2, cost: 2400, time: 108000, lvl: 8,  charm: 12, floor: true, desc: 'High-energy obstacle course (30h build). +12 charm.' },
+  { id: 'path',       cat: 'decor', name: 'Stone Path',      icon: '🪨', w: 1, h: 1, cost: 20,   time: 300,    lvl: 1,  charm: 0.25, floor: true, desc: 'A tidy stepping-stone path.' },
+  { id: 'flowers',    cat: 'decor', name: 'Flower Bed',      icon: '🌷', w: 1, h: 1, cost: 45,   time: 600,    lvl: 1,  charm: 1, floor: true, desc: '+1 charm (upgradeable).' },
+  { id: 'hydrant',    cat: 'decor', name: 'Fire Hydrant',    icon: '🧯', w: 1, h: 1, cost: 75,   time: 900,    lvl: 1,  charm: 1, solid: true, desc: '+1 charm (upgradeable).' },
+  { id: 'bush',       cat: 'decor', name: 'Berry Bush',      icon: '🌿', w: 1, h: 1, cost: 95,   time: 1500,   lvl: 2,  charm: 2, solid: true, desc: '+2 charm (upgradeable).' },
+  { id: 'bench',      cat: 'decor', name: 'Garden Bench',    icon: '🪑', w: 2, h: 1, cost: 150,  time: 2400,   lvl: 2,  charm: 2, solid: true, desc: '+2 charm (upgradeable).' },
+  { id: 'lamp',       cat: 'decor', name: 'Lamp Post',       icon: '💡', w: 1, h: 1, cost: 180,  time: 3600,   lvl: 3,  charm: 2, solid: true, desc: '+2 charm. Glows at dusk.' },
+  { id: 'tree',       cat: 'decor', name: 'Apple Tree',      icon: '🌳', w: 1, h: 1, cost: 240,  time: 7200,   lvl: 3,  charm: 3, solid: true, desc: '+3 charm (upgradeable).' },
+  { id: 'birdbath',   cat: 'decor', name: 'Bird Bath',       icon: '🐦', w: 1, h: 1, cost: 310,  time: 10800,  lvl: 4,  charm: 3, solid: true, desc: '+3 charm (upgradeable).' },
+  { id: 'topiary',    cat: 'decor', name: 'Dog Topiary',     icon: '🐩', w: 1, h: 1, cost: 460,  time: 21600,  lvl: 5,  charm: 4, solid: true, desc: '+4 charm. Shaped like a very good dog.' },
+  { id: 'picnic',     cat: 'decor', name: 'Picnic Table',    icon: '🧺', w: 2, h: 2, cost: 580,  time: 28800,  lvl: 6,  charm: 5, solid: true, desc: '+5 charm (upgradeable).' },
+  { id: 'statue',     cat: 'decor', name: 'Golden Bone',     icon: '🦴', w: 1, h: 1, cost: 850,  time: 43200,  lvl: 7,  charm: 7, solid: true, desc: '+7 charm (upgradeable).' },
+  { id: 'pond',       cat: 'decor', name: 'Lily Pond',       icon: '🪷', w: 3, h: 2, cost: 1600, time: 64800,  lvl: 9,  charm: 10, solid: true, desc: '+10 charm (upgradeable).' },
+  { id: 'fountain',   cat: 'decor', name: 'Fountain',        icon: '⛲', w: 2, h: 2, cost: 2200, time: 86400,  lvl: 10, charm: 12, solid: true, desc: '+12 charm (upgradeable).' },
+  { id: 'gazebo',     cat: 'decor', name: 'Gazebo',          icon: '🏛️', w: 3, h: 3, cost: 4800, time: 172800, lvl: 12, charm: 20, solid: true, desc: '+20 charm. The crown jewel of the daycare.' },
 ];
 
 // In-world floor unlock pads (only appear in newly expanded land plots — starter lawn is 100% empty so you place buildings yourself!)
 var UNLOCK_PADS = [
   // Unlocked when North Lawn ('north') is expanded!
   { id: 'pad_n_sand',    plot: 'north',     kind: 'obj',   type: 'sandpit',    x: 20, y: 13, ignoreLvl: true },
+  { id: 'pad_n_kitchen', plot: 'north',     kind: 'obj',   type: 'kitchen',    x: 27, y: 9,  ignoreLvl: true, uniqueType: true },
   { id: 'pad_n_feeder',  plot: 'north',     kind: 'staff', staffId: 'feeder',  x: 24, y: 14, w: 2, h: 2 },
   { id: 'pad_n_picnic',  plot: 'north',     kind: 'obj',   type: 'picnic',     x: 27, y: 13, ignoreLvl: true },
   { id: 'pad_n_agility', plot: 'north',     kind: 'obj',   type: 'agility',    x: 22, y: 8,  ignoreLvl: true },
   // Unlocked when East Meadow ('east') is expanded!
+  { id: 'pad_e_groomh',  plot: 'east',      kind: 'obj',   type: 'groomhouse', x: 35, y: 19, ignoreLvl: true, uniqueType: true },
   { id: 'pad_e_pool',    plot: 'east',      kind: 'obj',   type: 'pool',       x: 35, y: 22, ignoreLvl: true },
   { id: 'pad_e_groomer', plot: 'east',      kind: 'staff', staffId: 'groomer', x: 33, y: 25, w: 2, h: 2 },
   { id: 'pad_e_trainer', plot: 'east',      kind: 'staff', staffId: 'trainer', x: 39, y: 20, w: 2, h: 2 },
@@ -150,6 +158,7 @@ CATALOG.forEach(function (c) { CAT_BY_ID[c.id] = c; });
 var UPGRADES = [
   { id: 'sneakers',   name: 'Comfy Sneakers',       icon: '👟', cost: 280,  lvl: 2, desc: '+8% walk speed per level.' },
   { id: 'scooper',    name: 'Carry Harness',        icon: '🎒', cost: 340,  lvl: 2, desc: '+1 carry stack capacity (bowls, toys, poop) per level.' },
+  { id: 'builders',   name: 'Builder Crew',         icon: '👷', cost: 480,  lvl: 3, desc: '+1 simultaneous build, upgrade or land clearing slot per level.' },
   { id: 'flyers',     name: 'Town Flyers',          icon: '📣', cost: 420,  lvl: 3, desc: '+10% customer arrival rate per level.' },
   { id: 'kibble',     name: 'Gourmet Kibble',       icon: '🥩', cost: 520,  lvl: 3, desc: '+5 extra happiness from every meal per level.' },
   { id: 'lounge',     name: 'Cosy Waiting Area',    icon: '🛋️', cost: 680,  lvl: 4, desc: 'Owners wait +18% longer per level.' },
@@ -157,6 +166,15 @@ var UPGRADES = [
   { id: 'nightstaff', name: 'Overnight Suite Care', icon: '🌙', cost: 1200, lvl: 6, desc: 'Overnight guests wake up happy & pay +15% per level.' },
   { id: 'webcam',     name: 'HD Pup Cam',           icon: '📷', cost: 1650, lvl: 8, desc: '+12% base boarding pay per level.' },
 ];
+
+// ---------- Paw Heart (💛) cozy care rewards (earned through loving care, PAWSOME pickups, breeds & co-op!) ----------
+var HEART_PERKS = [
+  { id: 'build_boost', name: 'Builder Speed Boost',  icon: '🔨', hearts: 8,  desc: 'Shave 1 full hour off your current active build, upgrade or land expansion!' },
+  { id: 'joy_party',   name: 'Pack Joy Treat Party', icon: '🎉', hearts: 10, desc: 'Boost every dog in the yard to 100% happiness, spark playful romps & +0.20★ Rating!' },
+  { id: 'vip_magnet',  name: 'VIP Guest Magnet',     icon: '⭐', hearts: 15, desc: 'Guarantees a rare Special Guest on the next eligible arrival today!' },
+];
+var HEART_PERK_BY_ID = {};
+HEART_PERKS.forEach(function (h) { HEART_PERK_BY_ID[h.id] = h; });
 // ---------- staff you can hire as you expand your business (paid per day, at closing time) ----------
 var STAFF = [
   { id: 'receptionist', name: 'Receptionist',     icon: '🧑‍💼', wage: 55,  lvl: 2, look: 1, spot: [6.6, 24.3],  desc: 'Moves around the front shop, welcomes drop-off customers, and polishes the counter.' },
