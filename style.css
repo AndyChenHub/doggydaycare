@@ -724,6 +724,12 @@ body.title #modalwrap { background: rgba(30,20,12,.22); }
 .mg-rew.star  { background: #fff6cc; color: #b56c08; }
 .mg-rew.time  { background: #dff5ef; color: #1b6b61; }
 .mg-rew.bad   { background: #ffe3df; color: #b83428; }
+.mg-heat {
+  font-size: 11px; font-weight: 800; border-radius: 8px; padding: 4px 8px;
+  margin: 6px 0 4px; border: 1.5px solid rgba(59,42,32,.25);
+}
+.mg-heat.up   { background: #fff0d6; color: #9c3d0c; border-color: #e69d52; }
+.mg-heat.cool { background: #e3f3ff; color: #1d5d8f; border-color: #7bb9e6; }
 
 /* 6. Safe Snack Inspector */
 .mg-sort-card {

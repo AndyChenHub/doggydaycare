@@ -127,17 +127,45 @@ var MINIGAMES = (function () {
     } catch (e) {}
   }
 
+  var MAX_HEAT = 10;
+
+  function getHeat() {
+    var h = (typeof S !== 'undefined' && S && S.life && typeof S.life.mgHeat === 'number' && isFinite(S.life.mgHeat))
+      ? S.life.mgHeat : 0;
+    return Math.max(0, Math.min(MAX_HEAT, h));
+  }
+
+  function setHeat(val) {
+    var clamped = Math.max(0, Math.min(MAX_HEAT, Math.round(val * 100) / 100));
+    if (typeof S !== 'undefined' && S) {
+      if (!S.life) S.life = {};
+      S.life.mgHeat = clamped;
+    }
+    return clamped;
+  }
+
+  // Adaptive difficulty odds:
+  // Baseline (heat = 0): 60% Easy / 25% Medium / 15% Hard
+  // Winning Easy (+1 heat) / Med (+0.75) / Hard (+0.5) escalates toward harder games (up to 20/40/40)
+  // Failing Hard (-3 heat) / Med (-1.5) / Easy (-1) cools the odds back down
+  function getDifficultyWeights() {
+    var h = getHeat();
+    return {
+      easy:   Math.max(20, 60 - h * 4.0),
+      medium: 25 + h * 1.5,
+      hard:   15 + h * 2.5,
+    };
+  }
+
   function rollDifficulty(forcedId) {
     if (forcedId === 'extreme') forcedId = 'hard';
     if (forcedId && DIFF_BY_ID[forcedId]) return DIFF_BY_ID[forcedId];
-    var tot = 0;
-    for (var i = 0; i < DIFFICULTIES.length; i++) tot += DIFFICULTIES[i].weight;
+    var w = getDifficultyWeights();
+    var tot = w.easy + w.medium + w.hard;
     var r = Math.random() * tot;
-    for (var j = 0; j < DIFFICULTIES.length; j++) {
-      r -= DIFFICULTIES[j].weight;
-      if (r <= 0) return DIFFICULTIES[j];
-    }
-    return DIFFICULTIES[0];
+    if (r < w.easy) return DIFF_BY_ID.easy;
+    if (r < w.easy + w.medium) return DIFF_BY_ID.medium;
+    return DIFF_BY_ID.hard;
   }
 
   function pickNextKind(forcedKind) {
@@ -427,10 +455,22 @@ var MINIGAMES = (function () {
     if (!active || active.finished) return;
     active.finished = true;
     var mg = active;
+    var prevHeat = getHeat();
+    var newHeat = prevHeat;
+    var diffId = mg.diff ? mg.diff.id : 'easy';
     if (S) {
       if (!S.life) S.life = {};
       S.life.mgPlayed = (S.life.mgPlayed || 0) + 1;
       if (won) S.life.mgWon = (S.life.mgWon || 0) + 1;
+      if (won) {
+        if (diffId === 'easy') newHeat = setHeat(prevHeat + 1);
+        else if (diffId === 'medium') newHeat = setHeat(prevHeat + 0.75);
+        else newHeat = setHeat(prevHeat + 0.5);
+      } else {
+        if (diffId === 'hard') newHeat = setHeat(prevHeat - 3);
+        else if (diffId === 'medium') newHeat = setHeat(prevHeat - 1.5);
+        else newHeat = setHeat(prevHeat - 1);
+      }
     }
 
     var cash = info.cash || 0;
@@ -520,6 +560,16 @@ var MINIGAMES = (function () {
       if (fChips.length) rewardsHtml = '<div class="mg-rew-row">' + fChips.join('') + '</div>';
     }
 
+    var wNow = getDifficultyWeights();
+    var heatNoteHtml = '';
+    if (newHeat > prevHeat) {
+      heatNoteHtml = '<div class="mg-heat up">🔥 Challenge rising! Next odds: ' +
+        Math.round(wNow.easy) + '% Easy · ' + Math.round(wNow.medium) + '% Med · ' + Math.round(wNow.hard) + '% Hard</div>';
+    } else if (newHeat < prevHeat) {
+      heatNoteHtml = '<div class="mg-heat cool">🧊 Challenge cooled down! Next odds: ' +
+        Math.round(wNow.easy) + '% Easy · ' + Math.round(wNow.medium) + '% Med · ' + Math.round(wNow.hard) + '% Hard</div>';
+    }
+
     var card = document.querySelector('#modal .card');
     if (card) {
       card.innerHTML =
@@ -529,6 +579,7 @@ var MINIGAMES = (function () {
           '<h2>' + esc(info.headline || (won ? 'Challenge Complete!' : 'Challenge Failed!')) + '</h2>' +
           '<p>' + esc(info.detail || '') + '</p>' +
           rewardsHtml +
+          heatNoteHtml +
           '<div class="row"><button id="mgDoneBtn" class="primary big">Back to Daycare</button></div>' +
         '</div>';
       var doneBtn = document.getElementById('mgDoneBtn');
@@ -2075,6 +2126,7 @@ var MINIGAMES = (function () {
     startCountdown: startCountdown,
     launch: launch,
     rollDifficulty: rollDifficulty,
+    getDifficultyWeights: getDifficultyWeights,
     generateMathQuestion: generateMathQuestion,
     buildAuditQuestions: buildAuditQuestions,
     DIFFICULTIES: DIFFICULTIES,
@@ -2086,5 +2138,6 @@ var MINIGAMES = (function () {
     get activeKind() { return active ? active.kind : null; },
     get activeDiff() { return active && active.diff ? active.diff.id : null; },
     get rollTimer() { return rollTimer; },
+    get heat() { return getHeat(); },
   };
 })();

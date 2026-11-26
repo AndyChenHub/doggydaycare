@@ -4227,11 +4227,12 @@ function sanitizeAndMigrateState(s) {
     }
   }
 
-  var defLife = { earned: 0, hearts: 0, served: 0, perfect: 0, complaints: 0, overnights: 0, bestPerfectDay: 0, care: 0 };
+  var defLife = { earned: 0, hearts: 0, served: 0, perfect: 0, complaints: 0, overnights: 0, bestPerfectDay: 0, care: 0, mgPlayed: 0, mgWon: 0, mgHeat: 0 };
   if (!s.life || typeof s.life !== 'object') s.life = defLife;
   else {
     for (var lk in defLife) s.life[lk] = _isnum(s.life[lk]) ? s.life[lk] : defLife[lk];
   }
+  s.life.mgHeat = clamp(s.life.mgHeat || 0, 0, 10);
 
   // Tutorial, upgrades, staff, staffLvl, franchiseTier, milestones, dailyEvent, specials
   if (!s.tutorial || typeof s.tutorial !== 'object' || Array.isArray(s.tutorial)) s.tutorial = {};

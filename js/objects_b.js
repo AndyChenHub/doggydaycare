@@ -2063,6 +2063,405 @@ OB_def('rainbow', [-4, -36, 148, 50], function (c, o, t, env, id) {
   light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 1.5) * T, y: ((+o.y || 0) + 0.1) * T, r: T * 3.6, color: '#ffe8b8' }; },
 });
 
+/* ===================================== FLOOR: wooden decking ======================================== */
+function OB_woodDeckArt(c, variant) {
+  var plankCols = ['#c9925a', '#bf874e', '#d29c64', '#b87f47'];
+  c.fillStyle = '#5e3c22';
+  c.fillRect(-0.5, -0.5, 49, 49);
+  for (var i = 0; i < 4; i++) {
+    var py = 0.6 + i * 12;
+    OB_rr(c, 0.5, py, 47, 10.6, 1.5);
+    c.fillStyle = plankCols[(i + variant) % plankCols.length]; c.fill();
+    c.fillStyle = 'rgba(255,240,210,0.22)'; c.fillRect(1.5, py + 1, 45, 2.2);
+    c.fillStyle = 'rgba(65,36,16,0.20)'; c.fillRect(1.5, py + 8.4, 45, 1.6);
+    OB_line(c, 4, py + 5.2, 44, py + 5.4, 'rgba(90,54,24,0.22)', 0.9);
+    // Nail heads at ends
+    OB_dot(c, 4.5, py + 3.2, 1.0, '#4f331e'); OB_dot(c, 4.5, py + 7.4, 1.0, '#4f331e');
+    OB_dot(c, 43.5, py + 3.2, 1.0, '#4f331e'); OB_dot(c, 43.5, py + 7.4, 1.0, '#4f331e');
+    OB_rr(c, 0.5, py, 47, 10.6, 1.5); OB_s(c, 'rgba(59,42,32,0.72)', 1.0);
+  }
+}
+OB_def('wooddeck', [-2, -2, 50, 50], function (c, o) {
+  var v = ((Math.floor(+o.x || 0) + Math.floor(+o.y || 0)) % 4 + 4) % 4;
+  OB_layer(c, 'wdeck' + v, -2, -2, 50, 50, function (g) { OB_woodDeckArt(g, v); });
+});
+
+/* ===================================== FLOOR: clover meadow ========================================= */
+function OB_cloverLeaf(c, x, y, r, four) {
+  var n = four ? 4 : 3;
+  for (var i = 0; i < n; i++) {
+    var a = i * OB_TAU / n + 0.3;
+    OB_ell(c, x + Math.cos(a) * r * 0.65, y + Math.sin(a) * r * 0.55, r * 0.55, r * 0.45, a);
+    OB_fo(c, four ? '#59b84d' : (i % 2 ? '#43963c' : '#53a948'), 0.9);
+  }
+  OB_dot(c, x, y, 1.1, '#a9e88a');
+}
+function OB_cloverArt(c) {
+  OB_ell(c, 24, 27, 21, 15); c.fillStyle = 'rgba(56,138,48,0.30)'; c.fill();
+  OB_cloverLeaf(c, 13, 21, 5.2, false);
+  OB_cloverLeaf(c, 34, 19, 5.0, false);
+  OB_cloverLeaf(c, 15, 34, 5.4, false);
+  OB_cloverLeaf(c, 33, 34, 5.2, false);
+  OB_cloverLeaf(c, 24, 26, 6.2, true);
+}
+OB_def('clover', [0, 6, 48, 46], function (c, o, t, env, id) {
+  OB_layer(c, 'clover', 0, 6, 48, 46, OB_cloverArt);
+  var tw = Math.sin(t * 2.6 + id * 1.9);
+  if (tw > 0.55) OB_sparkle(c, 24, 24, (tw - 0.55) * 9, '#fff9c4', 0.9);
+}, { iconBounds: { x0: 2, y0: 8, x1: 46, y1: 44 } });
+
+/* ===================================== SOLID: white picket fence ==================================== */
+function OB_picketArt(c) {
+  OB_shadow(c, 24, 42, 22, 5.5);
+  // Horizontal rails
+  OB_rr(c, 0, 20, 48, 5, 1.5); OB_fo(c, '#ebe4d5', 1.4);
+  OB_rr(c, 0, 32, 48, 5, 1.5); OB_fo(c, '#dfd6c5', 1.4);
+  // 4 pointed white pickets
+  var xs = [4, 16, 28, 40];
+  for (var i = 0; i < xs.length; i++) {
+    var x = xs[i];
+    OB_poly(c, [x, 41, x, 13, x + 3.5, 7, x + 7, 13, x + 7, 41]);
+    OB_fo(c, '#fdfaf2', 1.5);
+    c.fillStyle = '#e6decb'; c.fillRect(x + 4.4, 13, 1.9, 27);
+  }
+  // Tiny trailing green vine & blossom
+  c.beginPath(); c.moveTo(7, 36); c.quadraticCurveTo(18, 25, 33, 22); OB_s(c, '#4f9946', 1.8);
+  OB_dot(c, 15, 29, 2.3, '#64b358'); OB_dot(c, 24, 24, 2.3, '#64b358');
+  OB_dot(c, 29, 22, 2.2, '#f59ab7'); OB_dot(c, 29, 22, 0.8, '#f2c14e');
+}
+OB_def('picket', [-2, 2, 50, 49], function (c) {
+  OB_layer(c, 'picket', -2, 2, 50, 49, OB_picketArt);
+}, { iconBounds: { x0: 0, y0: 4, x1: 48, y1: 47 } });
+
+/* ===================================== SOLID: paw park signpost ===================================== */
+function OB_signpostArt(c) {
+  OB_shadow(c, 24, 42, 14, 5.5);
+  OB_ell(c, 24, 40, 8.5, 4); OB_fo(c, '#a8a196', 1.5);
+  // Main timber post
+  OB_rr(c, 21, -2, 6, 42, 2); OB_fo(c, '#8c5630', 1.6);
+  // Top arrow pointing right
+  OB_poly(c, [10, 2, 36, 2, 43, 7, 36, 12, 10, 12]); OB_fo(c, '#e6b873', 1.5);
+  OB_line(c, 14, 7, 34, 7, '#6b3f1e', 1.5);
+  // Lower arrow pointing left
+  OB_poly(c, [38, 15, 12, 15, 5, 20, 12, 25, 38, 25]); OB_fo(c, '#d7a158', 1.5);
+  OB_line(c, 14, 20, 34, 20, '#6b3f1e', 1.5);
+  // Paw badge cap on post
+  OB_ell(c, 24, -4, 6.2, 6.2); OB_fo(c, '#f2c14e', 1.4);
+  OB_dot(c, 24, -3, 2.1, '#7a4722');
+  OB_dot(c, 21.8, -5.6, 1.0, '#7a4722'); OB_dot(c, 24, -6.5, 1.0, '#7a4722'); OB_dot(c, 26.2, -5.6, 1.0, '#7a4722');
+}
+OB_def('signpost', [2, -13, 46, 49], function (c, o, t, env, id) {
+  OB_layer(c, 'signpost', 2, -13, 46, 49, OB_signpostArt);
+  // Tiny swinging wooden bone tag underneath right arrow
+  var sw = Math.sin(t * 2.2 + id) * 1.6 + env.wind * 2.8;
+  OB_line(c, 34, 12, 34 + sw, 17, '#5a3a22', 1.1);
+  OB_rr(c, 30.5 + sw, 16.5, 7, 2.6, 1.2); OB_fo(c, '#fff6de', 1.0);
+}, { iconBounds: { x0: 3, y0: -11, x1: 45, y1: 47 } });
+
+/* ===================================== SOLID: cedar planter box (2x1) =============================== */
+function OB_planterArt(c) {
+  OB_shadow(c, 48, 42, 43, 7);
+  // Cedar wooden trough
+  OB_rr(c, 6, 20, 84, 21, 4); OB_fo(c, '#a86b3a', 1.7);
+  OB_line(c, 7, 27, 89, 27, '#754622', 1.2);
+  OB_line(c, 7, 34, 89, 34, '#754622', 1.2);
+  // Dark metal corner straps
+  c.fillStyle = '#4e4741'; c.fillRect(10, 20, 4, 21); c.fillRect(82, 20, 4, 21);
+  OB_rr(c, 4, 17, 88, 5.5, 2); OB_fo(c, '#c4834b', 1.6);
+  // Rich foliage & lavender + marigold blooms
+  OB_foliage(c, [
+    [16, 14, 10, 7.5], [32, 12, 12, 8.5], [48, 13, 13, 8.5], [64, 12, 12, 8.5], [80, 14, 10, 7.5],
+  ], ['#2e6630', '#4f9946', '#72bd62', '#95db82'], 421, { density: 26, leaf: 2.2 });
+  // Lavender spikes & bright marigolds
+  var lav = [18, 25, 44, 52, 72, 79];
+  for (var i = 0; i < lav.length; i++) {
+    OB_ell(c, lav[i], 5 + (i % 2) * 2, 2.6, 6.2); OB_fo(c, '#9a74d6', 1.0);
+    OB_dot(c, lav[i], 3 + (i % 2) * 2, 1.3, '#cbb2f5');
+  }
+  var mar = [[31, 10], [37, 13], [59, 10], [65, 13], [48, 8]];
+  for (var j = 0; j < mar.length; j++) {
+    OB_ell(c, mar[j][0], mar[j][1], 4.0, 3.4); OB_fo(c, j % 2 ? '#f7a531' : '#ffd24c', 1.1);
+    OB_dot(c, mar[j][0], mar[j][1], 1.3, '#c85a17');
+  }
+}
+OB_def('planter', [0, -6, 96, 50], function (c) {
+  OB_layer(c, 'planter', 0, -6, 96, 50, OB_planterArt);
+}, { iconBounds: { x0: 2, y0: -4, x1: 94, y1: 48 } });
+
+/* ===================================== SOLID: bark mailbox ========================================== */
+function OB_mailboxArt(c) {
+  OB_shadow(c, 24, 42, 14, 5.5);
+  // Post
+  OB_rr(c, 21, 16, 6, 26, 2); OB_fo(c, '#8c5530', 1.6);
+  // Rounded sky-blue mailbox body
+  OB_shape(c, function () {
+    c.beginPath(); c.moveTo(10, 20); c.lineTo(10, 7); c.arc(17, 7, 7, Math.PI, 0);
+    c.lineTo(38, 0); c.lineTo(38, 20); c.closePath();
+  }, '#579ad1', function () {
+    c.fillStyle = '#3d7bb0'; c.fillRect(10, 14, 29, 7);
+  }, 1.7);
+  // Front door with envelopes peeking out!
+  OB_rr(c, 7, 9, 9, 11, 2); OB_fo(c, '#3d7bb0', 1.4);
+  OB_poly(c, [9, 11, 19, 8, 19, 14, 9, 16]); OB_fo(c, '#fffdf2', 1.1);
+  OB_line(c, 9, 11, 14, 13.5, '#d9574a', 1.0);
+  // Little paw decal on side
+  OB_dot(c, 27, 11, 2.2, '#fff6d8');
+  OB_dot(c, 25, 8.2, 1.0, '#fff6d8'); OB_dot(c, 27, 7.6, 1.0, '#fff6d8'); OB_dot(c, 29, 8.2, 1.0, '#fff6d8');
+}
+OB_def('mailbox', [2, -8, 46, 49], function (c, o, t, env, id) {
+  OB_layer(c, 'mailbox', 2, -8, 46, 49, OB_mailboxArt);
+  // Little red flag gently wags up when mail arrives
+  var ang = -0.35 + Math.sin(t * 1.8 + id) * 0.25;
+  c.save(); c.translate(32, 12); c.rotate(ang);
+  OB_line(c, 0, 0, 0, -11, OB_OUT, 2.2);
+  OB_rr(c, 0, -12, 7.5, 4.5, 1); OB_fo(c, '#e04f44', 1.1);
+  c.restore();
+}, { iconBounds: { x0: 4, y0: -6, x1: 44, y1: 47 } });
+
+/* ===================================== FLOOR: paw print rug (2x2) =================================== */
+function OB_pawRugArt(c) {
+  // Soft woven oval mat with fringe border
+  OB_ell(c, 48, 50, 44, 34); c.fillStyle = 'rgba(40,26,12,0.16)'; c.fill();
+  OB_ell(c, 48, 48, 42, 32); OB_fo(c, '#f6e7cb', 1.8);
+  OB_ell(c, 48, 48, 36, 26); OB_fo(c, '#e59a7a', 1.4);
+  OB_ell(c, 48, 48, 31, 22); OB_fo(c, '#fff6e3', 1.2);
+  // Giant centered paw print motif
+  OB_ell(c, 48, 54, 12.5, 9.5); OB_fo(c, '#c97856', 1.4);
+  var toes = [[34, 43, 5.2, 6.2, -0.35], [43.5, 37.5, 5.0, 6.4, -0.12], [52.5, 37.5, 5.0, 6.4, 0.12], [62, 43, 5.2, 6.2, 0.35]];
+  for (var i = 0; i < toes.length; i++) {
+    var p = toes[i]; OB_ell(c, p[0], p[1], p[2], p[3], p[4]); OB_fo(c, '#c97856', 1.3);
+  }
+}
+OB_def('pawrug', [2, 10, 94, 88], function (c) {
+  OB_layer(c, 'pawrug', 2, 10, 94, 88, OB_pawRugArt);
+}, { iconBounds: { x0: 4, y0: 14, x1: 92, y1: 84 } });
+
+/* ===================================== SOLID: garden tiki torch ===================================== */
+function OB_tikiBaseArt(c) {
+  OB_shadow(c, 24, 42, 11, 4.5);
+  OB_ell(c, 24, 40.5, 7, 3.2); OB_fo(c, '#9c9487', 1.4);
+  // Bamboo stalk with segments
+  OB_rr(c, 21.5, 4, 5, 37, 2); OB_fo(c, '#b88b48', 1.6);
+  OB_line(c, 21, 16, 27, 16, '#755324', 1.6);
+  OB_line(c, 21, 28, 27, 28, '#755324', 1.6);
+  // Woven bamboo torch basket
+  OB_poly(c, [17, -4, 31, -4, 27.5, 9, 20.5, 9]); OB_fo(c, '#a37134', 1.6);
+  OB_line(c, 18.5, 1, 29.5, 1, '#6b451a', 1.2);
+  OB_line(c, 19.5, 5, 28.5, 5, '#6b451a', 1.2);
+}
+OB_def('tiki', [4, -22, 44, 49], function (c, o, t, env, id, ga) {
+  if (env.night > 0.05) {
+    c.globalAlpha = ga * env.night * 0.3;
+    OB_ell(c, 24, 38, 26, 11); c.fillStyle = '#ffa64c'; c.fill();
+    c.globalAlpha = ga;
+  }
+  OB_layer(c, 'tikiBase', 10, -7, 38, 48, OB_tikiBaseArt);
+  // Dancing flame
+  var sw = Math.sin(t * 10 + id) * 2.0 + env.wind * 2.5;
+  c.beginPath(); c.moveTo(19, -4); c.quadraticCurveTo(18, -13, 24 + sw, -20); c.quadraticCurveTo(30, -13, 29, -4); c.closePath();
+  OB_fo(c, '#f26a2e', 1.4);
+  c.beginPath(); c.moveTo(21.2, -4); c.quadraticCurveTo(21, -10, 24 + sw * 0.6, -15); c.quadraticCurveTo(27, -10, 26.8, -4); c.closePath();
+  c.fillStyle = '#ffe066'; c.fill();
+}, {
+  iconBounds: { x0: 10, y0: -20, x1: 38, y1: 47 },
+  light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 0.5) * T, y: ((+o.y || 0) + 0.1) * T, r: T * 2.9, color: '#ffae57' }; },
+});
+
+/* ===================================== SOLID: evergreen pine ======================================== */
+function OB_pineArt(c) {
+  OB_shadow(c, 24, 41, 18, 7);
+  OB_rr(c, 20.5, 28, 7, 13, 2); OB_fo(c, '#6e452a', 1.6);
+  // 3 lush layered pine tiers
+  var tiers = [
+    [6, 33, 24, 12, 42, 33, '#2d6637'],
+    [9, 21, 24, 0, 39, 21, '#367841'],
+    [13, 9, 24, -14, 35, 9, '#448e4f'],
+  ];
+  for (var i = 0; i < tiers.length; i++) {
+    var tr = tiers[i];
+    OB_poly(c, [tr[0], tr[1], tr[2], tr[3], tr[4], tr[5]]); OB_fo(c, tr[6], 1.7);
+    OB_poly(c, [tr[2], tr[3] + 2, tr[4] - 2, tr[5] - 1, tr[2] + 1, tr[5] - 1]);
+    c.fillStyle = 'rgba(20,50,24,0.28)'; c.fill();
+  }
+}
+OB_def('pine', [2, -18, 46, 50], function (c, o, t, env, id, ga) {
+  OB_layer(c, 'pine', 2, -18, 46, 50, OB_pineArt);
+  // Twinkling warm fairy lights at dusk!
+  if (env.night > 0.05) {
+    var pts = [[24, -12, '#ffe066'], [18, 3, '#ff8fb1'], [29, 5, '#80d8ff'], [15, 16, '#ffe066'], [26, 17, '#a7f08c'], [33, 26, '#ff8fb1'], [16, 28, '#80d8ff']];
+    for (var i = 0; i < pts.length; i++) {
+      var tw = 0.6 + Math.sin(t * 3.4 + i * 1.5 + id) * 0.4;
+      c.globalAlpha = ga * env.night * tw;
+      OB_dot(c, pts[i][0], pts[i][1], 4.5, 'rgba(255,240,160,0.42)');
+      OB_dot(c, pts[i][0], pts[i][1], 2.0, pts[i][2]);
+    }
+    c.globalAlpha = ga;
+  }
+}, {
+  iconBounds: { x0: 4, y0: -16, x1: 44, y1: 48 },
+  light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 0.5) * T, y: ((+o.y || 0) + 0.2) * T, r: T * 2.5, color: '#ffe599' }; },
+});
+
+/* ===================================== SOLID: harvest pumpkin patch (2x1) =========================== */
+function OB_pumpkinOne(c, x, y, rx, ry, col) {
+  OB_shadow(c, x, y + ry * 0.82, rx * 1.05, ry * 0.42);
+  OB_ell(c, x - rx * 0.38, y, rx * 0.62, ry * 0.94); OB_fo(c, col, 1.5);
+  OB_ell(c, x + rx * 0.38, y, rx * 0.62, ry * 0.94); OB_fo(c, col, 1.5);
+  OB_ell(c, x, y, rx * 0.58, ry); OB_fo(c, col, 1.5);
+  OB_ell(c, x - rx * 0.16, y - ry * 0.34, rx * 0.22, ry * 0.26); c.fillStyle = 'rgba(255,240,200,0.35)'; c.fill();
+  c.beginPath(); c.moveTo(x - 1.5, y - ry + 1); c.quadraticCurveTo(x, y - ry - 5.5, x + 3.5, y - ry - 4.5);
+  OB_s(c, OB_OUT, 3.6); OB_s(c, '#56853c', 1.8);
+}
+function OB_pumpkinArt(c) {
+  // Curling leafy garden vine
+  c.beginPath(); c.moveTo(10, 35); c.quadraticCurveTo(36, 44, 62, 34); c.quadraticCurveTo(78, 28, 88, 36);
+  OB_s(c, '#49853b', 2.4);
+  OB_ell(c, 16, 36, 6, 3.5, -0.4); OB_fo(c, '#5da348', 1.2);
+  OB_ell(c, 58, 36, 6.5, 3.6, 0.3); OB_fo(c, '#5da348', 1.2);
+  OB_ell(c, 83, 35, 5.5, 3.2, -0.3); OB_fo(c, '#6ab352', 1.2);
+  OB_pumpkinOne(c, 22, 26, 13, 11, '#eb7f2d');
+  OB_pumpkinOne(c, 74, 28, 12, 10, '#f29438');
+  OB_pumpkinOne(c, 48, 24, 16, 13.5, '#e66c24');
+}
+OB_def('pumpkin', [2, 2, 94, 49], function (c, o, t, env, id, ga) {
+  OB_layer(c, 'pumpkin', 2, 2, 94, 49, OB_pumpkinArt);
+  // Friendly carved jack-o'-lantern smile glows softly at dusk!
+  if (env.night > 0.05) {
+    var fl = 0.8 + Math.sin(t * 7 + id) * 0.2;
+    c.globalAlpha = ga * env.night * fl;
+    OB_poly(c, [42, 21, 45.5, 21, 43.8, 18]); c.fillStyle = '#ffe566'; c.fill();
+    OB_poly(c, [50.5, 21, 54, 21, 52.2, 18]); c.fill();
+    c.beginPath(); c.arc(48, 25, 5.5, 0.15 * Math.PI, 0.85 * Math.PI); OB_s(c, '#ffe566', 2.4);
+    c.globalAlpha = ga;
+  }
+}, {
+  iconBounds: { x0: 4, y0: 4, x1: 92, y1: 47 },
+  light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 1.0) * T, y: ((+o.y || 0) + 0.5) * T, r: T * 2.7, color: '#ffbb5c' }; },
+});
+
+/* ===================================== SOLID: frosty pup snowman ==================================== */
+function OB_snowmanArt(c) {
+  OB_shadow(c, 24, 42, 16, 6);
+  // Bottom & middle snowballs
+  OB_ell(c, 24, 33, 13.5, 10.5); OB_fo(c, '#f5faff', 1.6);
+  OB_ell(c, 24, 19, 10.5, 8.8); OB_fo(c, '#ffffff', 1.6);
+  // Stick arms
+  OB_line(c, 14, 19, 5, 13, '#6e452a', 2.2); OB_line(c, 34, 19, 43, 13, '#6e452a', 2.2);
+  // Cozy red scarf
+  OB_rr(c, 15, 11.5, 18, 4.5, 2); OB_fo(c, '#de4e47', 1.3);
+  OB_rr(c, 27, 14, 4.5, 9, 1.5); OB_fo(c, '#de4e47', 1.2);
+  // Coal buttons
+  OB_dot(c, 24, 21, 1.6, '#3b2a20'); OB_dot(c, 24, 27, 1.6, '#3b2a20');
+  // Head with cute floppy snowy dog ears!
+  OB_ell(c, 14.5, 6, 3.6, 6.2, 0.25); OB_fo(c, '#e6f2ff', 1.4);
+  OB_ell(c, 33.5, 6, 3.6, 6.2, -0.25); OB_fo(c, '#e6f2ff', 1.4);
+  OB_ell(c, 24, 5, 8.5, 7.6); OB_fo(c, '#ffffff', 1.6);
+  OB_dot(c, 21.2, 3.5, 1.3, '#2e221b'); OB_dot(c, 26.8, 3.5, 1.3, '#2e221b');
+  OB_poly(c, [24, 5.2, 30.5, 6.8, 24, 8.2]); OB_fo(c, '#f28729', 1.0);
+  // Mini top hat
+  OB_rr(c, 16.5, -3.5, 15, 3, 1.2); OB_fo(c, '#3e424a', 1.3);
+  OB_rr(c, 19, -11, 10, 8, 1.5); OB_fo(c, '#3e424a', 1.4);
+  c.fillStyle = '#de4e47'; c.fillRect(19.5, -5.2, 9, 2);
+}
+OB_def('snowman', [2, -16, 46, 49], function (c, o, t, env, id, ga) {
+  OB_layer(c, 'snowman', 2, -16, 46, 49, OB_snowmanArt);
+  // 3 gentle drifting snowflakes
+  for (var i = 0; i < 3; i++) {
+    var u = OB_fract(t * 0.35 + i * 0.33 + id * 0.19);
+    var sx = 10 + i * 14 + Math.sin(u * 6 + i) * 5 + env.wind * u * 10;
+    var sy = -12 + u * 50;
+    c.globalAlpha = ga * Math.sin(u * Math.PI) * 0.9;
+    OB_dot(c, sx, sy, 1.8, '#ffffff');
+  }
+  c.globalAlpha = ga;
+}, { iconBounds: { x0: 3, y0: -13, x1: 45, y1: 47 } });
+
+/* ===================================== SOLID: porch garden swing (2x1) ============================== */
+function OB_swingFrameArt(c) {
+  OB_shadow(c, 48, 43, 42, 7.5);
+  // Left & right A-frame timber legs
+  OB_line(c, 14, -4, 6, 42, OB_OUT, 6); OB_line(c, 14, -4, 6, 42, '#9a6338', 3.4);
+  OB_line(c, 14, -4, 21, 42, OB_OUT, 6); OB_line(c, 14, -4, 21, 42, '#87532c', 3.4);
+  OB_line(c, 82, -4, 75, 42, OB_OUT, 6); OB_line(c, 82, -4, 75, 42, '#87532c', 3.4);
+  OB_line(c, 82, -4, 90, 42, OB_OUT, 6); OB_line(c, 82, -4, 90, 42, '#9a6338', 3.4);
+  // Top crossbar & striped fabric canopy
+  OB_rr(c, 8, -8, 80, 6, 2.5); OB_fo(c, '#a86b3a', 1.6);
+  OB_poly(c, [6, -6, 16, -18, 80, -18, 90, -6]); OB_fo(c, '#f6ebd4', 1.7);
+  for (var sx = 18; sx < 78; sx += 16) {
+    c.fillStyle = '#5da6a8'; c.fillRect(sx, -17, 8, 10.5);
+  }
+  OB_poly(c, [6, -6, 16, -18, 80, -18, 90, -6]); OB_s(c, OB_OUT, 1.6);
+}
+function OB_swingSeatArt(c) {
+  // Hanging wooden bench with plush cushions
+  OB_rr(c, -26, -12, 52, 13, 3); OB_fo(c, '#c4834b', 1.5);
+  OB_rr(c, -28, -1, 56, 7.5, 3); OB_fo(c, '#b3723c', 1.5);
+  OB_rr(c, -23, -10, 21, 10, 3); OB_fo(c, '#f4a2be', 1.2);
+  OB_rr(c, 2, -10, 21, 10, 3); OB_fo(c, '#ffd875', 1.2);
+}
+OB_def('swing', [0, -22, 96, 51], function (c, o, t, env, id) {
+  OB_layer(c, 'swingFrame', 0, -22, 96, 51, OB_swingFrameArt);
+  var sw = Math.sin(t * 1.55 + id) * 3.2 + env.wind * 2.5;
+  // Chains from top beam to gently swaying seat
+  OB_line(c, 24, -2, 24 + sw, 24, '#5a4a3c', 1.5);
+  OB_line(c, 72, -2, 72 + sw, 24, '#5a4a3c', 1.5);
+  OB_layer(c, 'swingSeat', -30, -14, 30, 10, OB_swingSeatArt, 48 + sw, 28);
+}, { iconBounds: { x0: 2, y0: -20, x1: 94, y1: 48 } });
+
+/* ===================================== SOLID: bronze pup statue ===================================== */
+function OB_pupStatueArt(c) {
+  OB_shadow(c, 24, 42, 17, 6.5);
+  // Marble tiered pedestal
+  OB_rr(c, 9, 34, 30, 8, 2.5); OB_fo(c, '#d8d2c7', 1.6);
+  OB_rr(c, 13, 24, 22, 11, 2); OB_fo(c, '#ebe6dc', 1.6);
+  OB_rr(c, 19, 27.5, 10, 4.5, 1); OB_fo(c, '#e8bc52', 1.1);
+  // Sitting bronze retriever silhouette
+  OB_ell(c, 24, 14, 9.5, 11); OB_fo(c, '#b88240', 1.7);
+  OB_ell(c, 21, 12, 4, 6); c.fillStyle = '#dba55c'; c.fill();
+  // Front paws
+  OB_ell(c, 19, 22.5, 3.6, 2.5); OB_fo(c, '#c99049', 1.3);
+  OB_ell(c, 29, 22.5, 3.6, 2.5); OB_fo(c, '#c99049', 1.3);
+  // Head, floppy ears & snout
+  OB_ell(c, 15.5, 1.5, 3.4, 6.2, 0.22); OB_fo(c, '#99682e', 1.4);
+  OB_ell(c, 32.5, 1.5, 3.4, 6.2, -0.22); OB_fo(c, '#99682e', 1.4);
+  OB_ell(c, 24, 0, 8.2, 7.5); OB_fo(c, '#c99049', 1.6);
+  OB_ell(c, 22, -2.2, 3.5, 2.6); c.fillStyle = '#e8ba74'; c.fill();
+  OB_ell(c, 24, 2.5, 4.2, 3.0); OB_fo(c, '#d69e54', 1.2);
+  OB_dot(c, 24, 1.4, 1.6, '#4f3318');
+}
+OB_def('pupstatue', [4, -12, 44, 49], function (c, o, t, env, id) {
+  OB_layer(c, 'pupStatue', 4, -12, 44, 49, OB_pupStatueArt);
+  var gl = Math.sin(t * 2.2 + id * 1.4);
+  if (gl > 0.55) OB_sparkle(c, 21, -3, (gl - 0.55) * 9, '#fff9d6', 0.95);
+}, { iconBounds: { x0: 6, y0: -10, x1: 42, y1: 47 } });
+
+/* ===================================== FLOOR: walkable party balloon arch (3x1) ===================== */
+function OB_balloonArchBaseArt(c) {
+  // Festive weighted gold stands on left & right feet
+  OB_shadow(c, 14, 40, 11, 4.5); OB_shadow(c, 130, 40, 11, 4.5);
+  OB_rr(c, 7, 32, 14, 9, 3); OB_fo(c, '#f2c14e', 1.5);
+  OB_rr(c, 123, 32, 14, 9, 3); OB_fo(c, '#f2c14e', 1.5);
+  // Subtle confetti dots on ground
+  var cf = [[32, 36, '#ff8fb1'], [48, 39, '#ffd54a'], [72, 37, '#80d8ff'], [96, 39, '#a7f08c'], [110, 35, '#c8a2f8']];
+  for (var i = 0; i < cf.length; i++) OB_dot(c, cf[i][0], cf[i][1], 2.0, cf[i][2]);
+}
+OB_def('balloon', [-4, -36, 148, 50], function (c, o, t, env, id) {
+  OB_layer(c, 'balBase', 0, 24, 144, 49, OB_balloonArchBaseArt);
+  var cols = ['#ff7eb6', '#ffd54a', '#6ec6f5', '#87de78', '#b894f6', '#ff9f68'];
+  var cx = 72, cy = 34, n = 13;
+  for (var i = 0; i < n; i++) {
+    var u = i / (n - 1);
+    var a = Math.PI + u * Math.PI;
+    var bob = Math.sin(t * 2.8 + i * 0.7 + id) * 1.6;
+    var bx = cx + Math.cos(a) * 58 + env.wind * Math.sin(u * Math.PI) * 3;
+    var by = cy + Math.sin(a) * 55 + bob;
+    OB_ell(c, bx, by, 9.2, 10.2, (u - 0.5) * 0.5);
+    OB_fo(c, cols[i % cols.length], 1.5);
+    OB_ell(c, bx - 3, by - 3.5, 2.5, 3.6, -0.3);
+    c.fillStyle = 'rgba(255,255,255,0.52)'; c.fill();
+  }
+}, { iconBounds: { x0: 0, y0: -34, x1: 144, y1: 47 } });
+
 /* ===================================== shop icon =================================================== */
 // Draws any registered object scaled to fit a size x size box whose top-left corner is (x, y).
 // The icon is baked once per (type, size, scale) and then blitted, so it is cheap to call every frame.
