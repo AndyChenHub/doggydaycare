@@ -140,7 +140,7 @@ function enterPlayFromState(fresh) {
   UI.cashShown = S.cash; FX.parts = []; FX.floats = [];
   UI.modalStack = []; $('modalwrap').hidden = true; $('modal').innerHTML = ''; UI.prevMode = 'play'; setMode('play');
   CAM.ready = false; sfx('day_start'); setTimeout(dayBanner, 650);
-  var gift = dailyGift();
+  var gift = isJoiningRoom ? null : dailyGift();
   if (gift) setTimeout(function () { if (UI.mode === 'play' || UI.mode === 'build') showGift(gift); }, 3000);
   if (S.offlineReport) {
     var rep = S.offlineReport; delete S.offlineReport; saveGame();
@@ -150,7 +150,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Tap 🔨 Shop at the bottom to select and place your first Kennel on the lawn!', 'good');
   if (!isJoiningRoom) saveGame();
 }
-var CURRENT_ASSET_VER = '25';
+var CURRENT_ASSET_VER = '26';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();
@@ -216,6 +216,7 @@ function dailyGift() {
   var hearts = 4 + Math.min(S.giftStreak, 7);
   S.cash += amount; S.hearts = (S.hearts || 0) + hearts;
   if (S.life) S.life.hearts = (S.life.hearts || 0) + hearts;
+  if (typeof MP !== 'undefined') MP.recordAction('gift', { earned: amount, name: 'Daily Gift', icon: '🎁' });
   saveGame();
   return { amount: amount, hearts: hearts, streak: S.giftStreak, days: S.playDays };
 }
@@ -350,8 +351,9 @@ var MODAL_ACTS = {
       S.cash -= c2; S.stats.spent += c2;
       if (!o.done) o.buildEnd = Date.now();
       else if (o.upgrading) o.upgradeEnd = Date.now();
-      sfx('buy'); checkBuilds(); saveGame(); renderBuildPanel();
-      if (typeof MP !== 'undefined') MP.recordAction('rush', { item: o.type, name: cName, icon: CAT_BY_ID[o.type].icon, cost: c2 });
+      sfx('buy'); checkBuilds();
+      if (typeof MP !== 'undefined') MP.recordAction('rush', { item: o.type, objId: o.id, name: cName, icon: CAT_BY_ID[o.type].icon, cost: c2 });
+      saveGame(); renderBuildPanel();
     }
   },
   trainstaff: function () {

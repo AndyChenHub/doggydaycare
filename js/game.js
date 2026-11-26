@@ -284,7 +284,15 @@ function newState() {
   return s;
 }
 function newStats(rep) { return { earned: 0, hearts: 0, tips: 0, served: 0, complaints: 0, perfect: 0, repStart: rep, spent: 0, complaintList: [], pets: 0, scoops: 0, baths: 0, feeds: 0, fetches: 0, goalCash: 0, wages: 0 }; }
-function nid() { return S.nextId++; }
+function nid() {
+  var isHost = (typeof MP === 'undefined' || !MP.isSimHost || MP.isSimHost());
+  var id = S.nextId++;
+  // Parity-partition IDs (Host=even, Guest=odd) so simultaneous builds/spawns never collide!
+  if ((id & 1) !== (isHost ? 0 : 1)) {
+    id = S.nextId++;
+  }
+  return id;
+}
 
 function kennelCount(includeBuilding) {
   if (!S || !Array.isArray(S.objects)) return 0;
@@ -856,7 +864,7 @@ function heartBoostSite(o) {
   toast('💛 Boosted ' + cName + ' by 30m (-' + cost + '💛)!', 'good');
   sfx('perfect');
   checkBuilds();
-  if (typeof MP !== 'undefined') MP.recordAction('heartperk', { item: o.type, name: cName + ' (-30m)', icon: '💛' });
+  if (typeof MP !== 'undefined') MP.recordAction('heartperk', { item: o.type, objId: o.id, name: cName + ' (-30m)', icon: '💛' });
   saveGame();
   return true;
 }
@@ -901,7 +909,7 @@ function lendAPaw(objOrPlot) {
   toast('🤝 Lent a Paw to ' + (objOrPlot.startedByName || 'your partner') + '\'s ' + name + ' (-' + fmtDur(shaveSec) + ' & +3💛)!', 'good');
   sfx('perfect'); pEmote('happy', 0.6);
   checkBuilds();
-  if (typeof MP !== 'undefined') MP.recordAction('lend_paw', { name: name, icon: '🤝' });
+  if (typeof MP !== 'undefined') MP.recordAction('lend_paw', { objId: objOrPlot.type ? objOrPlot.id : null, plotId: objOrPlot.type ? null : objOrPlot.id, name: name, icon: '🤝' });
   saveGame();
   return true;
 }
@@ -919,7 +927,7 @@ function cutRibbon(o) {
   toast('🎀 Grand Opening! ' + label + ' Lv ' + (o.lvl || 1) + ' is officially open! (+3💛)', 'good');
   if (typeof showBanner === 'function') showBanner('🎀 Grand Opening!', label + ' Lv ' + (o.lvl || 1) + ' · +3💛 Paw Hearts');
   sfx('level'); pEmote('happy', 0.8);
-  if (typeof MP !== 'undefined') MP.recordAction('ribbon', { item: o.type, name: label, icon: '🎀' });
+  if (typeof MP !== 'undefined') MP.recordAction('ribbon', { item: o.type, objId: o.id, name: label, icon: '🎀' });
   saveGame();
   return true;
 }
@@ -935,7 +943,7 @@ function cutPlotRibbon(pl) {
   toast('🎀 Welcome to ' + name + '! Grand Opening Celebration (+5💛)!', 'good');
   if (typeof showBanner === 'function') showBanner('🎀 ' + name + ' Grand Opening!', '+5💛 Paw Hearts · New unlock pads await!');
   sfx('level'); pEmote('happy', 0.9);
-  if (typeof MP !== 'undefined') MP.recordAction('ribbon', { item: pl.id, name: name, icon: '🎀' });
+  if (typeof MP !== 'undefined') MP.recordAction('ribbon', { item: pl.id, plotId: pl.id, name: name, icon: '🎀' });
   saveGame();
   return true;
 }
@@ -2256,7 +2264,7 @@ function doChore(ch) {
       burst(d.x, d.y - 28, 'heart', 3);
     }
   });
-  if (typeof MP !== 'undefined') MP.recordAction('chore', { name: ch.label, icon: ch.icon, earned: cashGain });
+  if (typeof MP !== 'undefined') MP.recordAction('chore', { choreId: ch.id, name: ch.label, icon: ch.icon, earned: cashGain });
   saveGame();
 }
 function runRepCampaign(kind) {
@@ -2500,7 +2508,7 @@ function updateUnlockPads(dt) {
       burst(ox, oy, 'dust', 18); float(ox, o.y * TILE - 10, '🔨 Building ' + c.name + ' (' + fmtDur(o.buildDur || c.time) + ')', '#ffe082', 1.15);
       toast('🏗️ Started building ' + c.name + ' — finishes in ' + fmtDur(o.buildDur || c.time), 'good');
       sfx('place'); checkStationTut(hit.type);
-      if (typeof MP !== 'undefined') MP.recordAction('build', { item: hit.type, name: c.name, icon: c.icon, cost: c.cost, x: hit.x, y: hit.y });
+      if (typeof MP !== 'undefined') MP.recordAction('build', { item: hit.type, objId: o.id, name: c.name, icon: c.icon, cost: c.cost, x: hit.x, y: hit.y });
       saveGame();
     } else if (hit.kind === 'staff') {
       S.builtPads[hit.id] = true;
@@ -2776,7 +2784,9 @@ function doCheckIn(o) {
   dexSeen(d); if (d.special) specialArrived(d);
   if (!o.byStaff) {
     tut('checkin');
-    if (typeof MP !== 'undefined') MP.recordAction('checkin', { dogName: d.name, breed: breedOf(d).name, overnight: !!d.overnight });
+    if (typeof MP !== 'undefined') MP.recordAction('checkin', { dogId: d.id, ownerId: o.id, dogName: d.name, breed: breedOf(d).name, overnight: !!d.overnight });
+  } else if (typeof MP !== 'undefined' && MP.syncSoon) {
+    MP.syncSoon(true);
   }
   saveGame();
 }
@@ -2785,7 +2795,7 @@ function doLeash(d) {
   if (d.objId) { var ob = objById(d.objId); if (ob) ob.dogId = null; d.objId = null; }
   d.state = 'leashed'; d.path = null; d.anim = null; d.seekObj = null; d.autoRelease = false; d.leashedBy = typeof MP !== 'undefined' ? MP.playerId : null; S.player.carry = { type: 'dog', id: d.id };
   sfx('leash'); float(d.x, d.y - 44, 'Come on, ' + d.name + '!', '#fff');
-  if (typeof MP !== 'undefined') MP.sendWorldSync(false);
+  if (typeof MP !== 'undefined') MP.recordAction('leash', { dogId: d.id, dogName: d.name });
   saveGame();
 }
 function doRelease() {
@@ -2797,7 +2807,7 @@ function doRelease() {
   d.state = 'idle'; d.idleT = 0.8; d.path = null; d.autoRelease = false; d.leashedBy = null;
   if (d.need) { d.idleT = 1e9; } else setAnim(d, 'jump', 0.75);
   sfx('pop'); tut('release');
-  if (typeof MP !== 'undefined') MP.sendWorldSync(false);
+  if (typeof MP !== 'undefined') MP.recordAction('unleash', { dogId: d.id, x: Math.round(d.x), y: Math.round(d.y) });
   saveGame();
 }
 function doPet(d, isBonus) {
@@ -2812,7 +2822,7 @@ function doPet(d, isBonus) {
   boostRep(0.02, d.x, d.y - 70);
   if (d.state !== 'kennel' && d.state !== 'leashed') setAnim(d, 'wiggle', 1.0);
   pEmote('pet', 0.4); tut('pet');
-  if (typeof MP !== 'undefined') MP.recordAction('pet', { dogName: d.name });
+  if (typeof MP !== 'undefined') MP.recordAction('pet', { dogId: d.id, dogName: d.name });
   saveGame();
 }
 function doFeed(d, isBonus) {
@@ -2831,7 +2841,7 @@ function doFeed(d, isBonus) {
   d.state = 'eat'; d.actT = 2.4; d.path = null; d.anim = null; d.poopT = Math.min(d.poopT || 1e9, nextPoopDelay(d, true));
   burst(d.x, d.y - 20, 'crumb', 8); sfx('munch'); gainXP((S.dailyEvent === 'feast' ? 4 : 2) + (hasKit ? 2 : 0)); tut('build_food'); tut('feed'); S.stats.feeds++; if (S.life) S.life.care = (S.life.care || 0) + 1;
   float(d.x, d.y - 48, hasKit ? ('🍲 Chef Meal! +$' + fPay) : fPay ? ('+$' + fPay + ' Feast!') : 'Nom nom!', '#fff'); pEmote('pet', 0.35);
-  if (typeof MP !== 'undefined') MP.recordAction('feed', { dogName: d.name });
+  if (typeof MP !== 'undefined') MP.recordAction('feed', { dogId: d.id, dogName: d.name });
   saveGame();
 }
 function doTreat(d, isBonus) {
@@ -2849,7 +2859,7 @@ function doTreat(d, isBonus) {
   if (d.state === 'wander') { d.state = 'idle'; d.idleT = 1.5; d.path = null; }
   setAnim(d, 'beg', 1.2);
   float(d.x, d.y - 48, hasKit ? ('🥐 Fresh Bake! +$' + trPay) : trPay ? ('+$' + trPay + ' Good trick!') : 'Yum!', '#fff'); pEmote('pet', 0.35);
-  if (typeof MP !== 'undefined') MP.recordAction('treat', { dogName: d.name });
+  if (typeof MP !== 'undefined') MP.recordAction('treat', { dogId: d.id, dogName: d.name });
   saveGame();
 }
 function doPlay(d, isBonus) {
@@ -2866,7 +2876,7 @@ function doPlay(d, isBonus) {
   tut('build_toy');
   FX.parts.push({ x: S.player.x, y: S.player.y - 50, vx: (d.x - S.player.x) * 1.2 + rand(-40, 40), vy: -220, life: 1.1, max: 1.1, kind: 'ball', size: 7, grav: 520 });
   float(d.x, d.y - 48, isBonus ? '+$2 Fetch!!' : 'Fetch!!', '#fff'); pEmote('happy', 0.45);
-  if (typeof MP !== 'undefined') MP.recordAction('play', { dogName: d.name });
+  if (typeof MP !== 'undefined') MP.recordAction('play', { dogId: d.id, dogName: d.name });
   saveGame();
 }
 function doScoop(pp) {
@@ -2875,7 +2885,7 @@ function doScoop(pp) {
   var car = S.player.carry;
   if (car && car.type === 'poop') { car.n = (car.n || 1) + 1; float(pp.x, pp.y - 30, car.n + ' / ' + poopCap(), '#d7ccc8'); }
   else { S.player.carry = { type: 'poop', age: pp.age, n: 1 }; float(pp.x, pp.y - 30, '1 / ' + poopCap(), '#d7ccc8'); }
-  if (typeof MP !== 'undefined') MP.recordAction('scoop', { count: 1 });
+  if (typeof MP !== 'undefined') MP.recordAction('scoop', { poopId: pp.id, x: Math.round(pp.x), y: Math.round(pp.y), count: 1 });
   saveGame();
 }
 function doTrash() {
@@ -2883,7 +2893,7 @@ function doTrash() {
   S.player.carry = null; sfx('trash'); gainXP((1 + stationLvl('trash')) * n); tut('build_trash'); tut('scoop');
   boostRep(0.025 * n, S.player.x, S.player.y - 102);
   float(S.player.x, S.player.y - 80, '+ Clean yard!', '#b9f6ca'); burst(S.player.x, S.player.y - 50, 'sparkle', 8);
-  if (typeof MP !== 'undefined') MP.sendWorldSync(false);
+  if (typeof MP !== 'undefined') MP.recordAction('trash', { count: n });
   saveGame();
 }
 function doWash(ob) {
@@ -2901,7 +2911,7 @@ function doWash(ob) {
   if (isSpa) d.happy = 100;
   boostRep(isSpa ? 0.055 : 0.035, d.x, d.y - 45);
   sfx('splash'); gainXP(Math.round((2 + tLv + (isSpa ? 3 : 0)) * (S.dailyEvent === 'muddy' ? 1.5 : 1))); S.stats.baths++; if (S.life) S.life.care = (S.life.care || 0) + 1; tut('build_tub');
-  if (typeof MP !== 'undefined') MP.recordAction('wash', { dogName: d.name });
+  if (typeof MP !== 'undefined') MP.recordAction('wash', { dogId: d.id, objId: ob.id, dogName: d.name });
   saveGame();
 }
 function doKennel(ob, d) {
@@ -2911,7 +2921,7 @@ function doKennel(ob, d) {
   d.x = (ob.x + ob.w / 2) * TILE; d.y = (ob.y + ob.h - 0.3) * TILE;
   if (d.need && d.need.type !== 'bath') fulfillNeed(d, 'self');
   sfx('pop'); float(d.x, d.y - 70, 'Zzz…', '#e3f2fd');
-  if (typeof MP !== 'undefined') MP.recordAction('kennel', { dogName: d.name });
+  if (typeof MP !== 'undefined') MP.recordAction('kennel', { dogId: d.id, objId: ob.id, dogName: d.name });
   saveGame();
 }
 function doReturn(o) {
@@ -2969,7 +2979,8 @@ function doReturn(o) {
   if (d.kennelId) { var k = objById(d.kennelId); if (k) k.reservedFor = null; d.kennelId = null; }
   o.state = 'walkOut'; o.slot = null; o.route = exitRoute(o);
   tut('return');
-  if (typeof MP !== 'undefined' && !o.byStaff) MP.recordAction('return', { dogName: d.name, earned: total, tip: tip, perfect: h >= 90, complaint: complaint });
+  if (typeof MP !== 'undefined' && !o.byStaff) MP.recordAction('return', { dogId: d.id, ownerId: o.id, dogName: d.name, earned: total, tip: tip, perfect: h >= 90, complaint: complaint });
+  else if (typeof MP !== 'undefined' && MP.syncSoon) MP.syncSoon(true);
   saveGame();
 }
 function fileComplaint(text, repHit) {
@@ -3121,7 +3132,7 @@ function moveObject(o, nx, ny, rot) {
   burst(cx, cy, 'dust', 14);
   float(cx, o.y * TILE - 10, (isJustRotate ? '🔄 Rotated ' : '↔️ Moved ') + (c ? c.name : 'item'), '#80d8ff', 1.15);
   sfx('place');
-  if (typeof MP !== 'undefined') MP.recordAction(isJustRotate ? 'rotate' : 'move', { item: o.type, name: c ? c.name : o.type, icon: c ? c.icon : '↔️', x: nx, y: ny, rot: o.rot });
+  if (typeof MP !== 'undefined') MP.recordAction(isJustRotate ? 'rotate' : 'move', { item: o.type, objId: o.id, name: c ? c.name : o.type, icon: c ? c.icon : '↔️', x: nx, y: ny, rot: o.rot });
   saveGame();
   return true;
 }
@@ -3162,7 +3173,7 @@ function placeBuild(type, x, y, rot) {
   float((x + o.w / 2) * TILE, y * TILE - 12, '-' + fmtMoney(cost), '#ff8a80');
   burst((x + o.w / 2) * TILE, (y + o.h / 2) * TILE, 'dust', 16); sfx('place');
   checkStationTut(type);
-  if (typeof MP !== 'undefined') MP.recordAction('build', { item: type, name: c.name, icon: c.icon, cost: cost, x: x, y: y, rot: o.rot });
+  if (typeof MP !== 'undefined') MP.recordAction('build', { item: type, objId: o.id, name: c.name, icon: c.icon, cost: cost, x: x, y: y, rot: o.rot });
   saveGame();
   return true;
 }
@@ -3206,7 +3217,7 @@ function upgradeObject(o) {
   float(cx, cy - 12, '-' + fmtMoney(cost), '#ff8a80');
   burst(cx, (o.y + o.h / 2) * TILE, 'dust', 14); sfx('place');
   toast('⬆️ Upgrading to ' + title + ' (' + fmtDur(dur) + ' · still usable while upgrading!)', 'good');
-  if (typeof MP !== 'undefined') MP.recordAction('upgrade_obj', { item: o.type, name: title, icon: c.icon, cost: cost, x: o.x, y: o.y, level: nextLv });
+  if (typeof MP !== 'undefined') MP.recordAction('upgrade_obj', { item: o.type, objId: o.id, name: title, icon: c.icon, cost: cost, x: o.x, y: o.y, level: nextLv });
   saveGame();
   return true;
 }
@@ -3230,7 +3241,7 @@ function sellObject(o) {
   float((o.x + o.w / 2) * TILE, o.y * TILE, '+' + fmtMoney(val), '#ffe66d');
   burst((o.x + o.w / 2) * TILE, (o.y + o.h / 2) * TILE, 'dust', 14); sfx('sell');
   S.dogs.forEach(function (d) { d.path = null; if (d.seekObj === o.id) d.seekObj = null; });
-  if (typeof MP !== 'undefined') MP.recordAction('sell', { item: o.type, name: c ? c.name : o.type, icon: c ? c.icon : '💸', earned: val });
+  if (typeof MP !== 'undefined') MP.recordAction('sell', { item: o.type, objId: o.id, name: c ? c.name : o.type, icon: c ? c.icon : '💸', earned: val });
   saveGame();
 }
 // a plot can only be bought if it touches land that is already owned (or being cleared)
@@ -3252,7 +3263,7 @@ function buyPlot(p) {
   var unlTxt = (p.unlocks && p.unlocks.length) ? ' · Unlocks: ' + p.unlocks.join(', ') : '';
   toast('🚜 Expanding ' + p.name + ' — ready in ' + fmtDur(p.time) + unlTxt, 'good');
   markDirty(p);
-  if (typeof MP !== 'undefined') MP.recordAction('plot', { item: p.id, name: p.name, icon: '🗺️', cost: p.cost });
+  if (typeof MP !== 'undefined') MP.recordAction('plot', { item: p.id, plotId: p.id, name: p.name, icon: '🗺️', cost: p.cost });
   saveGame();
 }
 function buyUpgrade(u) {
@@ -3383,7 +3394,8 @@ function update(dt) {
     }
     if (S.dayTime >= D) { S.dayTime = D; S.closing = true; toast('🌇 Closing time! Finish the last pickups.', ''); sfx('day_end'); }
   }
-  if (!S.closing && S.dayTime < D - 55) {
+  var simHost = (typeof MP === 'undefined' || !MP.isSimHost || MP.isSimHost());
+  if (simHost && !S.closing && S.dayTime < D - 55) {
     if (!S.tutorialDone && S.dogs.length >= 1) {
       S.arrivalTimer = 6;
     } else {
@@ -3392,26 +3404,32 @@ function update(dt) {
         var atCounter = 0;
         for (i = 0; i < S.owners.length; i++) if (S.owners[i].state !== 'walkOut') atCounter++; // keep the queue at the counter short
         var canArrive = dayPhase().id !== 'pickup' || activeDogCount() === 0;
-        if (canArrive && atCounter < 3 && activeDogCount() < capacity() && spawnArrival()) scheduleArrival(); else S.arrivalTimer = 4;
+        if (canArrive && atCounter < 3 && activeDogCount() < capacity() && spawnArrival()) {
+          scheduleArrival();
+          if (typeof MP !== 'undefined' && MP.syncSoon) MP.syncSoon(false);
+        } else S.arrivalTimer = 4;
       }
     }
   }
-  for (i = 0; i < S.dogs.length; i++) {
-    var d = S.dogs[i];
-    if (!d.checkedIn || d.called || d.state === 'leaving') continue;
-    var due = (d.pickupDay < S.day) || (d.pickupDay === S.day && (S.dayTime >= d.pickupAt || (S.closing && !d.overnight)));
-    if (due && freeSlot() >= 0) {
-      var o = makeOwner('pickup', d); if (!o) continue;
-      d.called = true; o.patienceMax = o.patience = 95 * patienceMul();
+  if (simHost) {
+    for (i = 0; i < S.dogs.length; i++) {
+      var d = S.dogs[i];
+      if (!d.checkedIn || d.called || d.state === 'leaving') continue;
+      var due = (d.pickupDay < S.day) || (d.pickupDay === S.day && (S.dayTime >= d.pickupAt || (S.closing && !d.overnight)));
+      if (due && freeSlot() >= 0) {
+        var o = makeOwner('pickup', d); if (!o) continue;
+        d.called = true; o.patienceMax = o.patience = 95 * patienceMul();
+        if (typeof MP !== 'undefined' && MP.syncSoon) MP.syncSoon(false);
+      }
     }
+    updateDirector(dt);
+    updateChores(dt);
+    updateRandomRepEvents(dt);
   }
-  updateDirector(dt);
-  updateChores(dt);
-  updateRandomRepEvents(dt);
   updateAdvisorHints(dt);
   updatePlayer(dt);
   updateDwell(dt);
-  updateNPCs(dt);
+  if (simHost) updateNPCs(dt);
   n = S.owners.length; _iterOwners.length = n;
   for (i = 0; i < n; i++) _iterOwners[i] = S.owners[i];
   for (i = 0; i < n; i++) updateOwner(_iterOwners[i], dt);
@@ -3421,20 +3439,22 @@ function update(dt) {
   for (i = 0; i < S.poops.length; i++) {
     var pp = S.poops[i];
     pp.age += dt;
-    if (S.tutorialDone && pp.age > 20 && now - (pp.repHitAt || -99) >= 14) {
+    if (simHost && S.tutorialDone && pp.age > 20 && now - (pp.repHitAt || -99) >= 14) {
       pp.repHitAt = now;
       dropRep(0.09, '💩 Customers noticed unscooped poop on the lawn!', pp.x, pp.y - 32);
     }
   }
-  checkGoals();
-  if (S.closing) {
-    var pending = S.owners.length > 0, dueOvernight = false;
-    for (i = 0; i < S.dogs.length; i++) {
-      var dg = S.dogs[i];
-      if (!dg.overnight || dg.state === 'leaving' || dg.called) pending = true;
-      if (dg.overnight && dg.checkedIn && dg.pickupDay <= S.day) dueOvernight = true;
+  if (simHost) {
+    checkGoals();
+    if (S.closing) {
+      var pending = S.owners.length > 0, dueOvernight = false;
+      for (i = 0; i < S.dogs.length; i++) {
+        var dg = S.dogs[i];
+        if (!dg.overnight || dg.state === 'leaving' || dg.called) pending = true;
+        if (dg.overnight && dg.checkedIn && dg.pickupDay <= S.day) dueOvernight = true;
+      }
+      if (!pending && !dueOvernight) endDay();
     }
-    if (!pending && !dueOvernight) endDay();
   }
   if (typeof MP !== 'undefined') MP.update(dt);
   updateFX(dt);
@@ -3583,9 +3603,14 @@ function moveTo(e, tx, ty, sp, dt) {
 function playerOnMat() { return inRect(S.player.x, S.player.y, ACTION_BOX); }
 
 function updateOwner(o, dt) {
+  var simHost = (typeof MP === 'undefined' || !MP.isSimHost || MP.isSimHost());
   o.sayT -= dt; if (o.emote) { o.emoteT += dt; if (o.emoteT > 1.6 && o.emote !== 'angry' && o.emote !== 'impatient' && o.emote !== 'handover') o.emote = null; }
   var d = dogById(o.dogId), dName = d ? d.name : 'a pup';
   if (o.moving) o.walkT += dt;
+  if (!simHost && o.state !== 'handover' && o.state !== 'toHandover') {
+    // Non-host lets Host drive walkIn/walkOut/patience/complaints; only local handover & walkOut animation runs here
+    return;
+  }
   if (o.state === 'walkIn' || o.state === 'walkOut' || o.state === 'toHandover') {
     if (!Array.isArray(o.route) || !o.route.length || !Array.isArray(o.route[0])) {
       if (o.state === 'walkIn') o.route = [[QUEUE[o.slot || 0][0] * TILE, QUEUE[o.slot || 0][1] * TILE]];
@@ -3684,8 +3709,25 @@ function updateOwner(o, dt) {
 }
 
 function updateDog(d, dt) {
+  var simHost = (typeof MP === 'undefined' || !MP.isSimHost || MP.isSimHost());
   d.petCd -= dt; d.mood -= dt; d.bark -= dt;
   if (d.state === 'arriving' || d.state === 'leaving') return;
+  if (!simHost) {
+    // On non-host Guest: keep animations, muddy coat visual, bath/play particles, and leashed-dog following silky-smooth while Host drives AI/needs/poops!
+    if (d.needs) d.needs.clean = d.need && d.need.type === 'bath' ? 12 : 90;
+    if (d.anim) { d.animT += dt; if (d.animDur > 0 && d.animT > d.animDur) d.anim = null; }
+    if (d.state === 'bath' && Math.random() < dt * 10) burst(d.x + rand(-22, 22), d.y - 20, 'bubble', 1);
+    if (d.state === 'nap' && Math.random() < dt * 0.8) FX.parts.push({ x: d.x + d.face * 12, y: d.y - 26, vx: 6, vy: -12, life: 1.4, max: 1.4, kind: 'z', size: 12 });
+    if (d.state === 'leashed') {
+      var peerHolderG = (typeof MP !== 'undefined' && d.leashedBy && d.leashedBy !== MP.playerId) ? MP.getPeer(d.leashedBy) : null;
+      var pg = (peerHolderG && peerHolderG.online) ? peerHolderG : S.player;
+      var vg = DIRV[pg.dir] || [0, 1], txg = pg.x - vg[0] * 36, tyg = pg.y - vg[1] * 30 + 5;
+      if (pg.dir === 'down') { txg = pg.x + (d.x >= pg.x ? 34 : -34); tyg = pg.y + 4; }
+      var ddg = dist(d.x, d.y, txg, tyg);
+      if (ddg > 5) moveTo(d, txg, tyg, Math.max(70, ddg * 6), dt); else { d.moving = false; d.curSpeed = 0; if (pg.x !== d.x) d.face = pg.x > d.x ? 1 : -1; }
+    }
+    return;
+  }
   var zone = zoneAt(d.x, d.y), k = diff().decay, mb = moraleBoostCount();
   // happiness: slowly recovers by itself; drops only while a need has been waiting too long
   if (d.need) {
@@ -3980,9 +4022,9 @@ function saveGame() {
     if (!json || json.length < 20) return;
     _storageSet(SAVE_KEY, json);
     _storageSet(BACKUP_SAVE_KEY, json);
-    if (typeof MP !== 'undefined' && MP.sendWorldSync && !(typeof window !== 'undefined' && window.__APPLYING_REMOTE_SYNC__)) {
+    if (typeof MP !== 'undefined' && MP.sendWorldSync && (!MP.isSimHost || MP.isSimHost()) && !(typeof window !== 'undefined' && window.__APPLYING_REMOTE_SYNC__)) {
       var nowSync = Date.now();
-      if (!saveGame._lastMpSync || nowSync - saveGame._lastMpSync >= 900) {
+      if (!saveGame._lastMpSync || nowSync - saveGame._lastMpSync >= 2500) {
         saveGame._lastMpSync = nowSync;
         MP.sendWorldSync(true);
       }
@@ -4468,15 +4510,16 @@ function sanitizeAndMigrateState(s) {
       var leaveOw = fd.ownerId ? ownerMap[fd.ownerId] : null;
       if (!leaveOw) continue; // already paid & owner left
     } else if (fd.state === 'leashed') {
-      if (carriedDogId !== fd.id) {
+      var heldByOnlinePeer = !!(fd.leashedBy && typeof MP !== 'undefined' && fd.leashedBy !== MP.playerId && MP.getPeer && MP.getPeer(fd.leashedBy) && MP.getPeer(fd.leashedBy).online);
+      if (carriedDogId !== fd.id && !heldByOnlinePeer) {
         var tw = nearestWalkable(fd.x, fd.y);
         fd.x = (tw[0] + 0.5) * TILE; fd.y = (tw[1] + 0.5) * TILE;
         fd.state = 'idle'; fd.idleT = 1; fd.autoRelease = false; fd.leashedBy = null;
       }
     } else if (fd.state === 'bath' || fd.state === 'kennel') {
       var stObj = fd.objId ? objById(fd.objId) : null;
-      var wantType = fd.state === 'bath' ? 'tub' : 'kennel';
-      if (!stObj || !stObj.done || stObj.type !== wantType) {
+      var stTypeOk = stObj && (fd.state === 'bath' ? (stObj.type === 'tub' || stObj.type === 'groomhouse') : stObj.type === 'kennel');
+      if (!stObj || !stObj.done || !stTypeOk) {
         var tw2 = nearestWalkable(fd.x, fd.y);
         fd.x = (tw2[0] + 0.5) * TILE; fd.y = (tw2[1] + 0.5) * TILE;
         fd.state = 'idle'; fd.idleT = 1; fd.objId = null;

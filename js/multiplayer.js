@@ -35,6 +35,12 @@ var MP = (function () {
 
   var mqttWs = null;
   var mqttConnected = false;
+  var mqttConnAcked = false;
+  var mqttEverConnected = false;
+  var mqttFailStreak = 0;
+  var mqttPid = 1;
+  var mqttRxBuf = new Uint8Array(0);
+  var mqttSubTopics = [];
   var mqttPingTimer = null;
   var mqttRetryTimer = null;
   var mqttBrokerIdx = 0;
@@ -45,6 +51,10 @@ var MP = (function () {
   ];
 
   var peers = {};          // playerId -> remote player state with interpolation targets
+  var peerAcks = {};       // guestPlayerId -> last processed clientActSeq by Host
+  var pendingActions = []; // Guest reliable outbox: [{ seq, pkt, sentAt, tries }]
+  var localActSeq = 0;     // monotonic action counter for this client
+  var hostAckedActSeq = 0; // highest localActSeq acknowledged by Host
   var roomState = null;    // latest shared state from server
   var unreadEvents = [];   // activity events by other players since lastSeenSeq
   var recentEvents = [];   // recent activity events in the room
@@ -56,12 +66,19 @@ var MP = (function () {
   var lastLocalActionAt = 0;
   var lastResetTs = 0;
   var joiningWaitUntil = 0;
+  var awaitingInitialSync = false;
+  var joinedAsGuest = false;
+  var retainedDebounceTimer = null;
   var lastKnownCash = null;
   var lastKnownHearts = null;
+  var lastKnownXp = null;
+  var lastKnownLevel = null;
+  var lastKnownRep = null;
   var prevSentX = null, prevSentY = null, prevSentAt = 0;
   var lastSentMoving = false, lastSentDir = 'down', lastSentCarrySig = '';
   var lastPingSentAt = 0, peerLatencyMs = 0;
   var pendingRetainedPublish = false;
+  var syncSoonTimer = null;
   var browserOnline = (typeof navigator === 'undefined' || navigator.onLine !== false);
   var summaryPending = false;
   var summaryShownAtSeq = 0;
@@ -69,16 +86,38 @@ var MP = (function () {
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('online', function () {
       browserOnline = true;
+      mqttBrokerIdx = 0;
+      mqttFailStreak = 0;
       connectCloudRelay();
       updateCoopBadge();
     });
     window.addEventListener('offline', function () {
       browserOnline = false;
       mqttConnected = false;
+      mqttConnAcked = false;
       connected = false;
       if (mqttWs) { try { mqttWs.close(); } catch (e) {} mqttWs = null; }
       updateCoopBadge();
     });
+    window.addEventListener('pageshow', function () {
+      handleAppResume();
+    });
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') handleAppResume();
+    });
+  }
+
+  function handleAppResume() {
+    browserOnline = (typeof navigator === 'undefined' || navigator.onLine !== false);
+    if (!browserOnline) return;
+    if (!mqttWs || mqttWs.readyState !== WebSocket.OPEN || !mqttConnected) {
+      reconnectNow();
+    } else {
+      try { mqttWs.send(new Uint8Array([0xc0, 0x00])); } catch (e) {}
+      if (inGame) sendJoin();
+    }
   }
 
   function isCloudReady() {
@@ -94,7 +133,49 @@ var MP = (function () {
     if (mqttRetryTimer) { clearTimeout(mqttRetryTimer); mqttRetryTimer = null; }
     if (mqttWs) { try { mqttWs.close(); } catch (e) {} mqttWs = null; }
     mqttConnected = false;
+    mqttConnAcked = false;
+    mqttBrokerIdx = 0;
+    mqttFailStreak = 0;
     connectCloudRelay();
+  }
+
+  function computeHostId() {
+    var candidates = [];
+    if (inGame && playerId && !awaitingInitialSync) {
+      candidates.push({ id: playerId, rank: joinedAsGuest ? 1 : 0 });
+    }
+    for (var pid in peers) {
+      var rp = peers[pid];
+      if (rp && rp.online && rp.inGame !== false && !rp.awaitingSync) {
+        candidates.push({ id: pid, rank: rp.joinedAsGuest ? 1 : 0 });
+      }
+    }
+    if (!candidates.length) {
+      if (inGame && playerId) return playerId;
+      return hostId || null;
+    }
+    candidates.sort(function (a, b) {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
+    });
+    hostId = candidates[0].id;
+    return hostId;
+  }
+
+  function isSimHost() {
+    if (awaitingInitialSync && joiningWaitUntil > Date.now()) return false;
+    if (!inGame) return true;
+    var hid = computeHostId();
+    return !hid || hid === playerId;
+  }
+
+  function snapshotEconomyBaseline() {
+    if (!S) return;
+    lastKnownCash = S.cash;
+    lastKnownHearts = S.hearts || 0;
+    lastKnownXp = S.xp || 0;
+    lastKnownLevel = S.level || 1;
+    lastKnownRep = S.rep || 3.0;
   }
 
   // ---------------- Identity & Multi-Tab / Multi-Device Slot Assignment ----------------
@@ -293,9 +374,17 @@ var MP = (function () {
     var rem = vh.concat(pl);
     return new Uint8Array([0x10].concat(mqttEncodeLen(rem.length), rem));
   }
+  function nextMqttPid() {
+    mqttPid = (mqttPid % 65000) + 1;
+    return mqttPid;
+  }
   function mqttSubPacket(topic, pid) {
     var rem = [(pid >> 8) & 0xff, pid & 0xff].concat(mqttEncodeStr(topic), [0]);
     return new Uint8Array([0x82].concat(mqttEncodeLen(rem.length), rem));
+  }
+  function mqttUnsubPacket(topic, pid) {
+    var rem = [(pid >> 8) & 0xff, pid & 0xff].concat(mqttEncodeStr(topic));
+    return new Uint8Array([0xa2].concat(mqttEncodeLen(rem.length), rem));
   }
   function mqttPubPacket(topic, payloadStr, retain) {
     var tb = mqttEncodeStr(topic);
@@ -310,33 +399,74 @@ var MP = (function () {
     for (var k = 0; k < pb.length; k++) out[idx++] = pb[k];
     return out;
   }
-  function mqttParsePackets(buf, onMsg) {
+  function mqttAppendRx(chunk) {
+    if (!chunk || !chunk.length) return;
+    if (!mqttRxBuf.length) {
+      mqttRxBuf = chunk;
+      return;
+    }
+    var merged = new Uint8Array(mqttRxBuf.length + chunk.length);
+    merged.set(mqttRxBuf, 0);
+    merged.set(chunk, mqttRxBuf.length);
+    mqttRxBuf = merged;
+  }
+  function mqttConsumeBuffer(onPacket) {
+    var buf = mqttRxBuf;
     var pos = 0;
     while (pos < buf.length) {
       var type = buf[pos];
       var mult = 1, val = 0, idx = pos + 1;
-      if (idx >= buf.length) break;
-      var b;
+      var incomplete = false;
+      var b = 0;
       do {
-        if (idx >= buf.length) return;
+        if (idx >= buf.length) { incomplete = true; break; }
         b = buf[idx++];
         val += (b & 127) * mult;
         mult *= 128;
+        if (mult > 2097152) { mqttRxBuf = new Uint8Array(0); return; } // corrupt stream guard
       } while ((b & 128) !== 0);
-      if (idx + val > buf.length) break;
-      if ((type & 0xf0) === 0x30) {
+      if (incomplete || idx + val > buf.length) break;
+      var pType = type & 0xf0;
+      if (pType === 0x30) {
         var tLen = (buf[idx] << 8) | buf[idx + 1];
         var topic = mqttUtf8Decode(buf.subarray(idx + 2, idx + 2 + tLen));
         var qos = (type >> 1) & 3;
         var pStart = idx + 2 + tLen + (qos > 0 ? 2 : 0);
         var payload = mqttUtf8Decode(buf.subarray(pStart, idx + val));
-        onMsg(topic, payload, (type & 1) === 1);
+        onPacket(0x30, { topic: topic, payload: payload, retain: (type & 1) === 1 });
+      } else if (pType === 0x20) {
+        onPacket(0x20, { rc: val >= 2 ? buf[idx + 1] : 0 });
+      } else if (pType === 0x90) {
+        onPacket(0x90, { pid: val >= 2 ? ((buf[idx] << 8) | buf[idx + 1]) : 0 });
+      } else if (pType === 0xd0) {
+        onPacket(0xd0, {});
       }
       pos = idx + val;
     }
+    mqttRxBuf = pos < buf.length ? buf.slice(pos) : new Uint8Array(0);
   }
   function mqttTopicLive(code) { return 'pawsplay/v2/' + cleanCode(code || roomCode) + '/live'; }
   function mqttTopicSnap(code) { return 'pawsplay/v2/' + cleanCode(code || roomCode) + '/snapshot'; }
+  function currentBrokerLabel() {
+    var u = MQTT_BROKERS[mqttBrokerIdx % MQTT_BROKERS.length] || '';
+    if (u.indexOf('emqx') >= 0) return 'emqx';
+    if (u.indexOf('hivemq') >= 0) return 'hivemq';
+    if (u.indexOf('mosquitto') >= 0) return 'mosquitto';
+    return 'cloud';
+  }
+  function subscribeCurrentRoom(sock) {
+    if (!sock || sock.readyState !== WebSocket.OPEN) return;
+    try {
+      for (var i = 0; i < mqttSubTopics.length; i++) {
+        sock.send(mqttUnsubPacket(mqttSubTopics[i], nextMqttPid()));
+      }
+      var liveT = mqttTopicLive(roomCode);
+      var snapT = mqttTopicSnap(roomCode);
+      mqttSubTopics = [liveT, snapT];
+      sock.send(mqttSubPacket(liveT, nextMqttPid()));
+      sock.send(mqttSubPacket(snapT, nextMqttPid()));
+    } catch (e) {}
+  }
 
   function connectCloudRelay() {
     if (typeof WebSocket === 'undefined') return;
@@ -347,52 +477,74 @@ var MP = (function () {
       sock = new WebSocket(url, 'mqtt');
       sock.binaryType = 'arraybuffer';
     } catch (e) {
-      scheduleCloudRetry();
+      scheduleCloudRetry(false);
       return;
     }
     mqttWs = sock;
+    mqttConnAcked = false;
+    mqttRxBuf = new Uint8Array(0);
+    mqttSubTopics = [];
+    var socketEverAuthed = false;
     var connectTimeout = setTimeout(function () {
-      if (mqttWs === sock && !mqttConnected) {
+      if (mqttWs === sock && !mqttConnAcked) {
         try { sock.close(); } catch (e) {}
       }
-    }, 6000);
+    }, 6500);
 
     sock.onopen = function () {
-      clearTimeout(connectTimeout);
       if (mqttWs !== sock) return;
       try {
-        var cid = 'paws_' + playerId.replace(/[^a-zA-Z0-9]/g, '') + '_' + Math.random().toString(36).slice(2, 6);
+        // MQTT 3.1.1 guarantees <=23-byte ClientIds on every broker
+        var safeId = playerId.replace(/[^a-zA-Z0-9]/g, '').slice(-12);
+        var cid = 'pp_' + safeId + '_' + Math.random().toString(36).slice(2, 6);
         sock.send(mqttConnectPacket(cid));
-        sock.send(mqttSubPacket(mqttTopicLive(roomCode), 1));
-        sock.send(mqttSubPacket(mqttTopicSnap(roomCode), 2));
-        mqttConnected = true;
-        connected = true;
-        transport = 'cloud';
-        if (mqttPingTimer) clearInterval(mqttPingTimer);
-        mqttPingTimer = setInterval(function () {
-          if (mqttWs === sock && sock.readyState === WebSocket.OPEN) {
-            try { sock.send(new Uint8Array([0xc0, 0x00])); } catch (e) {}
-          }
-        }, 15000);
-        if (pendingRetainedPublish && S) {
-          pendingRetainedPublish = false;
-          roomState = serializeSharedState();
-          sendPacket({ type: 'new_game', rev: rev, ts: lastResetTs || Date.now(), state: roomState }, true);
-          publishRetainedSnapshot();
-        }
-        sendJoin();
-        updateCoopBadge();
-        if (typeof UI !== 'undefined' && UI.mode === 'coop') renderCoopModal();
       } catch (e) {}
     };
 
     sock.onmessage = function (ev) {
-      if (!ev || !ev.data) return;
+      if (mqttWs !== sock || !ev || !ev.data) return;
       try {
         var u8 = new Uint8Array(ev.data);
-        mqttParsePackets(u8, function (topic, payloadStr) {
-          var msg = safeJsonParse(payloadStr);
-          if (msg) handleIncomingMessage(msg, true);
+        mqttAppendRx(u8);
+        mqttConsumeBuffer(function (pType, info) {
+          if (pType === 0x20) {
+            // CONNACK received — now subscribe to room topics!
+            clearTimeout(connectTimeout);
+            if (info.rc !== 0) {
+              try { sock.close(); } catch (e) {}
+              return;
+            }
+            socketEverAuthed = true;
+            mqttConnAcked = true;
+            mqttEverConnected = true;
+            mqttFailStreak = 0;
+            mqttConnected = true;
+            connected = true;
+            transport = 'cloud';
+            subscribeCurrentRoom(sock);
+            if (mqttPingTimer) clearInterval(mqttPingTimer);
+            mqttPingTimer = setInterval(function () {
+              if (mqttWs === sock && sock.readyState === WebSocket.OPEN) {
+                try { sock.send(new Uint8Array([0xc0, 0x00])); } catch (e) {}
+              }
+            }, 15000);
+            updateCoopBadge();
+            if (typeof UI !== 'undefined' && UI.mode === 'coop') renderCoopModal();
+          } else if (pType === 0x90) {
+            // SUBACK received — safe to announce presence & flush any pending new-game snapshot!
+            if (pendingRetainedPublish && S && !awaitingInitialSync) {
+              pendingRetainedPublish = false;
+              roomState = serializeSharedState();
+              sendPacket({ type: 'new_game', rev: rev, ts: lastResetTs || Date.now(), state: roomState }, true);
+              publishRetainedSnapshot(true);
+            }
+            sendJoin();
+            updateCoopBadge();
+            if (typeof UI !== 'undefined' && UI.mode === 'coop') renderCoopModal();
+          } else if (pType === 0x30) {
+            var msg = safeJsonParse(info.payload);
+            if (msg) handleIncomingMessage(msg, true);
+          }
         });
       } catch (e) {}
     };
@@ -402,11 +554,14 @@ var MP = (function () {
       if (mqttWs === sock) {
         mqttWs = null;
         mqttConnected = false;
+        mqttConnAcked = false;
+        mqttRxBuf = new Uint8Array(0);
+        mqttSubTopics = [];
         if (mqttPingTimer) { clearInterval(mqttPingTimer); mqttPingTimer = null; }
         transport = 'local';
         updateCoopBadge();
         if (typeof UI !== 'undefined' && UI.mode === 'coop') renderCoopModal();
-        scheduleCloudRetry();
+        scheduleCloudRetry(socketEverAuthed);
       }
     };
 
@@ -415,17 +570,42 @@ var MP = (function () {
     };
   }
 
-  function scheduleCloudRetry() {
+  function scheduleCloudRetry(wasAuthed) {
     if (mqttRetryTimer) return;
+    // Broker Affinity: never split phones across different public MQTT servers after a normal disconnect or iOS background suspend!
+    // Always reconnect to the primary broker (idx 0) first; only fail over if primary fails 3 consecutive times.
+    if (wasAuthed) {
+      mqttBrokerIdx = 0;
+      mqttFailStreak = 0;
+    } else {
+      mqttFailStreak++;
+      if (mqttFailStreak >= 3) {
+        mqttBrokerIdx = (mqttBrokerIdx + 1) % MQTT_BROKERS.length;
+        mqttFailStreak = 0;
+      }
+    }
+    var delay = wasAuthed ? 1200 : 2400;
     mqttRetryTimer = setTimeout(function () {
       mqttRetryTimer = null;
-      mqttBrokerIdx = (mqttBrokerIdx + 1) % MQTT_BROKERS.length;
       connectCloudRelay();
-    }, 2500);
+    }, delay);
   }
 
-  function publishRetainedSnapshot() {
-    if (!S || !mqttWs || mqttWs.readyState !== WebSocket.OPEN || !mqttConnected) return;
+  function publishRetainedSnapshot(force) {
+    if (!S || awaitingInitialSync || !mqttWs || mqttWs.readyState !== WebSocket.OPEN || !mqttConnected) return;
+    var nowMs = Date.now();
+    var waitMs = 1200 - (nowMs - lastRetainedSent);
+    if (!force && waitMs > 0) {
+      // Trailing-edge debounce: NEVER silently drop a newer snapshot!
+      if (!retainedDebounceTimer) {
+        retainedDebounceTimer = setTimeout(function () {
+          retainedDebounceTimer = null;
+          publishRetainedSnapshot(true);
+        }, waitMs + 20);
+      }
+      return;
+    }
+    if (retainedDebounceTimer) { clearTimeout(retainedDebounceTimer); retainedDebounceTimer = null; }
     try {
       var snap = {
         type: 'retained_snapshot',
@@ -435,12 +615,12 @@ var MP = (function () {
         senderLook: playerLook,
         rev: rev,
         seq: seq,
-        ts: Date.now(),
+        ts: nowMs,
         state: serializeSharedState(),
         recentEvents: recentEvents.slice(-80),
       };
       mqttWs.send(mqttPubPacket(mqttTopicSnap(roomCode), JSON.stringify(snap), true));
-      lastRetainedSent = Date.now();
+      lastRetainedSent = nowMs;
     } catch (e) {}
   }
 
@@ -531,6 +711,8 @@ var MP = (function () {
     msg.name = playerName;
     msg.look = playerLook;
     msg.inGame = inGame;
+    msg.awaitingSync = !!awaitingInitialSync;
+    msg.joinedAsGuest = !!joinedAsGuest;
 
     // 1. Same-browser tabs via BroadcastChannel
     if (bc) {
@@ -541,26 +723,99 @@ var MP = (function () {
     if (mqttWs && mqttWs.readyState === WebSocket.OPEN && mqttConnected) {
       try {
         mqttWs.send(mqttPubPacket(mqttTopicLive(roomCode), JSON.stringify(msg), false));
-        if (retainSnapshot && S) {
-          publishRetainedSnapshot();
+        if (retainSnapshot && S && !awaitingInitialSync) {
+          publishRetainedSnapshot(false);
         }
       } catch (e) {}
     }
   }
 
+  function sendPeerHello() {
+    sendPacket({
+      type: 'peer_update',
+      x: S && S.player ? Math.round(S.player.x * 10) / 10 : PLAYER_START[0] * TILE,
+      y: S && S.player ? Math.round(S.player.y * 10) / 10 : PLAYER_START[1] * TILE,
+      vx: 0,
+      vy: 0,
+      dir: S && S.player ? S.player.dir : 'down',
+      face: S && S.player ? S.player.face : 1,
+      moving: !!(S && S.player && S.player.moving),
+      carry: S && S.player ? S.player.carry : null,
+      emote: S && S.player ? S.player.emote : null,
+      emoteT: S && S.player ? (S.player.emoteT || 0) : 0,
+    }, false);
+  }
+
   function sendJoin() {
-    var waitRemote = joiningWaitUntil > Date.now() && !roomState;
+    var waitRemote = awaitingInitialSync || (joiningWaitUntil > Date.now() && !roomState);
     sendPacket({
       type: 'join',
       rev: rev,
       seq: seq,
-      x: S && S.player ? S.player.x : PLAYER_START[0] * TILE,
-      y: S && S.player ? S.player.y : PLAYER_START[1] * TILE,
+      x: S && S.player ? Math.round(S.player.x * 10) / 10 : PLAYER_START[0] * TILE,
+      y: S && S.player ? Math.round(S.player.y * 10) / 10 : PLAYER_START[1] * TILE,
       dir: S && S.player ? S.player.dir : 'down',
       face: S && S.player ? S.player.face : 1,
+      moving: !!(S && S.player && S.player.moving),
       carry: S && S.player ? S.player.carry : null,
-      state: (!roomState && S && !waitRemote) ? serializeSharedState() : undefined,
+      state: (!roomState && S && inGame && !waitRemote) ? serializeSharedState() : undefined,
     }, false);
+  }
+
+  function touchPeerFromMessage(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    var pid = msg.playerId || msg.senderId;
+    if (!pid || pid === playerId) return;
+    // Do not mark an offline retained snapshot sender as currently online!
+    if (msg.type === 'retained_snapshot') return;
+    var info = {
+      id: pid,
+      name: msg.name || msg.senderName,
+      look: typeof msg.look === 'number' ? msg.look : (typeof msg.senderLook === 'number' ? msg.senderLook : undefined),
+      online: true,
+    };
+    if ('inGame' in msg) info.inGame = msg.inGame;
+    if ('awaitingSync' in msg) info.awaitingSync = !!msg.awaitingSync;
+    if ('joinedAsGuest' in msg) info.joinedAsGuest = !!msg.joinedAsGuest;
+    if (typeof msg.x === 'number' && typeof msg.y === 'number') {
+      info.x = msg.x;
+      info.y = msg.y;
+    }
+    if (typeof msg.vx === 'number') info.vx = msg.vx;
+    if (typeof msg.vy === 'number') info.vy = msg.vy;
+    if (msg.dir) info.dir = msg.dir;
+    if (typeof msg.face === 'number') info.face = msg.face;
+    if ('moving' in msg) info.moving = !!msg.moving;
+    if (typeof msg.walkT === 'number') info.walkT = msg.walkT;
+    if (typeof msg.walkDist === 'number') info.walkDist = msg.walkDist;
+    if ('carry' in msg) info.carry = msg.carry;
+    if (msg.emote) { info.emote = msg.emote; info.emoteT = msg.emoteT || 0; }
+    updateSinglePeer(info);
+  }
+
+  function syncSoon(retain) {
+    if (!inGame || !S || awaitingInitialSync || !isSimHost()) return;
+    if (syncSoonTimer) return;
+    syncSoonTimer = setTimeout(function () {
+      syncSoonTimer = null;
+      if (!inGame || !S || awaitingInitialSync || !isSimHost()) return;
+      lastTickSent = Date.now();
+      sendLiveTick();
+      if (retain) {
+        lastWorldSent = Date.now();
+        sendWorldSync(true);
+      }
+    }, 120);
+  }
+
+  function hasUnackedLocalAction(acksObj) {
+    if (acksObj && typeof acksObj[playerId] === 'number' && acksObj[playerId] > hostAckedActSeq) {
+      hostAckedActSeq = acksObj[playerId];
+      if (pendingActions.length) {
+        pendingActions = pendingActions.filter(function (pa) { return pa.seq > hostAckedActSeq; });
+      }
+    }
+    return pendingActions.length > 0 || (localActSeq > hostAckedActSeq && (Date.now() - lastLocalActionAt < 4500));
   }
 
   // ---------------- Incoming Message Handling ----------------
@@ -568,13 +823,15 @@ var MP = (function () {
     if (!msg || typeof msg !== 'object') return;
     if (msg.roomCode && cleanCode(msg.roomCode) !== roomCode) return;
 
-    if (msg.hostId !== undefined) hostId = msg.hostId;
     if (typeof msg.rev === 'number' && msg.rev > rev) rev = msg.rev;
     if (typeof msg.seq === 'number' && msg.seq > seq) seq = msg.seq;
 
     if (msg.players && typeof msg.players === 'object') {
       syncPeersMap(msg.players);
     }
+
+    // Keep partner presence alive and updated from EVERY live message type!
+    touchPeerFromMessage(msg);
 
     if (Array.isArray(msg.recentEvents)) {
       var seenRec = {};
@@ -593,7 +850,6 @@ var MP = (function () {
     }
 
     if (Array.isArray(msg.unreadEvents) && msg.unreadEvents.length) {
-      // Merge unread events by seq
       var seenSeqs = {};
       unreadEvents.forEach(function (e) { seenSeqs[e.seq] = true; });
       msg.unreadEvents.forEach(function (e) {
@@ -607,34 +863,19 @@ var MP = (function () {
 
     if (msg.type === 'join') {
       if (msg.playerId && msg.playerId !== playerId) {
-        updateSinglePeer({
-          id: msg.playerId,
-          name: msg.name,
-          look: msg.look,
-          x: msg.x,
-          y: msg.y,
-          dir: msg.dir,
-          face: msg.face,
-          carry: msg.carry,
-          online: true,
-          inGame: msg.inGame,
-        });
-        if (msg.state && (!roomState || (msg.rev || 0) > rev)) {
+        if (msg.state && !msg.awaitingSync && (awaitingInitialSync || !roomState || (msg.rev || 0) > rev)) {
           roomState = msg.state;
-          if (inGame && S && Date.now() - lastLocalActionAt > 1200) applySharedState(msg.state, false);
+          if (inGame && S && (awaitingInitialSync || !hasUnackedLocalAction(null))) {
+            awaitingInitialSync = false;
+            applySharedState(msg.state, false);
+          }
         }
-        // Reply with our presence and latest world state so the joining partner immediately syncs
-        sendPacket({
-          type: 'peer_update',
-          x: S && S.player ? S.player.x : PLAYER_START[0] * TILE,
-          y: S && S.player ? S.player.y : PLAYER_START[1] * TILE,
-          dir: S && S.player ? S.player.dir : 'down',
-          face: S && S.player ? S.player.face : 1,
-          moving: !!(S && S.player && S.player.moving),
-          carry: S && S.player ? S.player.carry : null,
-        }, false);
-        if (S && rev >= (msg.rev || 0)) {
-          sendWorldSync(true);
+        // Immediately reply with our live presence so the partner sees us on screen right away!
+        sendPeerHello();
+        // If we have authoritative state (not awaiting sync), send full daycare state immediately!
+        if (inGame && S && !awaitingInitialSync && (msg.awaitingSync || isSimHost() || rev >= (msg.rev || 0))) {
+          sendWorldSync(false);
+          sendLiveTick();
         }
         if (typeof UI !== 'undefined' && UI.mode === 'coop') renderCoopModal();
       }
@@ -644,15 +885,18 @@ var MP = (function () {
     if (msg.type === 'new_game') {
       if (msg.playerId && msg.playerId !== playerId && msg.state) {
         lastResetTs = msg.ts || Date.now();
+        awaitingInitialSync = false;
         roomState = msg.state;
         rev = Math.max(rev, msg.rev || 1);
         seq = 0;
         lastSeenSeq = 0;
         unreadEvents = [];
         recentEvents = [];
+        peerAcks = {};
         if (inGame && S) {
           applySharedState(msg.state, true);
           toast('🔄 Synced New Game from ' + (msg.name || 'partner phone') + '!', 'good');
+          sendPeerHello();
         }
       }
       return;
@@ -661,19 +905,21 @@ var MP = (function () {
     if (msg.type === 'retained_snapshot' || msg.type === 'joined' || msg.type === 'sync_ack') {
       var snapTs = msg.ts || (msg.state && (msg.state.savedAt || msg.state.created)) || 0;
       if (lastResetTs > 0 && snapTs > 0 && snapTs < lastResetTs) {
-        // Ignore stale retained snapshot from before our explicit New Game reset, and republish our newer state
-        if (S) publishRetainedSnapshot();
+        if (S && !awaitingInitialSync) publishRetainedSnapshot(true);
         return;
       }
-      if (msg.state && (!roomState || (msg.rev || 0) >= rev || snapTs > ((S && S.savedAt) || 0))) {
-        if (msg.type === 'retained_snapshot' && typeof clearWaitingOwners === 'function') {
-          var anyOnline = Object.keys(peers).some(function (pid) { return peers[pid].online; });
-          if (!anyOnline) clearWaitingOwners(msg.state);
+      var anyOnlineNow = getOnlinePeerList().some(function (rp) { return rp.inGame !== false; });
+      if (msg.state && (awaitingInitialSync || !roomState || (msg.rev || 0) >= rev || snapTs > ((S && S.savedAt) || 0))) {
+        if (msg.type === 'retained_snapshot' && !anyOnlineNow && typeof clearWaitingOwners === 'function') {
+          clearWaitingOwners(msg.state);
         }
         roomState = msg.state;
         rev = Math.max(rev, msg.rev || 1);
-        if (inGame && S && msg.senderId !== playerId && Date.now() - lastLocalActionAt > 900) {
+        if (inGame && S && msg.senderId !== playerId && (awaitingInitialSync || (!anyOnlineNow && Date.now() - lastLocalActionAt > 900))) {
+          var wasAwaiting = awaitingInitialSync;
+          awaitingInitialSync = false;
           applySharedState(msg.state, false);
+          if (wasAwaiting) sendPeerHello();
         }
       }
       if (inGame && summaryPending && hasSummaryToReport()) {
@@ -709,7 +955,8 @@ var MP = (function () {
 
     if (msg.type === 'live_tick') {
       if (msg.playerId === playerId) return;
-      if (inGame && S && Date.now() - lastLocalActionAt > 900) {
+      // Only non-host (Guest) applies live_ticks from the authoritative Sim Host
+      if (inGame && S && !isSimHost()) {
         applyLiveTick(msg);
       }
       return;
@@ -736,6 +983,7 @@ var MP = (function () {
           emoteT: p.emoteT,
           online: true,
           inGame: p.inGame,
+          awaitingSync: !!p.awaitingSync,
         });
       }
       return;
@@ -748,8 +996,13 @@ var MP = (function () {
         var wTs = msg.ts || msg.state.savedAt || msg.state.created || 0;
         if (lastResetTs > 0 && wTs > 0 && wTs < lastResetTs) return;
         roomState = msg.state;
-        if (inGame && S && Date.now() - lastLocalActionAt > 900) {
+        // Apply world_sync if we are awaiting initial join sync OR we are Guest receiving from Host!
+        var pendingLocal = hasUnackedLocalAction(msg.acks);
+        if (inGame && S && (awaitingInitialSync || (!isSimHost() && !pendingLocal))) {
+          var wasWaiting = awaitingInitialSync;
+          awaitingInitialSync = false;
           applySharedState(msg.state, false);
+          if (wasWaiting) sendPeerHello();
         }
       }
       return;
@@ -782,27 +1035,36 @@ var MP = (function () {
         complaint: !!act.complaint,
       } : null);
 
-      if (ev && ev.kind !== 'wave') {
+      if (ev && ev.kind !== 'wave' && ev.kind !== 'leash' && ev.kind !== 'unleash') {
         if (!recentEvents.some(function (x) { return x.seq === ev.seq; })) {
           recentEvents.push(ev);
         }
         if (!inGame) {
-          // Player is still on title screen / not logged in yet: queue for login summary!
           if (!unreadEvents.some(function (x) { return x.seq === ev.seq; })) {
             unreadEvents.push(ev);
           }
         } else {
-          // Player is actively in-game with partner: mark seen and show live co-op feedback
           ackSeq(ev.seq);
         }
       }
 
-      if (msg.state) {
-        roomState = msg.state;
-        if (inGame && S) {
-          applySharedState(msg.state, true, act);
+      if (inGame && S) {
+        if (isSimHost()) {
+          // Sim Host: NEVER overwrite canonical cash/dogs with Guest's stale snapshot!
+          // Apply Guest's exact economy deltas + targeted entity mutations on top of Host state, then broadcast canonical tick/world!
+          applyGuestActionOnHost(sId, act, msg.state, msg.clientActSeq);
+        } else {
+          // Guest receiving Host's action (or another peer's action): apply canonical state while respecting un-acked local deltas!
+          var stillPending = hasUnackedLocalAction(msg.acks);
+          if (msg.state) {
+            roomState = msg.state;
+            applySharedState(msg.state, true, act, stillPending);
+          }
         }
+      } else if (msg.state) {
+        roomState = msg.state;
       }
+
       if (inGame && S && act) {
         showLivePartnerAction(sName, act, sId);
       }
@@ -815,6 +1077,8 @@ var MP = (function () {
       unreadEvents = [];
       recentEvents = [];
       lastSeenSeq = 0;
+      peerAcks = {};
+      awaitingInitialSync = false;
       if (msg.state) {
         roomState = msg.state;
         if (inGame && S) {
@@ -837,13 +1101,14 @@ var MP = (function () {
     for (var existingId in peers) {
       if (!seen[existingId]) peers[existingId].online = false;
     }
+    computeHostId();
     updateCoopBadge();
   }
 
   function updateSinglePeer(p) {
     if (!p || !p.id || p.id === playerId) return;
     var cur = peers[p.id];
-    var newlyOnline = (!cur || !cur.online) && p.online;
+    var wasOnlineInGame = !!(cur && cur.online && cur.inGame !== false);
     if (!cur) {
       cur = peers[p.id] = {
         id: p.id,
@@ -867,11 +1132,13 @@ var MP = (function () {
         sayT: 0,
         online: p.online !== false,
         inGame: p.inGame !== false,
+        awaitingSync: !!p.awaitingSync,
+        joinedAsGuest: !!p.joinedAsGuest,
         lastPacketAt: Date.now(),
       };
     } else {
       var nowP = Date.now(), dtP = Math.max(0.016, (nowP - (cur.lastPacketAt || nowP)) / 1000);
-      cur.name = p.name || cur.name;
+      if (p.name) cur.name = p.name;
       if (typeof p.look === 'number') cur.look = p.look;
       if (typeof p.x === 'number' && typeof p.y === 'number') {
         if (typeof p.vx === 'number' && typeof p.vy === 'number') {
@@ -890,16 +1157,21 @@ var MP = (function () {
       }
       if (p.dir) cur.dir = p.dir;
       if (typeof p.face === 'number') cur.face = p.face;
-      cur.moving = !!p.moving;
-      if (!cur.moving) { cur.vx = 0; cur.vy = 0; }
+      if ('moving' in p) {
+        cur.moving = !!p.moving;
+        if (!cur.moving) { cur.vx = 0; cur.vy = 0; }
+      }
       if (typeof p.walkDist === 'number') cur.walkDist = p.walkDist;
       if ('carry' in p) cur.carry = p.carry;
       if (p.emote) { cur.emote = p.emote; cur.emoteT = 0; }
       cur.online = p.online !== false;
-      cur.inGame = p.inGame !== false;
+      if ('inGame' in p) cur.inGame = p.inGame !== false;
+      if ('awaitingSync' in p) cur.awaitingSync = !!p.awaitingSync;
+      if ('joinedAsGuest' in p) cur.joinedAsGuest = !!p.joinedAsGuest;
       cur.lastPacketAt = nowP;
     }
-    if (newlyOnline && inGame && p.inGame) {
+    computeHostId();
+    if (!wasOnlineInGame && cur.online && cur.inGame !== false && inGame) {
       toast('🐾 ' + cur.name + ' joined the daycare!', 'good');
       if (typeof sfx === 'function') sfx('bell');
     }
@@ -913,38 +1185,38 @@ var MP = (function () {
     return copy;
   }
 
-  function applySharedState(incoming, isAction, remoteAct) {
+  function applySharedState(incoming, isAction, remoteAct, protectPendingLocal) {
     if (!incoming || !S) return;
     var localP = S.player;
     var oldObjCount = S.objects ? S.objects.length : 0;
     var oldPlotCount = S.plots ? S.plots.length : 0;
     var oldDoneCount = S.objects ? S.objects.filter(function (o) { return o.done; }).length : 0;
     var newDoneCount = incoming.objects ? incoming.objects.filter(function (o) { return o.done; }).length : 0;
-    var concurrentLocalEdit = isAction && (Date.now() - lastLocalActionAt < 1500);
+    var concurrentLocalEdit = !!protectPendingLocal || (isAction && (Date.now() - lastLocalActionAt < 1500));
 
-    // Shared Economy: if two players spend or earn simultaneously within 1.5s, apply the remote cash delta to local S.cash so neither transaction is lost!
+    // Shared Economy: if local player has an unacknowledged spend/earn in flight, preserve local cash + apply remote delta!
     if (concurrentLocalEdit && remoteAct && typeof remoteAct.cashDelta === 'number' && isFinite(remoteAct.cashDelta) && remoteAct.cashDelta !== 0) {
       S.cash = clamp(Math.floor(S.cash + remoteAct.cashDelta), 0, 1e9);
     } else if (concurrentLocalEdit && remoteAct && ((remoteAct.cost || 0) > 0 || (remoteAct.earned || 0) > 0)) {
       var delta = (remoteAct.earned || 0) - (remoteAct.cost || 0);
       S.cash = clamp(Math.floor(S.cash + delta), 0, 1e9);
-    } else if (typeof incoming.cash === 'number' && isFinite(incoming.cash)) {
+    } else if (!protectPendingLocal && typeof incoming.cash === 'number' && isFinite(incoming.cash)) {
       S.cash = clamp(Math.floor(incoming.cash), 0, 1e9);
     }
-    lastKnownCash = S.cash;
 
     // Shared Paw Hearts: mirror concurrent delta merge so partner heart gains/spends aren't clobbered
     if (concurrentLocalEdit && remoteAct && typeof remoteAct.heartsDelta === 'number' && isFinite(remoteAct.heartsDelta) && remoteAct.heartsDelta !== 0) {
       S.hearts = clamp(Math.floor((S.hearts || 0) + remoteAct.heartsDelta), 0, 1e9);
-    } else if (typeof incoming.hearts === 'number' && isFinite(incoming.hearts)) {
+    } else if (!protectPendingLocal && typeof incoming.hearts === 'number' && isFinite(incoming.hearts)) {
       S.hearts = clamp(Math.floor(incoming.hearts), 0, 1e9);
     }
-    lastKnownHearts = S.hearts || 0;
     if ('vipMagnet' in incoming) S.vipMagnet = !!(incoming.vipMagnet || (concurrentLocalEdit && S.vipMagnet));
 
-    if (typeof incoming.xp === 'number' && isFinite(incoming.xp)) S.xp = concurrentLocalEdit ? Math.max(S.xp || 0, clamp(Math.floor(incoming.xp), 0, 1e9)) : clamp(Math.floor(incoming.xp), 0, 1e9);
-    if (typeof incoming.level === 'number' && isFinite(incoming.level)) S.level = Math.max(concurrentLocalEdit ? (S.level || 1) : 1, clamp(Math.floor(incoming.level), 1, 999));
-    if (typeof incoming.rep === 'number' && isFinite(incoming.rep)) S.rep = clamp(incoming.rep, 0.5, 5.0);
+    if (!protectPendingLocal) {
+      if (typeof incoming.xp === 'number' && isFinite(incoming.xp)) S.xp = concurrentLocalEdit ? Math.max(S.xp || 0, clamp(Math.floor(incoming.xp), 0, 1e9)) : clamp(Math.floor(incoming.xp), 0, 1e9);
+      if (typeof incoming.level === 'number' && isFinite(incoming.level)) S.level = Math.max(concurrentLocalEdit ? (S.level || 1) : 1, clamp(Math.floor(incoming.level), 1, 999));
+      if (typeof incoming.rep === 'number' && isFinite(incoming.rep)) S.rep = clamp(incoming.rep, 0.5, 5.0);
+    }
     if (typeof incoming.day === 'number' && isFinite(incoming.day)) S.day = clamp(Math.floor(incoming.day), 1, 99999);
     if (typeof incoming.dayTime === 'number' && isFinite(incoming.dayTime)) {
       if (isAction || Math.abs(incoming.dayTime - S.dayTime) > 2.5) S.dayTime = incoming.dayTime;
@@ -1022,7 +1294,6 @@ var MP = (function () {
       S.dogs = incoming.dogs.map(function (nd) {
         var od = localDogMap[nd.id];
         if (!od) return nd;
-        // If local player currently has this dog on leash, keep local leash ownership
         if (myLeashedId === nd.id) {
           nd.state = 'leashed';
           nd.leashedBy = playerId;
@@ -1030,8 +1301,7 @@ var MP = (function () {
           nd.y = od.y;
           return nd;
         }
-        // Smooth position if walking normally
-        if (!isAction && dist(od.x, od.y, nd.x, nd.y) < 90 && nd.state === od.state) {
+        if (!isAction && dist(od.x, od.y, nd.x, nd.y) < 110 && nd.state === od.state) {
           nd.x = lerp(od.x, nd.x, 0.45);
           nd.y = lerp(od.y, nd.y, 0.45);
           nd.walkDist = od.walkDist;
@@ -1046,7 +1316,7 @@ var MP = (function () {
       S.owners.forEach(function (o) { localOwnerMap[o.id] = o; });
       S.owners = incoming.owners.map(function (no) {
         var oo = localOwnerMap[no.id];
-        if (oo && !isAction && dist(oo.x, oo.y, no.x, no.y) < 90 && no.state === oo.state) {
+        if (oo && !isAction && dist(oo.x, oo.y, no.x, no.y) < 110 && no.state === oo.state) {
           no.x = lerp(oo.x, no.x, 0.45);
           no.y = lerp(oo.y, no.y, 0.45);
           no.walkDist = oo.walkDist;
@@ -1058,6 +1328,7 @@ var MP = (function () {
 
     S.player = localP;
     if (typeof sanitizeAndMigrateState === 'function') sanitizeAndMigrateState(S);
+    snapshotEconomyBaseline();
 
     if (isAction || S.objects.length !== oldObjCount || S.plots.length !== oldPlotCount || newDoneCount !== oldDoneCount) {
       markDirty(true);
@@ -1071,6 +1342,279 @@ var MP = (function () {
       } finally {
         window.__APPLYING_REMOTE_SYNC__ = false;
       }
+    }
+  }
+
+  // Authoritative Sim Host merge for a Guest's action: applies exact deltas + targeted entity mutations on top of Host's canonical state!
+  function applyGuestActionOnHost(senderId, act, incoming, clientActSeq) {
+    if (!S || !act) return;
+    if (typeof clientActSeq === 'number' && peerAcks[senderId] >= clientActSeq) {
+      // Duplicate packet already processed — just re-broadcast ack via live_tick
+      sendLiveTick();
+      return;
+    }
+    peerAcks[senderId] = typeof clientActSeq === 'number' ? clientActSeq : ((peerAcks[senderId] || 0) + 1);
+
+    var kind = act.kind || '';
+    var structural = false;
+
+    // 1. Exact economy deltas (Host cash/hearts are NEVER overwritten by Guest's stale totals!)
+    if (typeof act.cashDelta === 'number' && isFinite(act.cashDelta) && act.cashDelta !== 0) {
+      S.cash = clamp(Math.floor(S.cash + act.cashDelta), 0, 1e9);
+      if (act.cashDelta > 0) { S.stats.earned = (S.stats.earned || 0) + act.cashDelta; if (S.life) S.life.earned = (S.life.earned || 0) + act.cashDelta; }
+      else { S.stats.spent = (S.stats.spent || 0) + Math.abs(act.cashDelta); }
+    } else if ((act.cost || 0) > 0 || (act.earned || 0) > 0) {
+      var fallbackDelta = (act.earned || 0) - (act.cost || 0);
+      if (fallbackDelta !== 0) S.cash = clamp(Math.floor(S.cash + fallbackDelta), 0, 1e9);
+    }
+    if (typeof act.heartsDelta === 'number' && isFinite(act.heartsDelta) && act.heartsDelta !== 0) {
+      S.hearts = clamp(Math.floor((S.hearts || 0) + act.heartsDelta), 0, 1e9);
+      if (act.heartsDelta > 0) {
+        if (S.stats) S.stats.hearts = (S.stats.hearts || 0) + act.heartsDelta;
+        if (S.life) S.life.hearts = (S.life.hearts || 0) + act.heartsDelta;
+      }
+    }
+    if (typeof act.xpDelta === 'number' && isFinite(act.xpDelta) && act.xpDelta > 0) {
+      S.xp = (S.xp || 0) + act.xpDelta;
+      if (typeof lvlNeed === 'function') {
+        while (S.xp >= lvlNeed(S.level)) { S.xp -= lvlNeed(S.level); S.level++; }
+      }
+    }
+    if (typeof act.repDelta === 'number' && isFinite(act.repDelta) && act.repDelta !== 0) {
+      S.rep = clamp((S.rep || 3.0) + act.repDelta, 0.5, 5.0);
+    }
+
+    // 2. Safe monotonic metadata merges from incoming state or compact act.meta (can never lose Host progress)
+    var metaSrc = incoming || (act && act.meta) || null;
+    if (metaSrc) {
+      S.nextId = Math.max(S.nextId || 1, metaSrc.nextId || 1);
+      S.tutorial = Object.assign({}, S.tutorial || {}, metaSrc.tutorial || {});
+      S.tutorialDone = !!(S.tutorialDone || metaSrc.tutorialDone);
+      S.builtPads = Object.assign({}, S.builtPads || {}, metaSrc.builtPads || {});
+      if (metaSrc.dex) Object.assign(S.dex, metaSrc.dex);
+      if (metaSrc.specials) Object.assign(S.specials, metaSrc.specials);
+      if (metaSrc.upgrades && typeof metaSrc.upgrades === 'object') {
+        S.upgrades = S.upgrades || {};
+        for (var uk in metaSrc.upgrades) S.upgrades[uk] = Math.max(S.upgrades[uk] || 0, metaSrc.upgrades[uk] || 0);
+      }
+      if (metaSrc.staffLvl && typeof metaSrc.staffLvl === 'object') {
+        S.staffLvl = S.staffLvl || {};
+        for (var slk in metaSrc.staffLvl) S.staffLvl[slk] = Math.max(S.staffLvl[slk] || 1, metaSrc.staffLvl[slk] || 1);
+      }
+      if (typeof metaSrc.franchiseTier === 'number') S.franchiseTier = Math.max(S.franchiseTier || 0, metaSrc.franchiseTier);
+      if (metaSrc.milestones && typeof metaSrc.milestones === 'object') {
+        S.milestones = S.milestones || {};
+        for (var mk in metaSrc.milestones) S.milestones[mk] = Math.max(S.milestones[mk] || 0, metaSrc.milestones[mk] || 0);
+      }
+      S.bestStreak = Math.max(S.bestStreak || 0, metaSrc.bestStreak || 0);
+    }
+
+    function findIn(arr, id) {
+      if (!Array.isArray(arr) || id == null) return null;
+      for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].id === id) return arr[i];
+      return null;
+    }
+    function upsertObjById(id) {
+      var srcObj = (act && act.objData && act.objData.id === id) ? act.objData : (incoming ? findIn(incoming.objects, id) : null);
+      if (!srcObj) return false;
+      var cloned = JSON.parse(JSON.stringify(srcObj));
+      for (var i = 0; i < S.objects.length; i++) {
+        if (S.objects[i].id === id) { S.objects[i] = cloned; return true; }
+      }
+      S.objects.push(cloned);
+      return true;
+    }
+    function upsertPlotData(pid) {
+      var sp = (act && act.plotData && act.plotData.id === pid) ? act.plotData : (incoming ? findIn(incoming.plots, pid) : null);
+      if (!sp) return false;
+      var clonedP = JSON.parse(JSON.stringify(sp));
+      for (var pi = 0; pi < S.plots.length; pi++) {
+        if (S.plots[pi].id === pid) { S.plots[pi] = clonedP; return true; }
+      }
+      S.plots.push(clonedP);
+      return true;
+    }
+
+    // 3. Targeted entity mutations by action kind
+    if (kind === 'build' || kind === 'move' || kind === 'rotate' || kind === 'upgrade_obj' || kind === 'rush' || kind === 'lend_paw' || kind === 'ribbon') {
+      structural = true;
+      if (act.objId != null) {
+        upsertObjById(act.objId);
+      } else if (act.plotId) {
+        upsertPlotData(act.plotId);
+      } else if (kind === 'build' && incoming && Array.isArray(incoming.objects)) {
+        var hostIds = {};
+        S.objects.forEach(function (o) { hostIds[o.id] = true; });
+        incoming.objects.forEach(function (io) {
+          if (io && !hostIds[io.id]) S.objects.push(JSON.parse(JSON.stringify(io)));
+        });
+      }
+      markDirty(true);
+    } else if (kind === 'sell') {
+      structural = true;
+      if (act.objId != null) {
+        S.objects = S.objects.filter(function (o) { return o.id !== act.objId; });
+      }
+      markDirty(true);
+    } else if (kind === 'plot') {
+      structural = true;
+      if (act.plotId) {
+        upsertPlotData(act.plotId);
+      } else if (incoming && Array.isArray(incoming.plots)) {
+        incoming.plots.forEach(function (ipl) {
+          var existing = findIn(S.plots, ipl.id);
+          if (!existing) S.plots.push(JSON.parse(JSON.stringify(ipl)));
+          else if (ipl.end < existing.end) existing.end = ipl.end;
+        });
+      }
+      markDirty(true);
+    } else if (kind === 'staff') {
+      structural = true;
+      if (act.item) {
+        S.staff = S.staff || {};
+        if (act.hired) S.staff[act.item] = true;
+        else delete S.staff[act.item];
+        if (typeof syncStaff === 'function') syncStaff();
+      }
+    } else if (kind === 'upgrade' || kind === 'staff_train' || kind === 'franchise' || kind === 'repboost') {
+      structural = true;
+      markDirty(true);
+    } else if (kind === 'heartperk') {
+      structural = true;
+      if (act.item === 'build_boost' && typeof shaveActiveTimers === 'function') {
+        shaveActiveTimers(3600, 'Heart Boost!');
+      } else if (act.item === 'joy_party' && typeof boostMoraleAndFriendships === 'function') {
+        boostMoraleAndFriendships(null, true);
+      } else if (act.item === 'vip_magnet') {
+        S.vipMagnet = true;
+        S.lastSpecialDay = 0;
+        if (S.arrivalTimer > 5) S.arrivalTimer = 5;
+      } else if (act.objId != null) {
+        upsertObjById(act.objId);
+      }
+    } else if (kind === 'leash') {
+      var ld = findIn(S.dogs, act.dogId);
+      if (ld) {
+        if (ld.objId) { var prevOb = findIn(S.objects, ld.objId); if (prevOb && prevOb.dogId === ld.id) prevOb.dogId = null; ld.objId = null; }
+        ld.state = 'leashed';
+        ld.leashedBy = senderId;
+        ld.path = null; ld.anim = null; ld.seekObj = null; ld.autoRelease = false;
+      }
+    } else if (kind === 'unleash') {
+      var ud = findIn(S.dogs, act.dogId);
+      if (ud && (ud.leashedBy === senderId || ud.state === 'leashed')) {
+        ud.state = 'idle';
+        ud.idleT = ud.need ? 1e9 : 0.8;
+        ud.leashedBy = null;
+        ud.path = null;
+        if (typeof act.x === 'number' && typeof act.y === 'number') { ud.x = act.x; ud.y = act.y; }
+      }
+    } else if (kind === 'checkin') {
+      structural = true;
+      var cd = findIn(S.dogs, act.dogId);
+      var icd = (act && act.dogData) || (incoming ? findIn(incoming.dogs, act.dogId) : null);
+      if (cd && icd) {
+        cd.checkedIn = true; cd.state = icd.state || 'toYard'; cd.route = icd.route || cd.route;
+        cd.ownerId = null; cd.leashedBy = null; cd.pickupDay = icd.pickupDay; cd.pickupAt = icd.pickupAt;
+      }
+      var co = findIn(S.owners, act.ownerId);
+      if (co) {
+        co.state = 'walkOut'; co.slot = null;
+        if (typeof exitRoute === 'function') co.route = exitRoute(co);
+      }
+    } else if (kind === 'return') {
+      structural = true;
+      var rd = findIn(S.dogs, act.dogId);
+      if (rd) {
+        rd.state = 'leaving'; rd.ownerId = act.ownerId || rd.ownerId; rd.anim = null; rd.need = null; rd.route = null; rd.leashedBy = null;
+        if (rd.kennelId) { var rk = findIn(S.objects, rd.kennelId); if (rk) rk.reservedFor = null; rd.kennelId = null; }
+      }
+      var ro = findIn(S.owners, act.ownerId);
+      if (ro) {
+        ro.state = 'walkOut'; ro.slot = null;
+        if (typeof exitRoute === 'function') ro.route = exitRoute(ro);
+      }
+      S.totalServed = (S.totalServed || 0) + 1;
+      if (S.stats) { S.stats.served = (S.stats.served || 0) + 1; S.stats.tips = (S.stats.tips || 0) + (act.tip || 0); if (act.perfect) S.stats.perfect = (S.stats.perfect || 0) + 1; }
+      if (S.life) { S.life.served = (S.life.served || 0) + 1; if (act.perfect) S.life.perfect = (S.life.perfect || 0) + 1; }
+      if (!act.complaint) S.streak = (S.streak || 0) + 1; else S.streak = 0;
+      S.bestStreak = Math.max(S.bestStreak || 0, S.streak || 0);
+      if (act.perfect && typeof shaveActiveTimers === 'function') {
+        shaveActiveTimers(600 + (typeof franchiseTier === 'function' ? franchiseTier() : 0) * 120, 'PAWSOME!');
+      }
+    } else if (kind === 'pet' || kind === 'feed' || kind === 'treat' || kind === 'play' || kind === 'wash' || kind === 'kennel') {
+      var td = findIn(S.dogs, act.dogId);
+      var itd = (act && act.dogData) || (incoming ? findIn(incoming.dogs, act.dogId) : null);
+      if (td && itd) {
+        td.happy = itd.happy;
+        td.need = itd.need;
+        td.careCd = itd.careCd;
+        td.anim = itd.anim;
+        td.animT = 0;
+        td.animDur = itd.animDur || 0;
+        if (kind === 'wash' || kind === 'kennel') {
+          if (td.objId && td.objId !== itd.objId) {
+            var oldOb = findIn(S.objects, td.objId);
+            if (oldOb && oldOb.dogId === td.id) oldOb.dogId = null;
+          }
+          td.state = itd.state; td.actT = itd.actT; td.objId = itd.objId; td.leashedBy = null; td.x = itd.x; td.y = itd.y;
+          var newOb = findIn(S.objects, itd.objId);
+          if (newOb) newOb.dogId = td.id;
+        } else if (kind === 'feed' || kind === 'play') {
+          td.state = itd.state; td.actT = itd.actT; td.path = null;
+        }
+      }
+      if (S.stats) {
+        if (kind === 'pet') S.stats.pets = (S.stats.pets || 0) + 1;
+        else if (kind === 'feed' || kind === 'treat') S.stats.feeds = (S.stats.feeds || 0) + 1;
+        else if (kind === 'play') S.stats.fetches = (S.stats.fetches || 0) + 1;
+        else if (kind === 'wash') S.stats.baths = (S.stats.baths || 0) + 1;
+      }
+    } else if (kind === 'scoop') {
+      if (act.poopId != null) {
+        S.poops = S.poops.filter(function (pp) { return pp.id !== act.poopId; });
+      } else if (typeof act.x === 'number' && typeof act.y === 'number') {
+        var bestIdx = -1, bestD = 75;
+        for (var ppi = 0; ppi < S.poops.length; ppi++) {
+          var pd = dist(S.poops[ppi].x, S.poops[ppi].y, act.x, act.y);
+          if (pd < bestD) { bestD = pd; bestIdx = ppi; }
+        }
+        if (bestIdx >= 0) S.poops.splice(bestIdx, 1);
+      }
+      if (S.stats) S.stats.scoops = (S.stats.scoops || 0) + 1;
+    } else if (kind === 'chore') {
+      if (act.choreId != null && Array.isArray(S.chores)) {
+        S.chores = S.chores.filter(function (ch) { return ch.id !== act.choreId; });
+      }
+      structural = true;
+    } else if (kind === 'repevent') {
+      S.repEvent = null;
+      if (!act.complaint && typeof shaveActiveTimers === 'function') shaveActiveTimers(900, 'Event!');
+      structural = true;
+    } else if (kind === 'dayend' && incoming && incoming.day > S.day) {
+      applySharedState(incoming, true, act, false);
+      return;
+    }
+
+    if (typeof sanitizeAndMigrateState === 'function') sanitizeAndMigrateState(S);
+    snapshotEconomyBaseline();
+    if (typeof UI !== 'undefined' && UI.mode === 'build' && typeof renderBuildPanel === 'function') renderBuildPanel();
+
+    // Immediately save locally and broadcast Host's canonical state + ack back to Guest!
+    if (typeof saveGame === 'function') {
+      try {
+        window.__APPLYING_REMOTE_SYNC__ = true;
+        saveGame();
+      } finally {
+        window.__APPLYING_REMOTE_SYNC__ = false;
+      }
+    }
+    rev++;
+    lastTickSent = Date.now();
+    sendLiveTick();
+    if (structural) {
+      lastWorldSent = Date.now();
+      sendWorldSync(true);
     }
   }
 
@@ -1155,12 +1699,19 @@ var MP = (function () {
     }
   }
 
-  // Compact 5 Hz entity position & economy tick (~600 bytes instead of 25 KB) to eliminate WebSocket head-of-line blocking!
+  // Compact 4 Hz authoritative entity & economy tick (includes full dog/owner/poop reconciliation + action acks)
   function sendLiveTick() {
-    if (!S) return;
+    if (!S || awaitingInitialSync) return;
     sendPacket({
       type: 'live_tick',
       rev: rev,
+      acks: Object.assign({}, peerAcks),
+      x: S.player ? Math.round(S.player.x * 10) / 10 : undefined,
+      y: S.player ? Math.round(S.player.y * 10) / 10 : undefined,
+      dir: S.player ? S.player.dir : undefined,
+      face: S.player ? S.player.face : undefined,
+      moving: !!(S.player && S.player.moving),
+      carry: S.player ? S.player.carry : null,
       cash: S.cash,
       hearts: S.hearts || 0,
       rep: Math.round(S.rep * 100) / 100,
@@ -1169,71 +1720,187 @@ var MP = (function () {
       day: S.day,
       dayTime: Math.round(S.dayTime * 10) / 10,
       closing: !!S.closing,
+      streak: S.streak || 0,
+      totalServed: S.totalServed || 0,
       dogs: (S.dogs || []).map(function (d) {
         return {
-          id: d.id, x: Math.round(d.x), y: Math.round(d.y), face: d.face, state: d.state,
-          happy: Math.round(d.happy || 75), need: d.need, called: !!d.called,
-          leashedBy: d.leashedBy || null, objId: d.objId || null, anim: d.anim || null
+          id: d.id, x: Math.round(d.x), y: Math.round(d.y), face: d.face, moving: !!d.moving, state: d.state,
+          happy: Math.round(d.happy || 75), need: d.need, called: !!d.called, checkedIn: !!d.checkedIn,
+          leashedBy: d.leashedBy || null, npcHolder: d.npcHolder || null, objId: d.objId || null,
+          kennelId: d.kennelId || null, ownerId: d.ownerId || null, anim: d.anim || null,
+          actT: Math.round((d.actT || 0) * 10) / 10, pickupDay: d.pickupDay, pickupAt: d.pickupAt,
+          breed: d.breed, name: d.name, coat: d.coat, traits: d.traits, fav: d.fav, quirk: d.quirk,
+          collar: d.collar, overnight: !!d.overnight, special: d.special || null, title: d.title || null,
+          speed: d.speed, moraleBoost: !!d.moraleBoost, specialId: d.specialId || null
         };
       }),
       owners: (S.owners || []).map(function (o) {
         return {
-          id: o.id, dogId: o.dogId, x: Math.round(o.x), y: Math.round(o.y), dir: o.dir,
-          state: o.state, patience: Math.round(o.patience), hoT: Math.round((o.hoT || 0) * 100) / 100
+          id: o.id, dogId: o.dogId, kind: o.kind, name: o.name, look: o.look, slot: o.slot,
+          x: Math.round(o.x), y: Math.round(o.y), dir: o.dir, moving: !!o.moving,
+          state: o.state, patience: Math.round(o.patience), patienceMax: Math.round(o.patienceMax || 90),
+          hoT: Math.round((o.hoT || 0) * 100) / 100, angry: !!o.angry, byStaff: !!o.byStaff,
+          emote: o.emote || null, say: o.sayT > 0 ? o.say : '', sayT: Math.max(0, Math.round((o.sayT || 0) * 10) / 10)
         };
+      }),
+      poops: (S.poops || []).map(function (pp) {
+        return { id: pp.id, x: Math.round(pp.x), y: Math.round(pp.y), age: Math.round((pp.age || 0) * 10) / 10, seed: pp.seed || 0 };
       })
     }, false);
   }
 
   function applyLiveTick(tick) {
     if (!tick || !S) return;
-    if (typeof tick.cash === 'number' && isFinite(tick.cash)) { S.cash = clamp(Math.floor(tick.cash), 0, 1e9); lastKnownCash = S.cash; }
-    if (typeof tick.hearts === 'number' && isFinite(tick.hearts)) { S.hearts = clamp(Math.floor(tick.hearts), 0, 1e9); lastKnownHearts = S.hearts; }
-    if (typeof tick.rep === 'number' && isFinite(tick.rep)) S.rep = clamp(tick.rep, 0.5, 5.0);
-    if (typeof tick.level === 'number' && isFinite(tick.level)) S.level = Math.max(S.level || 1, clamp(Math.floor(tick.level), 1, 999));
-    if (typeof tick.xp === 'number' && isFinite(tick.xp)) S.xp = clamp(Math.floor(tick.xp), 0, 1e9);
-    if (typeof tick.dayTime === 'number' && isFinite(tick.dayTime) && tick.day === S.day) {
+    var pendingLocal = hasUnackedLocalAction(tick.acks);
+    if (!pendingLocal) {
+      if (typeof tick.cash === 'number' && isFinite(tick.cash)) S.cash = clamp(Math.floor(tick.cash), 0, 1e9);
+      if (typeof tick.hearts === 'number' && isFinite(tick.hearts)) S.hearts = clamp(Math.floor(tick.hearts), 0, 1e9);
+      if (typeof tick.rep === 'number' && isFinite(tick.rep)) S.rep = clamp(tick.rep, 0.5, 5.0);
+      if (typeof tick.level === 'number' && isFinite(tick.level)) S.level = Math.max(S.level || 1, clamp(Math.floor(tick.level), 1, 999));
+      if (typeof tick.xp === 'number' && isFinite(tick.xp)) S.xp = clamp(Math.floor(tick.xp), 0, 1e9);
+      if (typeof tick.streak === 'number') S.streak = tick.streak;
+      if (typeof tick.totalServed === 'number') S.totalServed = Math.max(S.totalServed || 0, tick.totalServed);
+      snapshotEconomyBaseline();
+    }
+    if (typeof tick.day === 'number' && tick.day > S.day) {
+      S.day = tick.day;
+      S.dayTime = typeof tick.dayTime === 'number' ? tick.dayTime : 0;
+      S.closing = !!tick.closing;
+    } else if (typeof tick.dayTime === 'number' && isFinite(tick.dayTime) && tick.day === S.day) {
       if (Math.abs(tick.dayTime - S.dayTime) > 2.5) S.dayTime = tick.dayTime;
       else S.dayTime = lerp(S.dayTime, tick.dayTime, 0.35);
+      S.closing = !!tick.closing;
     }
+
     var myLeashedId = (S.player && S.player.carry && S.player.carry.type === 'dog') ? S.player.carry.id : null;
-    if (Array.isArray(tick.dogs) && Array.isArray(S.dogs)) {
+    if (Array.isArray(tick.dogs)) {
       var dMap = {};
-      S.dogs.forEach(function (d) { dMap[d.id] = d; });
+      (S.dogs || []).forEach(function (d) { dMap[d.id] = d; });
+      var nextDogs = [];
+      var occObj = {};
       tick.dogs.forEach(function (td) {
         var ld = dMap[td.id];
-        if (!ld || myLeashedId === ld.id) return;
-        if (dist(ld.x, ld.y, td.x, td.y) < 120) {
-          ld.x = lerp(ld.x, td.x, 0.55);
-          ld.y = lerp(ld.y, td.y, 0.55);
+        if (!ld) {
+          // Brand-new dog spawned by Host: materialize immediately on Guest!
+          ld = {
+            id: td.id, breed: td.breed, name: td.name || 'Pup', coat: td.coat || 0,
+            traits: Array.isArray(td.traits) ? td.traits : [], fav: td.fav || 'pets', quirk: td.quirk || '',
+            collar: td.collar || '#d9574a', overnight: !!td.overnight, special: td.special || null,
+            title: td.title || null, speed: td.speed || 95, moraleBoost: !!td.moraleBoost, specialId: td.specialId || null,
+            x: td.x, y: td.y, ox: 0, oy: 0, face: td.face || 1, moving: !!td.moving, curSpeed: 0, walkDist: 0,
+            state: td.state || 'arriving', happy: typeof td.happy === 'number' ? td.happy : 80,
+            needs: { clean: 90 }, need: td.need || null, called: !!td.called, checkedIn: !!td.checkedIn,
+            leashedBy: td.leashedBy || null, npcHolder: td.npcHolder || null, objId: td.objId || null,
+            kennelId: td.kennelId || null, ownerId: td.ownerId || null, anim: td.anim || null, animT: 0, animDur: 0,
+            actT: td.actT || 0, pickupDay: td.pickupDay || S.day, pickupAt: td.pickupAt || 200,
+            petCd: 0, mood: 0, bark: 3, idleT: 1, stepped: [], path: null, route: null
+          };
+          if (td.id >= (S.nextId || 1)) S.nextId = td.id + 1;
+        } else if (myLeashedId === ld.id) {
+          // Keep local player's active leash position & state smooth
+          ld.state = 'leashed';
+          ld.leashedBy = playerId;
+          if (!pendingLocal) {
+            ld.happy = typeof td.happy === 'number' ? td.happy : ld.happy;
+            if ('need' in td) ld.need = td.need;
+            ld.called = !!td.called;
+          }
         } else {
-          ld.x = td.x;
-          ld.y = td.y;
+          var gap = dist(ld.x, ld.y, td.x, td.y);
+          if (gap < 150) {
+            var nx = lerp(ld.x, td.x, 0.55);
+            var ny = lerp(ld.y, td.y, 0.55);
+            ld.walkDist = (ld.walkDist || 0) + dist(ld.x, ld.y, nx, ny);
+            ld.x = nx; ld.y = ny;
+          } else {
+            ld.x = td.x; ld.y = td.y;
+          }
+          ld.face = td.face || ld.face;
+          ld.moving = !!td.moving || gap > 6;
+          if (!pendingLocal) {
+            ld.state = td.state || ld.state;
+            ld.happy = typeof td.happy === 'number' ? td.happy : ld.happy;
+            if ('need' in td) ld.need = td.need;
+            ld.called = !!td.called;
+            ld.checkedIn = !!td.checkedIn;
+            ld.leashedBy = td.leashedBy || null;
+            ld.npcHolder = td.npcHolder || null;
+            ld.objId = td.objId || null;
+            ld.kennelId = td.kennelId || null;
+            ld.ownerId = td.ownerId || null;
+            ld.anim = td.anim || null;
+            ld.actT = typeof td.actT === 'number' ? td.actT : ld.actT;
+            if (td.pickupDay != null) ld.pickupDay = td.pickupDay;
+            if (td.pickupAt != null) ld.pickupAt = td.pickupAt;
+          }
         }
-        ld.face = td.face || ld.face;
-        ld.state = td.state || ld.state;
-        ld.happy = typeof td.happy === 'number' ? td.happy : ld.happy;
-        if ('need' in td) ld.need = td.need;
-        ld.called = !!td.called;
-        ld.leashedBy = td.leashedBy || null;
+        if (ld.objId && (ld.state === 'bath' || ld.state === 'kennel')) occObj[ld.objId] = ld.id;
+        nextDogs.push(ld);
       });
+      S.dogs = nextDogs;
+      // Clear local leash carry if that dog actually left the daycare on Host
+      if (myLeashedId && !S.dogs.some(function (d) { return d.id === myLeashedId; })) {
+        S.player.carry = null;
+      }
+      // Keep station occupancy (bath tub / kennel dogId) synced with Host
+      if (Array.isArray(S.objects)) {
+        S.objects.forEach(function (o) {
+          if (o && (o.type === 'tub' || o.type === 'groomhouse' || o.type === 'kennel')) {
+            o.dogId = occObj[o.id] || null;
+          }
+        });
+      }
     }
-    if (Array.isArray(tick.owners) && Array.isArray(S.owners)) {
+
+    if (Array.isArray(tick.owners)) {
       var oMap = {};
-      S.owners.forEach(function (o) { oMap[o.id] = o; });
+      (S.owners || []).forEach(function (o) { oMap[o.id] = o; });
+      var nextOwners = [];
       tick.owners.forEach(function (to) {
         var lo = oMap[to.id];
-        if (!lo) return;
-        if (dist(lo.x, lo.y, to.x, to.y) < 120) {
-          lo.x = lerp(lo.x, to.x, 0.55);
-          lo.y = lerp(lo.y, to.y, 0.55);
+        if (!lo) {
+          lo = {
+            id: to.id, dogId: to.dogId, kind: to.kind || 'dropoff', name: to.name || 'Owner',
+            look: to.look || 0, slot: to.slot, x: to.x, y: to.y, dir: to.dir || 'up',
+            moving: !!to.moving, walkT: 0, walkDist: 0, state: to.state || 'walkIn',
+            patience: to.patience || 80, patienceMax: to.patienceMax || 90,
+            hoT: to.hoT || 0, angry: !!to.angry, byStaff: !!to.byStaff,
+            emote: to.emote || null, emoteT: 0, say: to.say || '', sayT: to.sayT || 0, route: []
+          };
+          if (to.id >= (S.nextId || 1)) S.nextId = to.id + 1;
         } else {
-          lo.x = to.x;
-          lo.y = to.y;
+          // If local Guest is actively standing on handover mat with this owner, don't reset their local handover progress!
+          var localHandover = lo.state === 'handover' && !lo.byStaff && typeof playerOnMat === 'function' && playerOnMat();
+          var ogap = dist(lo.x, lo.y, to.x, to.y);
+          if (ogap < 150) {
+            var ox = lerp(lo.x, to.x, 0.55);
+            var oy = lerp(lo.y, to.y, 0.55);
+            lo.walkDist = (lo.walkDist || 0) + dist(lo.x, lo.y, ox, oy);
+            lo.x = ox; lo.y = oy;
+          } else {
+            lo.x = to.x; lo.y = to.y;
+          }
+          lo.dir = to.dir || lo.dir;
+          lo.moving = !!to.moving || ogap > 6;
+          if (!localHandover && !pendingLocal) {
+            lo.state = to.state || lo.state;
+            if (typeof to.hoT === 'number') lo.hoT = to.hoT;
+          }
+          if (typeof to.patience === 'number') lo.patience = to.patience;
+          if (typeof to.patienceMax === 'number') lo.patienceMax = to.patienceMax;
+          lo.angry = !!to.angry;
+          lo.byStaff = !!to.byStaff;
+          if (to.emote) lo.emote = to.emote;
+          if (to.say && to.sayT > 0 && !lo.sayT) { lo.say = to.say; lo.sayT = to.sayT; }
         }
-        lo.dir = to.dir || lo.dir;
-        lo.state = to.state || lo.state;
-        if (typeof to.patience === 'number') lo.patience = to.patience;
+        nextOwners.push(lo);
+      });
+      S.owners = nextOwners;
+    }
+
+    if (Array.isArray(tick.poops) && !pendingLocal) {
+      S.poops = tick.poops.map(function (pp) {
+        return { id: pp.id, x: pp.x, y: pp.y, age: pp.age || 0, seed: pp.seed || 0 };
       });
     }
   }
@@ -1241,14 +1908,21 @@ var MP = (function () {
   // ---------------- Outgoing Updates & Actions ----------------
   function update(dt) {
     var nowMs = Date.now();
+    // If joining an empty/brand-new room with no retained snapshot and no partner after 4s, clear awaitingInitialSync
+    if (awaitingInitialSync && joiningWaitUntil > 0 && nowMs > joiningWaitUntil) {
+      awaitingInitialSync = false;
+      computeHostId();
+    }
+
     // Interpolate remote peers at 60 FPS with velocity dead-reckoning (client-side prediction)
     var anyPartnerOnline = false;
+    var peerChanged = false;
     for (var pid in peers) {
       var rp = peers[pid];
       if (!rp.online) continue;
       if (nowMs - (rp.lastPacketAt || 0) > 15000) {
         rp.online = false;
-        updateCoopBadge();
+        peerChanged = true;
         continue;
       }
       anyPartnerOnline = true;
@@ -1257,9 +1931,9 @@ var MP = (function () {
         rp.emoteT = (rp.emoteT || 0) + dt;
         if (rp.emoteT > 1.3) rp.emote = null;
       }
-      // Dead-reckoning: while moving and within 165ms of last packet, extrapolate target position by (vx, vy) so partner never pauses between packets!
+      // Dead-reckoning: while moving and within 220ms of last packet, extrapolate target position by (vx, vy)
       var ageSec = (nowMs - (rp.lastPacketAt || nowMs)) / 1000;
-      if (rp.moving && ageSec < 0.165 && (rp.vx || rp.vy)) {
+      if (rp.moving && ageSec < 0.22 && (rp.vx || rp.vy)) {
         var predX = (rp.tx || rp.x) + rp.vx * dt;
         var predY = (rp.ty || rp.y) + rp.vy * dt;
         if (typeof canStand === 'function' ? canStand(predX, predY) : true) {
@@ -1271,7 +1945,7 @@ var MP = (function () {
       var dy = (rp.ty || rp.y) - rp.y;
       var d = Math.sqrt(dx * dx + dy * dy);
       if (d > 0.4) {
-        var step = Math.min(d, Math.max(265, d * 14) * dt);
+        var step = Math.min(d, Math.max(265, d * 12) * dt);
         rp.x += (dx / d) * step;
         rp.y += (dy / d) * step;
         rp.walkDist = (rp.walkDist || 0) + step;
@@ -1283,14 +1957,19 @@ var MP = (function () {
         if (!rp.moving) rp.walkT = 0;
       }
     }
+    if (peerChanged) {
+      computeHostId();
+      updateCoopBadge();
+    }
 
     if (!inGame || !S || !S.player) return;
 
-    // Broadcast local player movement at 30 Hz (33ms) while moving, or immediately (0ms) on start/stop/direction/carry change!
+    // Broadcast local player movement at 10 Hz (100ms) while moving (stays well below public MQTT rate limits!)
+    // or immediately on start/stop/direction/carry change, plus a 2s idle heartbeat so partner presence never times out.
     var p = S.player;
     var carrySig = p.carry ? (p.carry.type + ':' + (p.carry.id || p.carry.n || 1)) : '';
     var stateChanged = (!!p.moving !== lastSentMoving) || (p.dir !== lastSentDir) || (carrySig !== lastSentCarrySig);
-    var moveInterval = p.moving ? 33 : 650;
+    var moveInterval = p.moving ? 100 : 2000;
     if (stateChanged || nowMs - lastMoveSent >= moveInterval) {
       var dtSent = Math.max(0.016, (nowMs - (prevSentAt || nowMs)) / 1000);
       var vx = (p.moving && prevSentX != null) ? Math.round((p.x - prevSentX) / dtSent) : 0;
@@ -1321,53 +2000,125 @@ var MP = (function () {
       sendPacket({ type: 'ping', t0: nowMs }, false);
     }
 
-    // Fast lightweight 5 Hz entity tick when a partner is online, plus full retained snapshot every 3.5s
-    var isHost = !hostId || hostId === playerId || !peers[hostId] || !peers[hostId].online;
-    var waitRemoteSnap = joiningWaitUntil > nowMs && !roomState;
-    if (isHost && !waitRemoteSnap && anyPartnerOnline && nowMs - lastTickSent >= 200) {
+    // Authoritative Sim Host broadcasts 4 Hz compact entity+economy ticks & periodic full snapshots
+    var hostNow = isSimHost();
+    // Guest reliable outbox: automatically retransmit any un-acked Guest action every 750ms over QoS 0 MQTT (deduplicated on Host!)
+    if (!hostNow && anyPartnerOnline && pendingActions.length) {
+      for (var ai = pendingActions.length - 1; ai >= 0; ai--) {
+        var pa = pendingActions[ai];
+        if (pa.seq <= hostAckedActSeq || pa.tries >= 6) {
+          pendingActions.splice(ai, 1);
+          continue;
+        }
+        if (nowMs - pa.sentAt >= 750) {
+          pa.sentAt = nowMs;
+          pa.tries++;
+          sendPacket(pa.pkt, false);
+        }
+      }
+    } else if (hostNow && pendingActions.length) {
+      pendingActions = [];
+    }
+    if (hostNow && !awaitingInitialSync && anyPartnerOnline && nowMs - lastTickSent >= 250) {
       lastTickSent = nowMs;
       sendLiveTick();
     }
-    if (isHost && !waitRemoteSnap && nowMs - lastWorldSent >= 3500) {
+    if (hostNow && !awaitingInitialSync && nowMs - lastWorldSent >= 4500) {
       lastWorldSent = nowMs;
       sendWorldSync(true);
     }
   }
 
   function sendWorldSync(alsoHttp) {
-    if (!S) return;
+    if (!S || awaitingInitialSync) return;
     var st = serializeSharedState();
     roomState = st;
     saveLocalRoomFallback(null);
     sendPacket({
       type: 'world_sync',
       rev: rev,
-      x: S.player.x,
-      y: S.player.y,
-      dir: S.player.dir,
-      face: S.player.face,
-      moving: S.player.moving,
-      carry: S.player.carry,
-      emote: S.player.emote,
+      acks: Object.assign({}, peerAcks),
+      x: S.player ? Math.round(S.player.x * 10) / 10 : undefined,
+      y: S.player ? Math.round(S.player.y * 10) / 10 : undefined,
+      dir: S.player ? S.player.dir : undefined,
+      face: S.player ? S.player.face : undefined,
+      moving: !!(S.player && S.player.moving),
+      carry: S.player ? S.player.carry : null,
+      emote: S.player ? S.player.emote : null,
       state: st,
-    }, alsoHttp);
+    }, !!alsoHttp && isSimHost());
   }
 
   function recordAction(kind, details) {
     if (!S) return;
     lastLocalActionAt = Date.now();
     rev++;
+    localActSeq++;
     var cashDelta = (typeof lastKnownCash === 'number' && isFinite(lastKnownCash)) ? (S.cash - lastKnownCash) : 0;
-    lastKnownCash = S.cash;
     var heartsDelta = (typeof lastKnownHearts === 'number' && isFinite(lastKnownHearts)) ? ((S.hearts || 0) - lastKnownHearts) : 0;
-    lastKnownHearts = S.hearts || 0;
-    var act = Object.assign({ kind: kind, day: S.day, cashDelta: cashDelta, heartsDelta: heartsDelta }, details || {});
-    var st = serializeSharedState();
-    roomState = st;
+    var xpDelta = 0;
+    if (typeof lastKnownXp === 'number' && typeof lastKnownLevel === 'number') {
+      if ((S.level || 1) === lastKnownLevel) xpDelta = Math.max(0, (S.xp || 0) - lastKnownXp);
+      else if ((S.level || 1) > lastKnownLevel && typeof lvlNeed === 'function') {
+        xpDelta = Math.max(0, lvlNeed(lastKnownLevel) - lastKnownXp + (S.xp || 0));
+      }
+    }
+    var repDelta = (typeof lastKnownRep === 'number' && isFinite(lastKnownRep)) ? Math.round(((S.rep || 3.0) - lastKnownRep) * 1000) / 1000 : 0;
+    snapshotEconomyBaseline();
 
-    // Local fallback event
+    var act = Object.assign({
+      kind: kind,
+      day: S.day,
+      cashDelta: cashDelta,
+      heartsDelta: heartsDelta,
+      xpDelta: xpDelta,
+      repDelta: repDelta,
+    }, details || {});
+    var hostNow = isSimHost();
+
+    // For Guest actions while Host is online, attach ONLY compact targeted entity data (~500 bytes instead of 25 KB!)
+    // so QoS 0 public MQTT never fragments or drops Guest actions!
+    var st = hostNow ? serializeSharedState() : null;
+    if (hostNow) {
+      roomState = st;
+    } else {
+      if (act.objId != null && Array.isArray(S.objects)) {
+        for (var oi = 0; oi < S.objects.length; oi++) {
+          if (S.objects[oi].id === act.objId) { act.objData = JSON.parse(JSON.stringify(S.objects[oi])); break; }
+        }
+      }
+      if (act.plotId && Array.isArray(S.plots)) {
+        for (var pi = 0; pi < S.plots.length; pi++) {
+          if (S.plots[pi].id === act.plotId) { act.plotData = JSON.parse(JSON.stringify(S.plots[pi])); break; }
+        }
+      }
+      if (act.dogId != null && Array.isArray(S.dogs)) {
+        for (var di = 0; di < S.dogs.length; di++) {
+          if (S.dogs[di].id === act.dogId) {
+            var gd = S.dogs[di];
+            act.dogData = {
+              id: gd.id, happy: gd.happy, need: gd.need, careCd: gd.careCd, anim: gd.anim, animDur: gd.animDur,
+              state: gd.state, actT: gd.actT, objId: gd.objId, leashedBy: gd.leashedBy, x: gd.x, y: gd.y,
+              checkedIn: gd.checkedIn, route: gd.route, pickupDay: gd.pickupDay, pickupAt: gd.pickupAt
+            };
+            break;
+          }
+        }
+      }
+      act.meta = {
+        nextId: S.nextId,
+        tutorial: S.tutorial,
+        tutorialDone: S.tutorialDone,
+        builtPads: S.builtPads,
+        upgrades: S.upgrades,
+        staffLvl: S.staffLvl,
+        franchiseTier: S.franchiseTier,
+        bestStreak: S.bestStreak,
+      };
+    }
+
     var localEv = null;
-    if (kind !== 'wave') {
+    if (kind !== 'wave' && kind !== 'leash' && kind !== 'unleash') {
       seq++;
       localEv = {
         seq: seq,
@@ -1396,14 +2147,31 @@ var MP = (function () {
     }
     saveLocalRoomFallback(localEv);
 
-    sendPacket({
+    if (hostNow) hostAckedActSeq = localActSeq;
+    var retainNow = hostNow && !awaitingInitialSync && kind !== 'wave' && kind !== 'leash' && kind !== 'unleash';
+    var pkt = {
       type: 'action',
       rev: rev,
       seq: seq,
+      clientActSeq: localActSeq,
+      fromHost: hostNow,
+      acks: hostNow ? Object.assign({}, peerAcks) : undefined,
+      x: S.player ? Math.round(S.player.x * 10) / 10 : undefined,
+      y: S.player ? Math.round(S.player.y * 10) / 10 : undefined,
+      dir: S.player ? S.player.dir : undefined,
+      face: S.player ? S.player.face : undefined,
+      moving: !!(S.player && S.player.moving),
+      carry: S.player ? S.player.carry : null,
       action: act,
       event: localEv,
       state: st,
-    }, true);
+    };
+    if (!hostNow && kind !== 'wave') {
+      pendingActions.push({ seq: localActSeq, pkt: pkt, sentAt: Date.now(), tries: 1 });
+      if (pendingActions.length > 20) pendingActions.shift();
+    }
+    sendPacket(pkt, retainNow);
+    if (retainNow) lastWorldSent = Date.now();
   }
 
   function ackSeq(newSeq) {
@@ -1412,7 +2180,6 @@ var MP = (function () {
       lastSeenSeq = target;
       unreadEvents = unreadEvents.filter(function (e) { return e.seq > lastSeenSeq; });
       saveTabSession();
-      sendPacket({ type: 'ack_summary', seq: lastSeenSeq }, true);
     }
   }
 
@@ -1715,14 +2482,19 @@ var MP = (function () {
   function onStartGame(fresh) {
     if (fresh) {
       inGame = true;
+      awaitingInitialSync = false;
+      joinedAsGuest = false;
+      joiningWaitUntil = 0;
       lastResetTs = Date.now();
       lastLocalActionAt = lastResetTs;
+      peerAcks = {};
       if (S) {
         S.player.look = playerLook;
         S.objects = [];
         S.chores = [];
         S.created = lastResetTs;
         S.savedAt = lastResetTs;
+        snapshotEconomyBaseline();
       }
       rev = Math.max(rev, (roomState && roomState.rev) || 0) + 1000;
       seq = 0;
@@ -1735,10 +2507,12 @@ var MP = (function () {
       if (mqttConnected && mqttWs && mqttWs.readyState === WebSocket.OPEN) {
         pendingRetainedPublish = false;
         sendPacket({ type: 'new_game', rev: rev, ts: lastResetTs, state: roomState }, true);
-        publishRetainedSnapshot();
+        publishRetainedSnapshot(true);
       } else {
         pendingRetainedPublish = true;
       }
+      computeHostId();
+      sendJoin();
       updateCoopBadge();
       return false;
     }
@@ -1749,7 +2523,8 @@ var MP = (function () {
       var rTs = roomState.savedAt || roomState.created || 0;
       var lTs = (S && (S.savedAt || S.created)) || 0;
       if (!S) newState();
-      if (rTs >= lTs || (S.objects && S.objects.length === 0 && Array.isArray(roomState.objects) && roomState.objects.length > 0)) {
+      if (awaitingInitialSync || rTs >= lTs || (S.objects && S.objects.length === 0 && Array.isArray(roomState.objects) && roomState.objects.length > 0)) {
+        awaitingInitialSync = false;
         applySharedState(roomState, true);
         appliedShared = true;
       }
@@ -1758,14 +2533,14 @@ var MP = (function () {
     inGame = true;
     if (S) {
       S.player.look = playerLook;
-      lastKnownCash = S.cash;
-      lastKnownHearts = S.hearts || 0;
+      snapshotEconomyBaseline();
     }
     // Offset second player slightly so they don't stand on the exact same pixel at start
     if (S && slot === 2 && dist(S.player.x, S.player.y, PLAYER_START[0] * TILE, PLAYER_START[1] * TILE) < 5) {
       S.player.x = (PLAYER_START[0] + 1.2) * TILE;
     }
 
+    computeHostId();
     sendJoin();
     updateCoopBadge();
 
@@ -1840,9 +2615,10 @@ var MP = (function () {
     var onlinePeers = getOnlinePeerList();
     var looks = (typeof PLAYER_LOOKS !== 'undefined') ? PLAYER_LOOKS : [];
     var pingTxt = peerLatencyMs > 0 ? (' · ⚡ ' + peerLatencyMs + 'ms') : '';
+    var roleTxt = onlinePeers.length ? (isSimHost() ? ' · 👑 Host' : ' · 🐾 Synced') : '';
     var netBadge = mqttConnected
-      ? '🟢 Low-Latency Cloud Sync · Room ' + esc(roomCode) + pingTxt
-      : '🟡 Local / LAN Sync · Room ' + esc(roomCode) + pingTxt;
+      ? '🟢 Cloud Sync (' + currentBrokerLabel() + ') · Room ' + esc(roomCode) + roleTxt + pingTxt
+      : '🟡 Reconnecting… · Room ' + esc(roomCode) + pingTxt;
 
     var peersHtml = '<div class="mp-player-list">' +
       '<div class="mp-p-row me"><img src="' + (typeof lookPortrait === 'function' ? lookPortrait(playerLook, 44) : '') + '">' +
@@ -1993,6 +2769,9 @@ var MP = (function () {
   function switchRoom(newCode, isJoiningExisting) {
     roomCode = cleanCode(newCode);
     peers = {};
+    peerAcks = {};
+    pendingActions = [];
+    hostId = null;
     roomState = null;
     unreadEvents = [];
     recentEvents = [];
@@ -2000,15 +2779,21 @@ var MP = (function () {
     if (isJoiningExisting) {
       lastResetTs = 0;
       lastLocalActionAt = 0;
-      joiningWaitUntil = Date.now() + 4000;
+      awaitingInitialSync = true;
+      joinedAsGuest = true;
+      joiningWaitUntil = Date.now() + 4500;
+    } else {
+      awaitingInitialSync = false;
+      joinedAsGuest = false;
+      joiningWaitUntil = 0;
     }
     saveTabSession();
     loadLocalRoomFallback();
+    if (roomState && roomState.version === 2 && !isJoiningExisting) {
+      awaitingInitialSync = false;
+    }
     if (mqttWs && mqttWs.readyState === WebSocket.OPEN && mqttConnected) {
-      try {
-        mqttWs.send(mqttSubPacket(mqttTopicLive(roomCode), 3));
-        mqttWs.send(mqttSubPacket(mqttTopicSnap(roomCode), 4));
-      } catch (e) {}
+      subscribeCurrentRoom(mqttWs);
     } else {
       connectCloudRelay();
     }
@@ -2225,9 +3010,13 @@ var MP = (function () {
     get roomCode() { return roomCode; },
     get slot() { return slot; },
     get peers() { return peers; },
+    get roomState() { return roomState; },
+    get hostId() { return computeHostId(); },
     get hasRemoteSave() { return !!(roomState && roomState.version === 2); },
+    isSimHost: isSimHost,
     isCloudReady: isCloudReady,
     reconnectNow: reconnectNow,
+    syncSoon: syncSoon,
     getPeer: function (id) { return peers[id] || null; },
     getOnlinePeers: getOnlinePeerList,
     setProfile: setProfile,

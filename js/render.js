@@ -278,6 +278,14 @@ function drawRemotePeer(c, rp, t) {
     c.beginPath(); c.moveTo(x0, y0); c.quadraticCurveTo((x0 + x1) / 2, Math.max(y0, y1) + 14, x1, y1); c.stroke();
   }
   if (car && car.type !== 'dog' && p.dir === 'up') drawCarry(c, car.type, p.x + a.handX, p.y + a.handY, t, car);
+  // Subtle co-op partner ring at feet so partner stands out clearly against staff & customers
+  c.save();
+  c.strokeStyle = 'rgba(128, 255, 224, 0.85)';
+  c.fillStyle = 'rgba(58, 168, 154, 0.16)';
+  c.lineWidth = 2;
+  ell(c, rp.x, rp.y + 1, 16 + Math.sin(t * 4) * 1.2, 8 + Math.sin(t * 4) * 0.6);
+  c.fill(); c.stroke();
+  c.restore();
   drawPersonEntity(c, p, t, look);
   if (car && car.type !== 'dog' && p.dir !== 'up') drawCarry(c, car.type, p.x + a.handX, p.y + a.handY, t, car);
   c.font = '14px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
@@ -931,6 +939,12 @@ function drawEdgeIndicators(c, t) {
     if (o.readyRibbon) items.push({ x: (o.x + o.w / 2) * TILE, y: (o.y + o.h / 2) * TILE, icon: '🎀', col: '#fff4cc', urgent: false, small: true });
     else if (typeof canLendAPaw === 'function' && canLendAPaw(o)) items.push({ x: (o.x + o.w / 2) * TILE, y: (o.y + o.h / 2) * TILE, icon: '🤝', col: '#dff5ef', urgent: false, small: true });
   });
+  if (typeof MP !== 'undefined') {
+    MP.getOnlinePeers().forEach(function (rp) {
+      if (rp.inGame === false) return;
+      items.push({ x: rp.x, y: rp.y - 24, icon: '🐾', label: rp.name || 'Partner', col: '#c8fff4', urgent: false, small: false });
+    });
+  }
   S.dogs.forEach(function (d) { if (!d.checkedIn || !d.need || d.need.self || d.state === 'leaving' || d.state === 'leashed' || d.state === 'kennel' || d.need.t < 2) return; items.push({ x: d.x, y: d.y - 20, icon: NEED_INFO[d.need.type].icon, col: d.need.t > NEED_GRACE ? '#ffd9d4' : '#fffaf0', urgent: d.need.t > NEED_GRACE, small: true }); });
   var padX = 32, topY = 114, botY = VIEW.h - 88;
   items.forEach(function (it) {
@@ -944,6 +958,10 @@ function drawEdgeIndicators(c, t) {
     c.save(); c.rotate(ang); c.beginPath(); c.moveTo(r + 10, 0); c.lineTo(r - 3, -8); c.lineTo(r - 3, 8); c.closePath(); c.fill(); c.stroke(); c.restore();
     ell(c, 0, 0, r, r); c.fill(); c.stroke();
     emoji(c, it.icon, 0, 1, it.small ? 14 : 18);
+    if (it.label) {
+      c.font = '11px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'top';
+      outlined(c, it.label, 0, r + 3, '#c8fff4');
+    }
     c.restore();
   });
 }
