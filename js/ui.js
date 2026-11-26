@@ -138,6 +138,7 @@ function enterPlayFromState(fresh) {
   if (typeof setActiveSession === 'function') setActiveSession(true);
   if (typeof MP !== 'undefined') MP.onStartGame(isFreshStart);
   UI.cashShown = S.cash; FX.parts = []; FX.floats = [];
+  if (typeof MINIGAMES !== 'undefined' && MINIGAMES.reset) MINIGAMES.reset();
   UI.modalStack = []; $('modalwrap').hidden = true; $('modal').innerHTML = ''; UI.prevMode = 'play'; setMode('play');
   CAM.ready = false; sfx('day_start'); setTimeout(dayBanner, 650);
   var gift = isJoiningRoom ? null : dailyGift();
@@ -150,7 +151,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Tap 🔨 Shop at the bottom to select and place your first Kennel on the lawn!', 'good');
   if (!isJoiningRoom) saveGame();
 }
-var CURRENT_ASSET_VER = '26';
+var CURRENT_ASSET_VER = '27';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();
@@ -703,7 +704,7 @@ function renderBuildPanel() {
     h += '<div class="bp-sub">Staff — hire &amp; train infinitely (Lv 1 → Lv ∞) for faster speed &amp; bonus pay!</div>';
     STAFF.forEach(function (s) {
       var hired = staffHired(s.id), locked = S.level < s.lvl, sLv = hired ? staffLvl(s.id) : 0, tCost = hired ? staffTrainCost(s.id) : 0;
-      h += '<div class="item' + (locked ? ' locked' : '') + (hired && S.cash < tCost ? ' poor' : '') + '" data-staff="' + s.id + '" style="grid-column:1/-1"><div class="ic">' + s.icon + '</div><div class="tx"><b>' + s.name + (hired ? ' <span style="color:#8e6bd6">Lv ' + sLv + '</span>' : '') + '</b><small>' + s.desc + (hired ? ' · Tap to Train Lv ' + (sLv + 1) + ' (+12% speed, +care bonus &amp; +15% offline pay)' : '') + '</small></div><div class="pr">' +
+      h += '<div class="item' + (locked ? ' locked' : '') + (hired && S.cash < tCost ? ' poor' : '') + '" data-staff="' + s.id + '" style="grid-column:1/-1"><div class="ic">' + s.icon + '</div><div class="tx"><b>' + s.name + (hired ? ' <span style="color:#8e6bd6">Lv ' + sLv + '</span>' : '') + '</b><small>' + s.desc + (hired ? ' · Tap to Train Lv ' + (sLv + 1) + ' (+6% speed, faster work, +care bonus &amp; +15% offline pay)' : '') + '</small></div><div class="pr">' +
         (hired ? '⬆️ ' + fmtMoney(tCost) : locked ? '🔒 Lv ' + s.lvl : fmtMoney(s.wage) + '/d') + '</div></div>';
     });
   } else {
@@ -812,7 +813,7 @@ function bpShowDesc(txt) {
         var curSLv = staffLvl(sid), trCost = staffTrainCost(sid);
         UI.actionStaff = sid;
         openModal('<h2>' + sd.icon + ' ' + esc(sd.name) + ' <small>Lv ' + curSLv + '</small></h2>' +
-          '<p style="text-align:center">' + esc(sd.desc) + '<br><small>Current bonuses: +' + ((curSLv - 1) * 12) + '% walk speed · +' + ((curSLv - 1) * 4) + ' care happiness · +' + ((curSLv - 1) * 15) + '% offline shift pay</small></p>' +
+          '<p style="text-align:center">' + esc(sd.desc) + '<br><small>Current bonuses: +' + ((curSLv - 1) * 6) + '% walk speed · +' + ((curSLv - 1) * 5) + '% work pace · +' + ((curSLv - 1) * 4) + ' care happiness · +' + ((curSLv - 1) * 15) + '% offline shift pay</small></p>' +
           '<div class="row col">' +
           '<button data-act="trainstaff" class="primary">⬆️ Train to Lv ' + (curSLv + 1) + ' (' + fmtMoney(trCost) + ')</button>' +
           '<button data-act="firestaff" class="flat">Let ' + esc(sd.name) + ' Go (' + fmtMoney(sd.wage) + '/d)</button>' +
@@ -1494,6 +1495,7 @@ function frame(ts) {
       var active = netOk && (UI.mode === 'play' || UI.mode === 'build') && !document.hidden;
       if (active) update(dt);
       else if (netOk) updateFX(dt * 0.5);
+      if (netOk && !document.hidden && typeof MINIGAMES !== 'undefined') MINIGAMES.tick(dt);
       // Portrait iPhone camera centered horizontally on the player!
       var P = S.player, v = DIRV[P.dir] || [0, 0];
       var tx = P.x + (P.moving ? v[0] * 32 : 0);

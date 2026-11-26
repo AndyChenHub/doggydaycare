@@ -1591,6 +1591,11 @@ var MP = (function () {
       S.repEvent = null;
       if (!act.complaint && typeof shaveActiveTimers === 'function') shaveActiveTimers(900, 'Event!');
       structural = true;
+    } else if (kind === 'minigame') {
+      if (act.perfect && act.shave > 0 && typeof shaveActiveTimers === 'function') {
+        shaveActiveTimers(act.shave, act.name || 'Mini-Game!');
+      }
+      structural = true;
     } else if (kind === 'dayend' && incoming && incoming.day > S.day) {
       applySharedState(incoming, true, act, false);
       return;
@@ -1673,6 +1678,9 @@ var MP = (function () {
       if (typeof sfx === 'function') sfx('perfect');
     } else if (act.kind === 'chore' || act.kind === 'repevent') {
       if (act.earned > 0) toast((act.icon || '✨') + ' ' + partnerName + ': ' + (act.name || 'completed task') + ' (+' + fmtMoney(act.earned) + ')', 'good');
+    } else if (act.kind === 'minigame') {
+      if (act.perfect && act.earned > 0) toast((act.icon || '🏆') + ' ' + partnerName + ' won ' + (act.name || 'a mini-game') + ' (+' + fmtMoney(act.earned) + ')!', 'good');
+      else if (act.cost > 0) toast((act.icon || '📊') + ' ' + partnerName + ' missed ' + (act.name || 'an audit') + ' (-' + fmtMoney(act.cost) + ')', '');
     } else if (act.kind === 'sell') {
       toast('💸 ' + partnerName + ' sold ' + (act.name || 'an item') + ' (+' + fmtMoney(act.earned || 0) + ')', '');
     } else if (act.kind === 'plot') {
@@ -2281,7 +2289,9 @@ var MP = (function () {
           break;
         case 'chore':
         case 'repevent':
+        case 'minigame':
           cashEarned += e.earned || 0;
+          cashSpent += e.cost || 0;
           break;
         case 'checkin':
           if (e.dogName && dogsCheckedIn.indexOf(e.dogName) < 0) dogsCheckedIn.push(e.dogName);

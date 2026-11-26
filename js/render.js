@@ -313,6 +313,12 @@ function drawNpc(c, n, t) {
   var sLv = typeof staffLvl === 'function' ? staffLvl(n.id) : 1;
   c.font = '12px ' + HEAD_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
   outlined(c, sDef ? (sDef.icon + ' ' + sDef.name + (sLv > 1 ? ' Lv' + sLv : '')) : n.id, n.x, n.y + 11, sLv > 1 ? '#ffd54a' : '#ffe9b0');
+  if (n.work && n.work.dur > 0) {
+    var wf = clamp((n.work.prog || 0) / n.work.dur, 0, 1);
+    var bx = n.x - 16, by = n.y - 68;
+    c.fillStyle = 'rgba(40,26,16,0.75)'; rr(c, bx, by, 32, 6, 3); c.fill();
+    c.fillStyle = '#ffe066'; rr(c, bx + 1, by + 1, Math.max(2, 30 * wf), 4, 2); c.fill();
+  }
   if (n.sayT > 0 && n.say) bubble(c, n.x, n.y - 82, n.say, { size: 11 });
 }
 function drawCarry(c, kind, x, y, t, car) {

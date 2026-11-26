@@ -1297,7 +1297,7 @@ function trainStaff(id) {
   var cx = npc ? npc.x : S.player.x, cy = npc ? npc.y - 40 : S.player.y - 40;
   confetti(cx, cy, 28);
   float(cx, cy - 16, s.icon + ' ' + s.name + ' Lv ' + nextLv + '!', '#ffe66d', 1.25);
-  toast('⬆️ Trained ' + s.icon + ' ' + s.name + ' to Lv ' + nextLv + '! (+12% walk speed, +care bonus & +15% offline earnings!)', 'good');
+  toast('⬆️ Trained ' + s.icon + ' ' + s.name + ' to Lv ' + nextLv + '! (+6% speed, faster work, +care bonus & +15% offline earnings!)', 'good');
   sfx('level'); gainXP(8 + nextLv * 4);
   if (typeof MP !== 'undefined') MP.recordAction('staff_train', { item: id, name: s.name + ' Lv ' + nextLv, icon: s.icon, cost: cost, level: nextLv });
   saveGame();
@@ -1318,13 +1318,36 @@ function totalStaffPower() {
   return p;
 }
 function staffWages() { var w = 0; STAFF.forEach(function (s) { if (staffHired(s.id)) w += s.wage; }); return w; }
+function staffMoveSpeed(id) {
+  var lv = staffLvl(id) || 1;
+  // Deliberate stroll (~82 px/s at Lv 1 vs player's 250 px/s), scaling gently +6%/lv up to 1.6x max so big yards require more staff!
+  return 82 * Math.min(1.6, 1 + (lv - 1) * 0.06);
+}
+function staffWorkDur(id, baseSec) {
+  var lv = staffLvl(id) || 1;
+  var roleMul = id === 'helper' ? 1.25 : 1.0; // Yard Manager is an all-rounder, slower than dedicated specialists
+  return Math.max(baseSec * 0.6, (baseSec * roleMul) / (1 + (lv - 1) * 0.05));
+}
+function tickNpcWork(n, key, durSec, emote, dt) {
+  if (!n.work || n.work.key !== key) {
+    n.work = { key: key, prog: 0, dur: durSec };
+  }
+  n.moving = false;
+  if (emote && !n.emote) { n.emote = emote; n.emoteT = 0; }
+  n.work.prog += dt;
+  if (n.work.prog >= n.work.dur) {
+    n.work = null;
+    return true;
+  }
+  return false;
+}
 function makeNpc(id) {
   var def = STAFF_BY_ID[id] || {};
   var sp = def.spot || (id === 'receptionist' ? RECEPTION_SPOT : [YARD_ENTRY[0] + 2.5, YARD_ENTRY[1] + 0.5]);
   var sIdx = typeof STAFF !== 'undefined' ? STAFF.indexOf(def) : -1;
   var lk = typeof def.look === 'number' ? ((def.look + (S && S.player ? S.player.look || 0 : 0) + 1) % 4) : 1;
   return { id: id, uid: 910 + (sIdx >= 0 ? sIdx : Math.floor(Math.random() * 50)), x: sp[0] * TILE, y: sp[1] * TILE, dir: 'down', face: 1, moving: false, walkT: 0, walkDist: 0, emote: null, emoteT: 0, carry: null,
-    look: lk, path: null, route: null, idleT: rand(0.4, 1.2), task: null, say: '', sayT: 0, stepT: 0, patrolIdx: 0 };
+    look: lk, path: null, route: null, idleT: rand(1.5, 3.0), task: null, work: null, say: '', sayT: 0, stepT: 0, patrolIdx: 0 };
 }
 function faceToward(e, tx, ty) {
   if (!e) return;
@@ -1365,67 +1388,73 @@ function updateNPCs(dt) {
 var SHOP_PATROL = [[6.6, 24.3], [11.2, 22.0], [14.5, 23.8], [8.8, 24.3], [5.4, 24.3]];
 function updateReceptionist(n, dt) {
   n.idleT -= dt;
-  // If Pickup Runner is not hired, Receptionist only brings pickup dogs if she isn't busy and the owner has waited a long time (>45s)
+  var sp = staffMoveSpeed('receptionist');
+  // If Pickup Runner is not hired, Receptionist only calls pickup dogs if the owner has waited a long time (>60s)
   if (!staffHired('runner')) {
     S.owners.forEach(function (o) {
       if (o.state !== 'waitPickup') return;
       var d = dogById(o.dogId); if (!d) return;
       if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'drink' || d.state === 'romp')) return;
-      if (o.patienceMax - o.patience < 45) return;
+      if (o.patienceMax - o.patience < 60) return;
       startToCounter(d);
     });
   }
   var busy = S.owners.some(function (o) { return o.state === 'toHandover' || o.state === 'handover'; });
   if (busy) {
+    n.work = null;
     // Walk to the handover desk position behind the counter
     var hSpot = [8.9 * TILE, 24.3 * TILE];
     if (dist(n.x, n.y, hSpot[0], hSpot[1]) > 6) {
-      moveTo(n, hSpot[0], hSpot[1], 145, dt);
+      moveTo(n, hSpot[0], hSpot[1], sp, dt);
       if (n.moving) n.walkT += dt;
     } else {
       n.moving = false; n.dir = 'down';
     }
-    n.idleT = 1.2;
+    n.idleT = staffWorkDur('receptionist', 3.5);
     return;
   }
   // Check if there is a shop counter chore to polish
   var shopChore = (S.chores || []).filter(function (c) { return c.kind === 'desk'; })[0];
   if (shopChore) {
     if (dist(n.x, n.y, shopChore.x, shopChore.y) > 20) {
-      moveTo(n, shopChore.x, shopChore.y, 145, dt);
+      n.work = null;
+      moveTo(n, shopChore.x, shopChore.y, sp, dt);
       if (n.moving) n.walkT += dt;
       return;
     } else {
-      n.moving = false;
+      faceToward(n, shopChore.x, shopChore.y);
+      if (!tickNpcWork(n, 'chore:' + shopChore.id, staffWorkDur('receptionist', 3.2), 'scoop', dt)) return;
       doChore(shopChore);
-      n.say = 'Counter sparkling!'; n.sayT = 2; n.idleT = 1.5;
+      n.say = 'Counter sparkling!'; n.sayT = 2; n.idleT = staffWorkDur('receptionist', 3.8);
       return;
     }
   }
   var ready = S.owners.filter(function (o) { return o.state === 'waitPickup' && (dogById(o.dogId) || {}).state === 'atDesk'; });
   var wc = S.owners.filter(function (o) { return o.state === 'waitCheckin'; }).sort(function (a, b) { return a.patience / a.patienceMax - b.patience / b.patienceMax; });
   if ((ready.length || wc.length) && !playerOnMat()) {
+    n.work = null;
     var deskX = 8.9 * TILE, deskY = 24.3 * TILE;
     if (dist(n.x, n.y, deskX, deskY) > 10) {
-      moveTo(n, deskX, deskY, 155, dt);
+      moveTo(n, deskX, deskY, sp, dt);
       if (n.moving) n.walkT += dt;
       return;
     }
     n.moving = false; n.dir = 'down';
     if (n.idleT <= 0) {
       if (ready.length) {
-        summonOwner(ready[0], true); n.say = pick(['Here we go!', 'Someone missed you!']); n.sayT = 2; n.idleT = 2.0; return;
+        summonOwner(ready[0], true); n.say = pick(['Here we go!', 'Someone missed you!']); n.sayT = 2; n.idleT = staffWorkDur('receptionist', 4.5); return;
       }
       if (wc.length) {
-        summonOwner(wc[0], true); n.say = pick(['Welcome!', 'Hello there!', 'Come on through!']); n.sayT = 2; n.idleT = 2.0; return;
+        summonOwner(wc[0], true); n.say = pick(['Welcome!', 'Hello there!', 'Come on through!']); n.sayT = 2; n.idleT = staffWorkDur('receptionist', 4.5); return;
       }
     }
     return;
   }
-  // When no customer is actively being served, patrol around the reception shop floor!
+  n.work = null;
+  // When no customer is actively being served, patrol slowly around the reception shop floor!
   if (n.route && n.route.length) {
     var wp = n.route[0];
-    if (moveTo(n, wp[0], wp[1], 115, dt)) n.route.shift();
+    if (moveTo(n, wp[0], wp[1], Math.round(sp * 0.75), dt)) n.route.shift();
     if (n.moving) n.walkT += dt;
     return;
   }
@@ -1434,7 +1463,7 @@ function updateReceptionist(n, dt) {
     n.patrolIdx = ((n.patrolIdx || 0) + 1) % SHOP_PATROL.length;
     var pt = SHOP_PATROL[n.patrolIdx];
     n.route = [[pt[0] * TILE + rand(-10, 10), pt[1] * TILE + rand(-8, 8)]];
-    n.idleT = rand(1.4, 2.8);
+    n.idleT = rand(2.6, 4.8);
     if (Math.random() < 0.25) { n.say = pick(['Checking bookings…', 'Stocking leashes!', 'Ready for guests!']); n.sayT = 1.8; }
   }
 }
@@ -1474,32 +1503,33 @@ function updateRunner(n, dt) {
     }
     if (pickupDog) {
       n.task = { kind: 'fetchPickup', dogId: pickupDog.id };
-      n.path = null;
+      n.path = null; n.work = null;
       n.say = 'Finding ' + pickupDog.name + '!'; n.sayT = 2.0;
     } else {
-      // Help with cuddles or patrol the yard actively
-      var petDog = S.dogs.filter(function (d) { return d.checkedIn && d.need && d.need.type === 'pet' && !d.need.self && (d.state === 'idle' || d.state === 'wander' || d.state === 'nap'); })[0];
-      if (petDog) { n.task = { kind: 'need', dogId: petDog.id, type: 'pet' }; n.path = null; }
-      else { n.idleT = rand(0.6, 1.4); helperWalkTo(n, null); }
+      n.work = null;
+      n.idleT = rand(2.2, 4.0);
+      helperWalkTo(n, null);
     }
   }
-  if (!n.task) { helperWalk(n, dt); return; }
+  if (!n.task) { n.work = null; helperWalk(n, dt); return; }
   if (n.task.kind === 'fetchPickup') {
     var fd = dogById(n.task.dogId);
     var stillWanted = fd && S.owners.some(function (o) { return o.dogId === fd.id && o.state === 'waitPickup'; });
     if (!fd || !stillWanted || fd.state === 'leashed' || fd.state === 'toCounter' || fd.state === 'atDesk') {
-      n.task = null; return;
+      n.task = null; n.work = null; return;
     }
     if (dist(n.x, n.y, fd.x, fd.y) < 48) {
       faceToward(n, fd.x, fd.y);
+      if (!tickNpcWork(n, 'pickup:' + fd.id, staffWorkDur('runner', 2.2), 'pet', dt)) return;
       n.say = 'Come on, ' + fd.name + '! Pickup time!'; n.sayT = 2.2;
       n.emote = 'happy'; n.emoteT = 0;
       startToCounter(fd);
-      // Runner trots back toward the yard door with the dog
+      // Runner strolls back toward the yard door with the dog
       helperWalkTo(n, [(YARD_ENTRY[0] + 1.5) * TILE, (YARD_ENTRY[1] + 0.5) * TILE]);
-      n.task = null; n.idleT = 1.5;
+      n.task = null; n.idleT = staffWorkDur('runner', 4.5);
       return;
     }
+    n.work = null;
     if (!n.path || n.pathT <= 0) helperWalkTo(n, [fd.x, fd.y]);
     helperWalk(n, dt);
     return;
@@ -1526,7 +1556,7 @@ function workerCanDoChore(role, choreKind) {
 }
 function updateYardWorker(n, dt) {
   n.idleT -= dt; n.moving = false;
-  var role = n.id, cap = poopCap();
+  var role = n.id, cap = Math.min(2, poopCap());
   // If worker is currently walking a leashed dog to the bath tub, finish that task first!
   if (n.carry && n.carry.type === 'dog') {
     if (!n.task || n.task.kind !== 'toTub') n.task = { kind: 'toTub', dogId: n.carry.id };
@@ -1559,10 +1589,11 @@ function updateYardWorker(n, dt) {
         .sort(function (a, b) { return dist(n.x, n.y, a.x, a.y) - dist(n.x, n.y, b.x, b.y); })[0];
       if (ch) best = { kind: 'chore', id: ch.id };
     }
-    if (best) { n.task = best; n.path = null; n.tries = 0; }
+    if (best) { n.task = best; n.path = null; n.work = null; n.tries = 0; }
     else {
-      // Keep moving & patrolling around the yard!
-      n.idleT = rand(0.5, 1.3);
+      // Stroll slowly around the yard between tasks
+      n.work = null;
+      n.idleT = rand(2.2, 3.8);
       helperWalkTo(n, null);
       if (Math.random() < 0.22) {
         var lines = role === 'cleaner' ? ['Keeping the grass spotless!', 'On poop patrol!']
@@ -1574,7 +1605,7 @@ function updateYardWorker(n, dt) {
       }
     }
   }
-  if (!n.task) { helperWalk(n, dt); return; }
+  if (!n.task) { n.work = null; helperWalk(n, dt); return; }
   runWorkerTask(n, dt);
 }
 
@@ -1584,14 +1615,16 @@ function runWorkerTask(n, dt) {
   if (t.kind === 'chore') {
     var ch = null;
     for (var ci = 0; ci < (S.chores || []).length; ci++) if (S.chores[ci].id === t.id) ch = S.chores[ci];
-    if (!ch) { n.task = null; return; }
+    if (!ch) { n.task = null; n.work = null; return; }
     if (dist(n.x, n.y, ch.x, ch.y) < 34) {
       faceToward(n, ch.x, ch.y);
+      if (!tickNpcWork(n, 'chore:' + ch.id, staffWorkDur(n.id, 3.2), 'scoop', dt)) return;
       doChore(ch);
       n.emote = 'happy'; n.emoteT = 0;
       n.say = ch.icon + ' All done!'; n.sayT = 1.6;
-      n.task = null; n.idleT = 0.7; n.path = null; return;
+      n.task = null; n.idleT = staffWorkDur(n.id, 3.5); n.path = null; return;
     }
+    n.work = null;
     if (!n.path || n.pathT <= 0) helperWalkTo(n, [ch.x, ch.y]);
     helperWalk(n, dt); return;
   }
@@ -1599,16 +1632,18 @@ function runWorkerTask(n, dt) {
     var wd = dogById(t.dogId);
     var tub = S.objects.filter(function (o) { return o.done && (o.type === 'tub' || o.type === 'groomhouse') && !o.dogId; })[0];
     if (!wd || !tub || !wd.need || wd.need.type !== 'bath' || !(wd.state === 'idle' || wd.state === 'wander' || wd.state === 'nap')) {
-      n.task = null; return;
+      n.task = null; n.work = null; return;
     }
     if (dist(n.x, n.y, wd.x, wd.y) < 42) {
       faceToward(n, wd.x, wd.y);
+      if (!tickNpcWork(n, 'leashbath:' + wd.id, staffWorkDur(n.id, 1.8), 'pet', dt)) return;
       wd.state = 'npcLeashed'; wd.npcHolder = n.id; wd.path = null; wd.anim = null;
       n.carry = { type: 'dog', id: wd.id };
       n.say = 'Bath time, ' + wd.name + '!'; n.sayT = 2.0;
       sfx('leash');
       n.task = { kind: 'toTub', dogId: wd.id }; n.path = null; return;
     }
+    n.work = null;
     if (!n.path || n.pathT <= 0) helperWalkTo(n, [wd.x, wd.y]);
     helperWalk(n, dt); return;
   }
@@ -1618,16 +1653,17 @@ function runWorkerTask(n, dt) {
     var tub2 = groomHouses[0] || S.objects.filter(function (o) { return o.done && o.type === 'tub' && !o.dogId; })[0];
     if (!bd || !tub2) {
       if (bd && bd.state === 'npcLeashed') { bd.state = 'idle'; bd.npcHolder = null; }
-      n.carry = null; n.task = null; return;
+      n.carry = null; n.task = null; n.work = null; return;
     }
-    // Keep the leashed dog trotting right behind the Groomer
-    moveTo(bd, n.x - (DIRV[n.dir] ? DIRV[n.dir][0] * 26 : 0), n.y - (DIRV[n.dir] ? DIRV[n.dir][1] * 22 : -18), 175, dt);
+    // Keep the leashed dog trotting calmly behind the Groomer
+    moveTo(bd, n.x - (DIRV[n.dir] ? DIRV[n.dir][0] * 26 : 0), n.y - (DIRV[n.dir] ? DIRV[n.dir][1] * 22 : -18), staffMoveSpeed(n.id) + 14, dt);
     var tPad = stationPad(tub2) || { x: tub2.x * TILE, y: (tub2.y + tub2.h) * TILE, w: tub2.w * TILE, h: TILE };
     if (inRect(n.x, n.y, tPad) || dist(n.x, n.y, (tub2.x + tub2.w / 2) * TILE, (tub2.y + tub2.h) * TILE) < 48) {
       faceToward(n, (tub2.x + tub2.w / 2) * TILE, (tub2.y + tub2.h / 2) * TILE);
+      if (!tickNpcWork(n, 'tub:' + bd.id, staffWorkDur(n.id, 2.2), 'pet', dt)) return;
       n.carry = null;
       var tLv = tub2.lvl || 1, isSpa = tub2.type === 'groomhouse';
-      bd.state = 'bath'; bd.actT = isSpa ? Math.max(1.0, 2.2 - (tLv - 1) * 0.2) : Math.max(1.6, 4.2 - (tLv - 1) * 0.35);
+      bd.state = 'bath'; bd.actT = isSpa ? Math.max(1.2, 2.4 - (tLv - 1) * 0.2) : Math.max(1.8, 4.4 - (tLv - 1) * 0.35);
       bd.objId = tub2.id; tub2.dogId = bd.id; tub2.useAt = now; bd.anim = null; bd.npcHolder = null;
       bd.x = (tub2.x + tub2.w / 2) * TILE; bd.y = (tub2.y + (isSpa ? tub2.h - 0.55 : 0.75)) * TILE;
       if (isSpa) {
@@ -1638,57 +1674,71 @@ function runWorkerTask(n, dt) {
       }
       sfx('splash'); gainXP(isSpa ? 5 : 2); S.stats.baths++;
       n.say = isSpa ? 'Luxury spa day!' : 'Scrub-a-dub!'; n.sayT = 1.8; n.emote = 'happy'; n.emoteT = 0;
-      n.task = null; n.idleT = 0.9; n.path = null; return;
+      n.task = null; n.idleT = staffWorkDur(n.id, 4.0); n.path = null; return;
     }
+    n.work = null;
     if (!n.path || n.pathT <= 0) helperWalkTo(n, [tPad.x + tPad.w / 2, tPad.y + tPad.h / 2]);
     helperWalk(n, dt); return;
   }
   if (t.kind === 'need') {
     var d = dogById(t.dogId);
-    if (!d || !d.need || d.need.self || !(d.state === 'idle' || d.state === 'wander' || d.state === 'nap')) { n.task = null; return; }
+    if (!d || !d.need || d.need.self || !(d.state === 'idle' || d.state === 'wander' || d.state === 'nap')) { n.task = null; n.work = null; return; }
     var item = t.type === 'food' ? 'food' : t.type === 'treat' ? 'treat' : t.type === 'play' ? 'ball' : null;
     if (item && !(n.carry && n.carry.type === item)) { // fetch it from the station first
-      if (n.carry && n.carry.type === 'poop') { t.kind = 'bin'; t.then = { kind: 'need', dogId: t.dogId, type: t.type }; return; }
+      if (n.carry && n.carry.type === 'poop') { t.kind = 'bin'; t.then = { kind: 'need', dogId: t.dogId, type: t.type }; n.work = null; return; }
       var kitchens = (item === 'food' || item === 'treat') ? S.objects.filter(function (o) { return o.done && o.type === 'kitchen'; }) : [];
       var st = kitchens[0] || S.objects.filter(function (o) { return o.done && STATION_ITEM[o.type] === item; })[0];
-      if (!st) { n.task = null; n.idleT = 3; return; }
+      if (!st) { n.task = null; n.work = null; n.idleT = 3.5; return; }
       var pad = stationPad(st);
       if (inRect(n.x, n.y, pad)) {
         faceToward(n, (st.x + st.w / 2) * TILE, (st.y + st.h / 2) * TILE);
+        if (!tickNpcWork(n, 'grab:' + st.id + ':' + item, staffWorkDur(n.id, 1.8), 'scoop', dt)) return;
         n.carry = { type: item, gourmet: st.type === 'kitchen' }; st.useAt = now; n.emote = 'scoop'; n.emoteT = 0; sfx('pop'); n.path = null; return;
       }
+      n.work = null;
       if (!n.path) helperWalkTo(n, [pad.x + pad.w / 2, pad.y + pad.h / 2]);
       helperWalk(n, dt); return;
     }
-    if (dist(n.x, n.y, d.x, d.y) < 44) { helperServe(n, d, t.type); n.task = null; n.idleT = 0.8; n.path = null; return; }
+    if (dist(n.x, n.y, d.x, d.y) < 46) {
+      faceToward(n, d.x, d.y);
+      var serveBase = t.type === 'play' ? 3.2 : 2.6;
+      if (!tickNpcWork(n, 'serve:' + d.id + ':' + t.type, staffWorkDur(n.id, serveBase), 'pet', dt)) return;
+      helperServe(n, d, t.type);
+      n.task = null; n.idleT = staffWorkDur(n.id, 3.5); n.path = null; return;
+    }
+    n.work = null;
     if (!n.path || n.pathT <= 0) { helperWalkTo(n, [d.x, d.y]); n.tries = (n.tries || 0) + 1; if (n.tries > 5) { d.helperSkip = S.clock + 30; n.task = null; n.tries = 0; return; } }
     helperWalk(n, dt); return;
   }
   if (t.kind === 'poop') {
     var pp = null; for (var i = 0; i < S.poops.length; i++) if (S.poops[i].id === t.id) pp = S.poops[i];
-    if (!pp) { n.task = null; return; }
-    if (dist(n.x, n.y, pp.x, pp.y) < 24) {
+    if (!pp) { n.task = null; n.work = null; return; }
+    if (dist(n.x, n.y, pp.x, pp.y) < 26) {
       faceToward(n, pp.x, pp.y);
+      if (!tickNpcWork(n, 'poop:' + pp.id, staffWorkDur(n.id, 2.2), 'scoop', dt)) return;
       S.poops.splice(S.poops.indexOf(pp), 1); burst(pp.x, pp.y, 'dust', 6); sfx('scoop'); n.emote = 'scoop'; n.emoteT = 0;
       if (n.carry && n.carry.type === 'poop') n.carry.n = (n.carry.n || 1) + 1; else n.carry = { type: 'poop', n: 1 };
-      n.task = null; n.idleT = 0.6; n.path = null; return;
+      n.task = null; n.idleT = staffWorkDur(n.id, 2.6); n.path = null; return;
     }
+    n.work = null;
     if (!n.path) helperWalkTo(n, [pp.x, pp.y]);
-    else if (!n.path.length) { pp.helperSkip = S.clock + 40; n.task = null; n.idleT = 0.5; return; }
+    else if (!n.path.length) { pp.helperSkip = S.clock + 40; n.task = null; n.idleT = 1.5; return; }
     helperWalk(n, dt); return;
   }
   if (t.kind === 'bin') {
     var bin = S.objects.filter(function (o) { return o.done && o.type === 'trash'; })[0];
-    if (!bin || !n.carry) { n.carry = null; n.task = t.then || null; return; }
+    if (!bin || !n.carry) { n.carry = null; n.task = t.then || null; n.work = null; return; }
     var bp = stationPad(bin);
     if (inRect(n.x, n.y, bp)) {
       faceToward(n, (bin.x + bin.w / 2) * TILE, (bin.y + bin.h / 2) * TILE);
-      n.carry = null; bin.useAt = now; sfx('trash'); n.task = t.then || null; n.idleT = 0.5; n.path = null; return;
+      if (!tickNpcWork(n, 'bin:' + bin.id, staffWorkDur(n.id, 1.6), 'scoop', dt)) return;
+      n.carry = null; bin.useAt = now; sfx('trash'); n.task = t.then || null; n.idleT = staffWorkDur(n.id, 2.8); n.path = null; return;
     }
+    n.work = null;
     if (!n.path) helperWalkTo(n, [bp.x + bp.w / 2, bp.y + bp.h / 2]);
     helperWalk(n, dt); return;
   }
-  n.task = null;
+  n.task = null; n.work = null;
 }
 function helperWalkTo(n, target) {
   var t0 = nearestWalkable(n.x, n.y), b = bfs(t0[0], t0[1]), goal;
@@ -1700,14 +1750,13 @@ function helperWalkTo(n, target) {
     if (!c.length) return;
     var k = pick(c); goal = [k % W, (k / W) | 0];
   }
-  n.path = pathTo(b, goal[0], goal[1]) || []; n.pathT = 2.8;
+  n.path = pathTo(b, goal[0], goal[1]) || []; n.pathT = 4.2;
 }
 function helperWalk(n, dt) {
   if (!n.path || !n.path.length) { n.moving = false; return; }
   n.pathT -= dt;
   var nx = n.path[0];
-  var lv = staffLvl(n.id) || 1;
-  var sp = 165 * Math.min(2.4, 1 + (lv - 1) * 0.12);
+  var sp = staffMoveSpeed(n.id);
   if (moveTo(n, (nx[0] + 0.5) * TILE, (nx[1] + 0.5) * TILE, sp, dt)) n.path.shift();
   if (n.moving) n.walkT += dt;
 }
@@ -3662,11 +3711,12 @@ function updateOwner(o, dt) {
       if (!S.player.moving && playerOnMat()) S.player.dir = 'down';
       if (o.hoT > 0 && !S.player.moving && S.player.emote !== (o.kind === 'pickup' ? 'handover' : 'receive')) pEmote(o.kind === 'pickup' ? 'handover' : 'receive', 0.6);
     }
-    if (o.hoT >= 0.65 && d) {
+    var hoNeed = staff ? staffWorkDur('receptionist', 2.6) : 0.65;
+    if (o.hoT >= hoNeed && d) {
       if (o.kind === 'dropoff') { doCheckIn(o); }
       else if (staff) {
         if (d.state !== 'toOwner') { d.state = 'toOwner'; d.path = null; d.anim = null; d.route = [SHOP_WAY.gapN, SHOP_WAY.gapS].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }).concat([[o.x + 18, o.y + 14]]); }
-        if (dist(d.x, d.y, o.x + 18, o.y + 14) < 24 || o.hoT > 2.1) doReturn(o);
+        if (dist(d.x, d.y, o.x + 18, o.y + 14) < 24 || o.hoT > hoNeed + 1.8) doReturn(o);
       } else { doReturn(o); }
     }
   } else {
