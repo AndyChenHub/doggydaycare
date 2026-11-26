@@ -137,11 +137,18 @@ final class GameViewController: UIViewController, WKNavigationDelegate, WKScript
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let url = navigationAction.request.url, url.isFileURL {
-            let bundlePath = Bundle.main.bundleURL.standardizedFileURL.path
-            let targetPath = url.standardizedFileURL.path
-            if targetPath.hasPrefix(bundlePath) {
-                decisionHandler(.allow)
+        if let url = navigationAction.request.url {
+            if url.isFileURL {
+                let bundlePath = Bundle.main.bundleURL.standardizedFileURL.path
+                let targetPath = url.standardizedFileURL.path
+                if targetPath.hasPrefix(bundlePath) {
+                    decisionHandler(.allow)
+                    return
+                }
+            } else if let scheme = url.scheme?.lowercased(),
+                      ["https", "http", "sidestore", "altstore", "apple-magnifier"].contains(scheme) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                decisionHandler(.cancel)
                 return
             }
         }
@@ -150,6 +157,10 @@ final class GameViewController: UIViewController, WKNavigationDelegate, WKScript
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "pawsStorage", let body = message.body as? [String: Any] else { return }
+        if let openUrlStr = body["openURL"] as? String, let openUrl = URL(string: openUrlStr) {
+            UIApplication.shared.open(openUrl, options: [:], completionHandler: nil)
+            return
+        }
         var store = loadNativeStorage()
         if let key = body["key"] as? String,
            let val = body["value"] as? String,

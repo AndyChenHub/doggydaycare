@@ -151,7 +151,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Tap 🔨 Shop at the bottom to select and place your first Kennel on the lawn!', 'good');
   if (!isJoiningRoom) saveGame();
 }
-var CURRENT_ASSET_VER = '29';
+var CURRENT_ASSET_VER = '31';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();
@@ -301,6 +301,19 @@ var MODAL_ACTS = {
   dex: function () { openDex(); },
   coop: function () { if (typeof MP !== 'undefined') MP.openCoopModal(); },
   partnersummary: function () { if (typeof MP !== 'undefined') MP.presentPartnerSummary(true); },
+  ghupdate: function () { openGithubUpdater(); },
+  runotagithub: function () { runGithubOTAUpdate(); },
+  dlipa: function () { openExternalOrDownload(GH_IPA_RELEASE_URL); },
+  ipasidestore: function () { openExternalOrDownload('sidestore://install?url=' + encodeURIComponent(GH_IPA_RELEASE_URL)); },
+  ipaaltstore: function () { openExternalOrDownload('altstore://install?url=' + encodeURIComponent(GH_IPA_RELEASE_URL)); },
+  ipatrollstore: function () { openExternalOrDownload('apple-magnifier://install?url=' + encodeURIComponent(GH_IPA_RELEASE_URL)); },
+  copyipaurl: function () { copyGithubIpaUrl(); },
+  resetota: function () {
+    if (typeof window.__PAWS_CLEAR_OTA__ === 'function') window.__PAWS_CLEAR_OTA__();
+    if (S && typeof saveGame === 'function') saveGame();
+    toast('🔄 Reverted to bundled IPA version — reloading…', 'good');
+    setTimeout(function () { location.reload(); }, 350);
+  },
   back: function () { closeModal(); },
   nextday: function () { fadeThen(function () { closeAllModals(); setMode('play'); sfx('day_start'); setTimeout(dayBanner, 500); }); },
   defaults: function () { var od = dayLen(); settings = defaultSettings(); if (S && dayLen() !== od) S.dayTime *= dayLen() / od; saveSettings(); closeModal(); openSettings(); },
@@ -427,13 +440,13 @@ function openTitle() {
       (has ? '<button data-act="play" class="primary big">▶ Continue Daycare (Room: ' + esc(rCode) + ')</button>' : '') +
       '<button data-act="titlecreate" class="' + (has ? 'wood big' : 'primary big') + '">🏠 Create a Daycare</button>' +
       '<button data-act="titlejoin" class="wood big">🤝 Join a Daycare</button>' +
-      '<div class="row" style="margin-top:2px"><button data-act="help" class="flat">How to Play</button><button data-act="settings" class="flat">Settings &amp; Co-op</button></div>' +
+      '<div class="row" style="margin-top:2px"><button data-act="help" class="flat">How to Play</button><button data-act="settings" class="flat">Settings &amp; Co-op</button><button data-act="ghupdate" class="flat">🔄 Update Game</button></div>' +
     '</div></div>';
   $('modalwrap').hidden = false; bindModalButtons();
 }
 function openPause() {
   saveGame();
-  openModal('<h2>Paused</h2><div class="row col"><button data-act="resume" class="primary big">Resume</button><button data-act="dex">📖 Dog Breeds</button><button data-act="settings">⚙️ Settings &amp; Co-op</button><button data-act="help">How to Play</button><button data-act="totitle" class="flat">Save &amp; Quit to Title</button></div>' +
+  openModal('<h2>Paused</h2><div class="row col"><button data-act="resume" class="primary big">Resume</button><button data-act="dex">📖 Dog Breeds</button><button data-act="settings">⚙️ Settings &amp; Co-op</button><button data-act="ghupdate" class="wood">🔄 Update Game from GitHub</button><button data-act="help">How to Play</button><button data-act="totitle" class="flat">Save &amp; Quit to Title</button></div>' +
     '<p class="small">Your daycare saves automatically on your iPhone.</p>', 'paused', 'narrow');
   bindModalButtons();
 }
@@ -461,10 +474,261 @@ function openSettings() {
     '<span>Difficulty</span><select data-set="difficulty">' + opt('relaxed', settings.difficulty, 'Relaxed') + opt('normal', settings.difficulty, 'Normal') + opt('hectic', settings.difficulty, 'Hectic') + '</select></div>' +
     '<div class="row col" style="margin-top:10px">' +
       '<button data-act="coop" class="wood">📱 iPhone Co-op &amp; Room Setup (Room: ' + esc(rCode) + (onlineN ? ' · 🟢 ' + (onlineN + 1) + ' Online' : '') + ')</button>' +
+      '<button data-act="ghupdate" class="wood">🔄 Update Game / Download Latest GitHub IPA</button>' +
       (S ? '<button data-act="partnersummary" class="flat">📋 View What Partner Did</button>' : '') +
     '</div>' +
     '<div class="row"><button data-act="back" class="primary">Done</button><button data-act="defaults" class="flat">Restore Defaults</button></div>', 'settings');
   bindModalButtons();
+}
+
+// ---------------- GitHub OTA & IPA Updater ----------------
+var GH_REPO = 'AndyChenHub/doggydaycare';
+var GH_RAW_BASE = 'https://raw.githubusercontent.com/' + GH_REPO + '/main/';
+var GH_API_COMMIT = 'https://api.github.com/repos/' + GH_REPO + '/commits/main';
+var GH_IPA_RELEASE_URL = 'https://github.com/' + GH_REPO + '/releases/download/latest/PawsAndPlay.ipa';
+
+function openExternalOrDownload(url) {
+  try {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pawsStorage) {
+      window.webkit.messageHandlers.pawsStorage.postMessage({ openURL: url });
+    }
+  } catch (e) {}
+  try {
+    var a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (e2) {
+    try { window.location.href = url; } catch (e3) {}
+  }
+}
+
+function copyGithubIpaUrl() {
+  var url = GH_IPA_RELEASE_URL;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function () {
+      toast('📋 Copied GitHub IPA URL to clipboard!', 'good');
+      var st = $('ghUpdateStatus');
+      if (st) st.innerHTML = '✅ Copied IPA URL:<br><small style="word-break:break-all">' + esc(url) + '</small>';
+    }).catch(function () {
+      fallbackCopyText(url);
+    });
+  } else {
+    fallbackCopyText(url);
+  }
+}
+
+function fallbackCopyText(text) {
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('📋 Copied GitHub IPA URL to clipboard!', 'good');
+  } catch (e) {}
+  var st = $('ghUpdateStatus');
+  if (st) st.innerHTML = '📋 Direct IPA URL:<br><small style="word-break:break-all">' + esc(text) + '</small>';
+}
+
+function openGithubUpdater() {
+  var ota = (typeof window !== 'undefined' && window.__PAWS_ACTIVE_OTA__) ? window.__PAWS_ACTIVE_OTA__ : null;
+  var curLabel = 'v' + CURRENT_ASSET_VER + (ota && ota.sha ? (' · GitHub #' + ota.sha.slice(0, 7)) : ' (Bundled IPA)');
+  openModal(
+    '<h2>🔄 Update from GitHub</h2>' +
+    '<p style="text-align:center;margin-bottom:6px">Update <b>Paws &amp; Play</b> directly from<br><small><b>github.com/' + esc(GH_REPO) + '</b></small></p>' +
+    '<div class="gh-box">' +
+      '<div class="gh-row"><span>Installed Build:</span><b id="ghCurBuild">' + esc(curLabel) + '</b></div>' +
+      '<div class="gh-row"><span>Latest on GitHub:</span><b id="ghRemoteBuild">Checking…</b></div>' +
+      '<div id="ghCommitMsg" class="gh-commit">Connecting to GitHub…</div>' +
+      '<div class="gh-prog-wrap" id="ghProgWrap" hidden><div class="gh-prog-bar" id="ghUpdateBar" style="width:0%"></div></div>' +
+      '<div id="ghUpdateStatus" class="gh-status">Tap <b>⚡ Instant In-App Update</b> below to pull the latest game code directly from GitHub without reinstalling the IPA!</div>' +
+    '</div>' +
+    '<div class="row col" style="margin-top:8px">' +
+      '<button data-act="runotagithub" id="ghRunOtaBtn" class="primary big">⚡ Instant In-App Update from GitHub</button>' +
+      '<div class="bp-sub" style="text-align:center;margin-top:4px">📦 Or Sideload / Download Latest PawsAndPlay.ipa</div>' +
+      '<button data-act="dlipa" class="wood">📥 Download Latest PawsAndPlay.ipa</button>' +
+      '<div class="row" style="margin-top:2px">' +
+        '<button data-act="ipasidestore" class="flat" style="flex:1">📲 SideStore</button>' +
+        '<button data-act="ipaaltstore" class="flat" style="flex:1">📲 AltStore</button>' +
+        '<button data-act="ipatrollstore" class="flat" style="flex:1">📲 TrollStore</button>' +
+      '</div>' +
+      '<button data-act="copyipaurl" class="flat">📋 Copy Direct GitHub .ipa URL</button>' +
+      (ota ? '<button data-act="resetota" class="flat">↩️ Revert to Original Bundled IPA Files</button>' : '') +
+      '<button data-act="back" class="flat">Close</button>' +
+    '</div>',
+    'ghupdate',
+    'narrow'
+  );
+  bindModalButtons();
+  checkGithubLatestStatus();
+}
+
+function checkGithubLatestStatus() {
+  if (typeof fetch !== 'function') return;
+  var cb = Date.now();
+  var remEl = $('ghRemoteBuild'), msgEl = $('ghCommitMsg');
+  Promise.all([
+    fetch(GH_API_COMMIT, { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+    fetch(GH_RAW_BASE + 'index.html?_cb=' + cb, { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).catch(function () { return ''; })
+  ]).then(function (res) {
+    var commitData = res[0], htmlTxt = res[1] || '';
+    var verMatch = htmlTxt.match(/\?v=(\d+)/);
+    var remVer = verMatch ? verMatch[1] : null;
+    var sha = (commitData && commitData.sha) ? commitData.sha.slice(0, 7) : null;
+    var msg = (commitData && commitData.commit && commitData.commit.message) ? commitData.commit.message.split('\n')[0] : null;
+    var dateStr = (commitData && commitData.commit && commitData.commit.committer && commitData.commit.committer.date)
+      ? new Date(commitData.commit.committer.date).toLocaleString()
+      : null;
+    if (remEl) {
+      remEl.textContent = (remVer ? ('v' + remVer) : 'main') + (sha ? (' · #' + sha) : '');
+      remEl.style.color = '#2b6826';
+    }
+    if (msgEl) {
+      if (msg) {
+        msgEl.innerHTML = '<b>Latest Commit:</b> ' + esc(msg) + (dateStr ? ('<br><small>' + esc(dateStr) + '</small>') : '');
+      } else if (remVer) {
+        msgEl.textContent = 'Ready to sync latest files from AndyChenHub/doggydaycare (v' + remVer + ').';
+      } else {
+        msgEl.textContent = 'Could not reach GitHub API — check your internet connection.';
+      }
+    }
+  });
+}
+
+function runGithubOTAUpdate() {
+  if (typeof fetch !== 'function') {
+    toast('Fetch unavailable in this environment', 'bad');
+    return;
+  }
+  if (UI._otaBusy) return;
+  UI._otaBusy = true;
+  var btn = $('ghRunOtaBtn'), stEl = $('ghUpdateStatus'), barEl = $('ghUpdateBar'), wrapEl = $('ghProgWrap');
+  if (btn) { btn.disabled = true; btn.textContent = '🔄 Downloading from GitHub…'; }
+  if (wrapEl) wrapEl.hidden = false;
+  if (barEl) barEl.style.width = '5%';
+  if (stEl) stEl.textContent = 'Connecting to github.com/' + GH_REPO + '…';
+
+  var cb = Date.now();
+  var remoteSha = '', remoteMsg = '', remoteVer = Number(CURRENT_ASSET_VER) || 31;
+
+  Promise.all([
+    fetch(GH_API_COMMIT, { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+    fetch(GH_RAW_BASE + 'index.html?_cb=' + cb, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }),
+    fetch(GH_RAW_BASE + 'js/boot.js?_cb=' + cb, { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).catch(function () { return ''; })
+  ]).then(function (initRes) {
+    var commitData = initRes[0], indexHtml = initRes[1], bootJs = initRes[2] || '';
+    if (commitData && commitData.sha) {
+      remoteSha = commitData.sha;
+      remoteMsg = (commitData.commit && commitData.commit.message) ? commitData.commit.message.split('\n')[0] : '';
+    }
+    var vm = indexHtml.match(/\?v=(\d+)/);
+    if (vm && vm[1]) remoteVer = Math.max(remoteVer, Number(vm[1]) || remoteVer);
+
+    // Discover ordered script list from remote boot.js or remote index.html
+    var scripts = [];
+    if (bootJs) {
+      var arrMatch = bootJs.match(/DEFAULT_SCRIPTS\s*=\s*\[([\s\S]*?)\]/);
+      if (arrMatch && arrMatch[1]) {
+        var strMatches = arrMatch[1].match(/'(js\/[^']+\.js)'/g) || [];
+        strMatches.forEach(function (s) {
+          var clean = s.replace(/'/g, '');
+          if (clean !== 'js/boot.js' && scripts.indexOf(clean) < 0) scripts.push(clean);
+        });
+      }
+    }
+    if (!scripts.length) {
+      var tagRe = /<script[^>]+src=["'](js\/[^"'?]+\.js)/g, tm;
+      while ((tm = tagRe.exec(indexHtml)) !== null) {
+        if (tm[1] !== 'js/boot.js' && scripts.indexOf(tm[1]) < 0) scripts.push(tm[1]);
+      }
+    }
+    if (scripts.length < 10) {
+      scripts = (window.__PAWS_DEFAULT_SCRIPTS__ || [
+        'js/config.js', 'js/data.js', 'js/breeds.js', 'js/sound.js', 'js/music.js',
+        'js/dogart.js', 'js/dogportrait.js', 'js/people.js', 'js/objects_a.js', 'js/objects_b.js',
+        'js/worldart.js', 'js/shopart.js', 'js/game.js', 'js/render.js', 'js/multiplayer.js',
+        'js/minigames.js', 'js/minigames_extra.js', 'js/ui.js'
+      ]).slice();
+    }
+
+    var filesToFetch = ['style.css'].concat(scripts);
+    var downloaded = {};
+    var idx = 0;
+
+    function fetchNext() {
+      if (idx >= filesToFetch.length) return Promise.resolve();
+      var path = filesToFetch[idx++];
+      var pct = Math.round((idx / filesToFetch.length) * 92);
+      if (barEl) barEl.style.width = pct + '%';
+      if (stEl) stEl.textContent = 'Downloading (' + idx + '/' + filesToFetch.length + '): ' + path + '…';
+      return fetch(GH_RAW_BASE + path + '?_cb=' + cb, { cache: 'no-store' })
+        .then(function (r) {
+          if (!r.ok) throw new Error('Failed to fetch ' + path + ' (HTTP ' + r.status + ')');
+          return r.text();
+        })
+        .then(function (txt) {
+          if (!txt || txt.length < 20) throw new Error('Empty file received for ' + path);
+          downloaded[path] = txt;
+          return fetchNext();
+        });
+    }
+
+    return fetchNext().then(function () {
+      var meta = {
+        ver: remoteVer,
+        bundledVer: window.__PAWS_BUNDLED_VER__ || 31,
+        sha: remoteSha,
+        msg: remoteMsg,
+        updatedAt: Date.now(),
+        scripts: scripts
+      };
+      var batch = {};
+      batch['pawsPlayOTA_meta'] = JSON.stringify(meta);
+      batch['pawsPlayOTA_css'] = downloaded['style.css'];
+      scripts.forEach(function (sp) {
+        batch['pawsPlayOTA_' + sp] = downloaded[sp];
+      });
+
+      for (var k in batch) {
+        try { localStorage.setItem(k, batch[k]); } catch (e) {}
+        try {
+          if (!window.__PAWS_NATIVE_STORAGE__) window.__PAWS_NATIVE_STORAGE__ = {};
+          window.__PAWS_NATIVE_STORAGE__[k] = batch[k];
+        } catch (e2) {}
+      }
+      try {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.pawsStorage) {
+          window.webkit.messageHandlers.pawsStorage.postMessage({ batch: batch });
+        }
+      } catch (e3) {}
+
+      if (S && typeof saveGame === 'function') {
+        try { saveGame(); } catch (e4) {}
+      }
+      if (barEl) barEl.style.width = '100%';
+      if (stEl) stEl.innerHTML = '✅ <b>Update installed!</b> Reloading into latest GitHub build…';
+      if (btn) btn.textContent = '✅ Updated! Reloading…';
+      sfx('level');
+      toast('✅ Updated to latest GitHub build! Reloading…', 'good');
+      setTimeout(function () {
+        location.reload();
+      }, 650);
+    });
+  }).catch(function (err) {
+    UI._otaBusy = false;
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Retry Instant In-App Update'; }
+    if (stEl) stEl.innerHTML = '❌ Update error: ' + esc(err && err.message ? err.message : String(err));
+    toast('GitHub update failed — check your internet connection', 'bad');
+    sfx('error');
+  });
 }
 
 // ---------------- glossary ----------------

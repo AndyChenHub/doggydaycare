@@ -175,9 +175,12 @@ var MINIGAMES = (function () {
     return pickOne(pool);
   }
 
+  var EXTRA_GAMES = {};
+
   function rememberKind(k) {
     recentKinds.push(k);
-    if (recentKinds.length > 3) recentKinds.shift();
+    var maxHist = Math.min(8, Math.max(3, ALL_KINDS.length - 3));
+    while (recentKinds.length > maxHist) recentKinds.shift();
   }
 
   function diffPillHtml(diff) {
@@ -1855,7 +1858,31 @@ var MINIGAMES = (function () {
     }
   }
 
-  // ---------------- Launcher & Per-Frame Tick ----------------
+  // ---------------- Extension API & Launcher & Per-Frame Tick ----------------
+  var MG_API = {
+    setActive: function (obj) { active = obj; },
+    getActive: function () { return active; },
+    finish: finishMinigame,
+    diffPill: diffPillHtml,
+    playNote: playNote,
+    randRange: randRange,
+    randInt: randInt,
+    pickOne: pickOne,
+    shuffle: shuffle,
+    updateTimerBar: updateTimerBar,
+  };
+
+  function register(id, spec) {
+    if (!id || !spec || typeof spec.start !== 'function') return;
+    if (ALL_KINDS.indexOf(id) < 0) ALL_KINDS.push(id);
+    KIND_META[id] = {
+      icon: spec.icon || '🎮',
+      title: spec.title || id,
+      warn: spec.warn || (spec.title + ' in {s}…'),
+    };
+    EXTRA_GAMES[id] = spec;
+  }
+
   function launch(kind, forcedDiffId) {
     if (active) return false;
     pending = null;
@@ -1864,7 +1891,8 @@ var MINIGAMES = (function () {
     var diff = rollDifficulty(forcedDiffId);
     rememberKind(k);
 
-    if (k === 'audit') startAudit(diff);
+    if (EXTRA_GAMES[k]) EXTRA_GAMES[k].start(diff, MG_API);
+    else if (k === 'audit') startAudit(diff);
     else if (k === 'find_dog') startFindDog(diff);
     else if (k === 'treat_catch') startTreatCatch(diff);
     else if (k === 'trick_memory') startTrickMemory(diff);
@@ -1898,6 +1926,16 @@ var MINIGAMES = (function () {
       if (active.finished) return;
       if (typeof UI !== 'undefined' && UI.mode !== 'minigame') {
         active = null;
+        return;
+      }
+
+      if (EXTRA_GAMES[active.kind]) {
+        var ext = EXTRA_GAMES[active.kind];
+        if (!ext.customTimer) {
+          active.timeLeft -= dt;
+          updateTimerBar();
+        }
+        if (typeof ext.tick === 'function') ext.tick(active, dt, MG_API);
         return;
       }
 
@@ -2123,6 +2161,7 @@ var MINIGAMES = (function () {
   return {
     tick: tick,
     reset: reset,
+    register: register,
     startCountdown: startCountdown,
     launch: launch,
     rollDifficulty: rollDifficulty,
