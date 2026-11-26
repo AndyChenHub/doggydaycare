@@ -338,9 +338,15 @@ function itemReqLvl(type) {
   }
   return c.lvl;
 }
+function isInstantDecor(typeOrObj) {
+  var id = typeof typeOrObj === 'string' ? typeOrObj : (typeOrObj && typeOrObj.type);
+  var c = id ? CAT_BY_ID[id] : null;
+  return !!(c && (c.cat === 'decor' || !(c.time > 0)));
+}
 function itemBuildTime(type) {
   var c = CAT_BY_ID[type];
   if (!c) return 10;
+  if (c.cat === 'decor' || !(c.time > 0)) return 0;
   var t = c.time;
   var kc = type === 'kennel' ? kennelCount(true) : 0;
   if (type === 'kennel') {
@@ -427,11 +433,12 @@ function addObject(type, x, y, instant, paidCost, rot) {
   var c = CAT_BY_ID[type];
   var dims = objDims(c, rot);
   var baseTime = itemBuildTime(type);
-  var dur = (!S.tutorialDone && !instant) ? Math.min(baseTime, 2.5) : baseTime;
+  var isDone = !!instant || baseTime <= 0;
+  var dur = isDone ? 0 : (!S.tutorialDone ? Math.min(baseTime, 2.5) : baseTime);
   var byId = (typeof MP !== 'undefined' && MP.playerId) ? MP.playerId : null;
   var byName = (typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : null;
-  var o = { id: nid(), type: type, x: x, y: y, w: dims.w, h: dims.h, rot: dims.rot, lvl: 1, upgrading: false, done: !!instant, buildEnd: instant ? 0 : Date.now() + dur * 1000,
-            buildDur: dur, upgradeEnd: 0, upgradeDur: 0, readyRibbon: false, startedBy: instant ? null : byId, startedByName: instant ? null : byName, helpedBy: [],
+  var o = { id: nid(), type: type, x: x, y: y, w: dims.w, h: dims.h, rot: dims.rot, lvl: 1, upgrading: false, done: isDone, buildEnd: isDone ? 0 : Date.now() + dur * 1000,
+            buildDur: dur, upgradeEnd: 0, upgradeDur: 0, readyRibbon: false, startedBy: isDone ? null : byId, startedByName: isDone ? null : byName, helpedBy: [],
             paidCost: paidCost != null ? paidCost : c.cost, dogId: null, reservedFor: null, useAt: -99 };
   S.objects.push(o);
   markDirty();
@@ -1394,7 +1401,7 @@ function updateReceptionist(n, dt) {
     S.owners.forEach(function (o) {
       if (o.state !== 'waitPickup') return;
       var d = dogById(o.dogId); if (!d) return;
-      if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'drink' || d.state === 'romp')) return;
+      if (!(d.state === 'idle' || d.state === 'wander' || d.state === 'nap' || d.state === 'drink' || d.state === 'romp' || d.state === 'kennel')) return;
       if (o.patienceMax - o.patience < 60) return;
       startToCounter(d);
     });
@@ -1468,9 +1475,15 @@ function updateReceptionist(n, dt) {
   }
 }
 function startToCounter(d) {
+  var exitObj = d.objId ? objById(d.objId) : null;
+  if (exitObj) { if (exitObj.dogId === d.id) exitObj.dogId = null; d.objId = null; }
+  if (!dogWalkable(tileOf(d.x), tileOf(d.y))) {
+    var exitPad = exitObj ? stationPad(exitObj) : null;
+    var et = exitPad ? nearestWalkable(exitPad.x + exitPad.w / 2, exitPad.y + exitPad.h / 2) : nearestWalkable(d.x, d.y);
+    d.x = (et[0] + 0.5) * TILE; d.y = (et[1] + 0.5) * TILE;
+  }
   var b = bfs(tileOf(d.x), tileOf(d.y)), path = pathTo(b, YARD_ENTRY[0], YARD_ENTRY[1]);
-  if (!path) { var t = nearestWalkable(d.x, d.y); d.x = (t[0] + .5) * TILE; d.y = (t[1] + .5) * TILE; b = bfs(t[0], t[1]); path = pathTo(b, YARD_ENTRY[0], YARD_ENTRY[1]); }
-  if (d.objId) { var ob = objById(d.objId); if (ob) ob.dogId = null; d.objId = null; }
+  if (!path) { var t = nearestWalkable(d.x, d.y); d.x = (t[0] + 0.5) * TILE; d.y = (t[1] + 0.5) * TILE; b = bfs(t[0], t[1]); path = pathTo(b, YARD_ENTRY[0], YARD_ENTRY[1]); }
   endRomp(d);
   d.state = 'toCounter'; d.path = path || []; d.route = [SHOP_WAY.door, SHOP_WAY.gapN, SHOP_WAY.desk].map(function (w) { return [w[0] * TILE, w[1] * TILE]; });
   d.anim = null; d.seekObj = null; d.ox = 0; d.oy = 0; if (d.need) d.need.self = null;
@@ -1515,10 +1528,33 @@ function updateRunner(n, dt) {
   if (n.task.kind === 'fetchPickup') {
     var fd = dogById(n.task.dogId);
     var stillWanted = fd && S.owners.some(function (o) { return o.dogId === fd.id && o.state === 'waitPickup'; });
-    if (!fd || !stillWanted || fd.state === 'leashed' || fd.state === 'toCounter' || fd.state === 'atDesk') {
+    if (!fd || !stillWanted || fd.state === 'leashed' || fd.state === 'npcLeashed' || fd.state === 'toCounter' || fd.state === 'atDesk' || fd.state === 'toOwner' || fd.state === 'leaving') {
       n.task = null; n.work = null; return;
     }
-    if (dist(n.x, n.y, fd.x, fd.y) < 48) {
+    var kObj = null;
+    if (fd.state === 'kennel') {
+      kObj = fd.objId ? objById(fd.objId) : null;
+      if (!kObj) {
+        for (var ki = 0; ki < S.objects.length; ki++) {
+          if (S.objects[ki].type === 'kennel' && S.objects[ki].dogId === fd.id) { kObj = S.objects[ki]; break; }
+        }
+      }
+    }
+    var kPad = kObj ? stationPad(kObj) : null;
+    var walkTarget = kPad ? [kPad.x + kPad.w / 2, kPad.y + kPad.h / 2] : [fd.x, fd.y];
+    var goalTile = nearestWalkable(walkTarget[0], walkTarget[1]);
+    var goalX = (goalTile[0] + 0.5) * TILE, goalY = (goalTile[1] + 0.5) * TILE;
+    var reached = false;
+    if (fd.state === 'kennel') {
+      var kBox = kObj ? { x: (kObj.x - 1) * TILE - 12, y: (kObj.y - 1) * TILE - 12, w: (kObj.w + 2) * TILE + 24, h: (kObj.h + 2) * TILE + 24 } : null;
+      reached = (kPad && (inRect(n.x, n.y, kPad) || dist(n.x, n.y, kPad.x + kPad.w / 2, kPad.y + kPad.h / 2) < 34))
+        || dist(n.x, n.y, goalX, goalY) < 28
+        || (kBox && inRect(n.x, n.y, kBox) && (!n.path || !n.path.length))
+        || dist(n.x, n.y, fd.x, fd.y) < 52;
+    } else {
+      reached = dist(n.x, n.y, fd.x, fd.y) < 48;
+    }
+    if (reached) {
       faceToward(n, fd.x, fd.y);
       if (!tickNpcWork(n, 'pickup:' + fd.id, staffWorkDur('runner', 2.2), 'pet', dt)) return;
       n.say = 'Come on, ' + fd.name + '! Pickup time!'; n.sayT = 2.2;
@@ -1530,7 +1566,12 @@ function updateRunner(n, dt) {
       return;
     }
     n.work = null;
-    if (!n.path || n.pathT <= 0) helperWalkTo(n, [fd.x, fd.y]);
+    if (!n.path || !n.path.length || n.pathT <= 0) {
+      helperWalkTo(n, walkTarget);
+      if ((!n.path || !n.path.length) && tileOf(n.x) === goalTile[0] && tileOf(n.y) === goalTile[1] && dist(n.x, n.y, goalX, goalY) > 4) {
+        n.path = [[goalTile[0], goalTile[1]]];
+      }
+    }
     helperWalk(n, dt);
     return;
   }
@@ -1753,8 +1794,8 @@ function helperWalkTo(n, target) {
   n.path = pathTo(b, goal[0], goal[1]) || []; n.pathT = 4.2;
 }
 function helperWalk(n, dt) {
+  n.pathT = (n.pathT || 0) - dt;
   if (!n.path || !n.path.length) { n.moving = false; return; }
-  n.pathT -= dt;
   var nx = n.path[0];
   var sp = staffMoveSpeed(n.id);
   if (moveTo(n, (nx[0] + 0.5) * TILE, (nx[1] + 0.5) * TILE, sp, dt)) n.path.shift();
@@ -2515,7 +2556,8 @@ function updateUnlockPads(dt) {
       PAD_FILL.id = hit.id; PAD_FILL.prog = 0; return;
     }
   }
-  if ((hit.kind === 'obj' || hit.kind === 'plot') && !canStartNewBuild()) {
+  var padNeedsBuilder = hit.kind === 'plot' || (hit.kind === 'obj' && !isInstantDecor(hit.type));
+  if (padNeedsBuilder && !canStartNewBuild()) {
     if (PAD_FILL.warnId !== hit.id) {
       PAD_FILL.warnId = hit.id;
       warnBuilderBusy();
@@ -2554,8 +2596,15 @@ function updateUnlockPads(dt) {
         var tx = tileOf(d.x), ty = tileOf(d.y);
         if (tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h) { var t2 = nearestWalkable(d.x, d.y); d.x = (t2[0] + .5) * TILE; d.y = (t2[1] + .5) * TILE; }
       });
-      burst(ox, oy, 'dust', 18); float(ox, o.y * TILE - 10, '🔨 Building ' + c.name + ' (' + fmtDur(o.buildDur || c.time) + ')', '#ffe082', 1.15);
-      toast('🏗️ Started building ' + c.name + ' — finishes in ' + fmtDur(o.buildDur || c.time), 'good');
+      burst(ox, oy, o.done ? 'sparkle' : 'dust', 18);
+      if (o.done) {
+        float(ox, o.y * TILE - 10, '✨ ' + c.name + '!', '#ffe082', 1.15);
+        toast('✨ Placed ' + c.name + ' instantly!', 'good');
+        gainXP(Math.max(2, Math.round(c.cost / 40)));
+      } else {
+        float(ox, o.y * TILE - 10, '🔨 Building ' + c.name + ' (' + fmtDur(o.buildDur || c.time) + ')', '#ffe082', 1.15);
+        toast('🏗️ Started building ' + c.name + ' — finishes in ' + fmtDur(o.buildDur || c.time), 'good');
+      }
       sfx('place'); checkStationTut(hit.type);
       if (typeof MP !== 'undefined') MP.recordAction('build', { item: hit.type, objId: o.id, name: c.name, icon: c.icon, cost: c.cost, x: hit.x, y: hit.y });
       saveGame();
@@ -2599,8 +2648,13 @@ function currentZone() {
         }
       }
     } else {
+      var readyAtDesk = S.owners.filter(function (o) { return o.state === 'waitPickup' && (dogById(o.dogId) || {}).state === 'atDesk'; })[0];
       var waiting = S.owners.filter(function (o) { return o.state === 'waitCheckin'; }).sort(function (a, b) { return a.patience / a.patienceMax - b.patience / b.patienceMax; });
-      if (waiting.length) {
+      if (readyAtDesk) {
+        var rDog = dogById(readyAtDesk.dogId);
+        z.label = 'Return ' + rDog.name + ' to ' + readyAtDesk.name;
+        z.run = function () { summonOwner(readyAtDesk); }; z.lockKey = 'mat:' + readyAtDesk.id;
+      } else if (waiting.length) {
         var wo = waiting[0], wd = dogById(wo.dogId);
         z.label = 'Welcome ' + wo.name + ' & ' + wd.name + (wd.overnight ? ' (overnight)' : '');
         z.run = function () { summonOwner(wo); }; z.lockKey = 'mat:' + wo.id;
@@ -2608,7 +2662,7 @@ function currentZone() {
         var fetching = S.dogs.filter(function (d) { return d.state === 'toCounter' || d.state === 'atDesk'; })[0];
         var wpOw = S.owners.filter(function (o) { return o.state === 'waitPickup'; })[0];
         var wpDog = wpOw ? dogById(wpOw.dogId) : null;
-        z.label = fetching ? 'Receptionist is bringing ' + fetching.name : wpDog ? (wpOw.name + ' is waiting for ' + wpDog.name + ' (' + breedOf(wpDog).name + ') — find them in the yard!') : 'SERVE pad — customers check in here';
+        z.label = fetching ? 'Bringing ' + fetching.name + ' to the desk…' : wpDog ? (wpOw.name + ' is waiting for ' + wpDog.name + ' (' + breedOf(wpDog).name + ') — find them in the yard!') : 'SERVE pad — customers check in here';
         z.disabled = true; z.quiet = true;
       }
     }
@@ -2653,7 +2707,11 @@ function currentZone() {
         if (o.dogId) { z.label = 'This kennel is taken'; z.disabled = true; }
         else if (o.reservedFor && o.reservedFor !== kd.id) { z.label = 'Reserved for ' + (dogById(o.reservedFor) || {}).name; z.disabled = true; }
         else { z.label = 'Tuck ' + kd.name + ' in for a nap'; z.run = function () { doKennel(o, kd); }; }
-      } else if (!car && o.dogId) { var nd = dogById(o.dogId); z.label = 'Take ' + nd.name + ' out of the kennel'; z.run = function () { doLeash(nd); }; }
+      } else if (!car && o.dogId) {
+        var nd = dogById(o.dogId);
+        if (nd) { z.label = 'Take ' + nd.name + ' out of the kennel'; z.run = function () { doLeash(nd); }; }
+        else { o.dogId = null; z.label = 'Kennel'; z.disabled = true; z.quiet = true; }
+      }
       else { z.label = 'Kennel'; z.disabled = true; z.quiet = true; }
     }
     offer(z);
@@ -3206,10 +3264,11 @@ function rotateObjectInPlace(o) {
 function placeBuild(type, x, y, rot) {
   var c = CAT_BY_ID[type];
   var cost = itemCost(type), reqLvl = itemReqLvl(type);
-  if (!canStartNewBuild()) { warnBuilderBusy(); return false; }
+  var instantDecor = isInstantDecor(type);
+  if (!instantDecor && !canStartNewBuild()) { warnBuilderBusy(); return false; }
   if (!c || S.level < reqLvl || S.cash < cost || !canPlace(type, x, y, rot)) { sfx('error'); return false; }
   S.cash -= cost; S.stats.spent += cost;
-  var o = addObject(type, x, y, false, cost, rot);
+  var o = addObject(type, x, y, instantDecor, cost, rot);
   unstuckPlayer(S.player, true);
   // push dogs out of the new footprint
   S.dogs.forEach(function (d) {
@@ -3220,7 +3279,8 @@ function placeBuild(type, x, y, rot) {
   });
   S.poops = S.poops.filter(function (pp) { var tx = tileOf(pp.x), ty = tileOf(pp.y); return !(tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h); });
   float((x + o.w / 2) * TILE, y * TILE - 12, '-' + fmtMoney(cost), '#ff8a80');
-  burst((x + o.w / 2) * TILE, (y + o.h / 2) * TILE, 'dust', 16); sfx('place');
+  burst((x + o.w / 2) * TILE, (y + o.h / 2) * TILE, instantDecor ? 'sparkle' : 'dust', 16); sfx('place');
+  if (instantDecor) gainXP(Math.max(1, Math.round(cost / 45)));
   checkStationTut(type);
   if (typeof MP !== 'undefined') MP.recordAction('build', { item: type, objId: o.id, name: c.name, icon: c.icon, cost: cost, x: x, y: y, rot: o.rot });
   saveGame();
@@ -3237,6 +3297,7 @@ function objUpgradeCost(o) {
   return Math.max(40, Math.round((c ? c.cost : 100) * Math.pow(1.65, lv)));
 }
 function objUpgradeTime(o) {
+  if (isInstantDecor(o)) return 0;
   var c = CAT_BY_ID[o.type], lv = (o && o.lvl) || 1;
   var baseT = c ? c.time : 1200;
   return Math.min(345600, Math.max(1200, Math.round(baseT * 0.75 * Math.pow(1.45, lv - 1))));
@@ -3248,24 +3309,36 @@ function objUpgradeReqLvl(o) {
 function upgradeObject(o) {
   var c = o && CAT_BY_ID[o.type];
   if (!o || !c || !o.done || o.upgrading) { sfx('error'); return false; }
-  if (!canStartNewBuild()) { warnBuilderBusy(); return false; }
+  var instantDecor = isInstantDecor(o);
+  if (!instantDecor && !canStartNewBuild()) { warnBuilderBusy(); return false; }
   var cost = objUpgradeCost(o), req = objUpgradeReqLvl(o), dur = objUpgradeTime(o);
   if (S.level < req || S.cash < cost) { sfx('error'); return false; }
   S.cash -= cost; S.stats.spent += cost;
   var nextLv = (o.lvl || 1) + 1;
-  // Non-blocking upgrade: keep o.done = true so stations & kennels remain 100% usable while upgrading!
-  o.upgrading = true;
-  o.upgradeDur = dur;
-  o.upgradeEnd = Date.now() + dur * 1000;
-  o.startedBy = (typeof MP !== 'undefined' && MP.playerId) ? MP.playerId : null;
-  o.startedByName = (typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : null;
-  o.helpedBy = [];
-  markDirty();
   var cx = (o.x + o.w / 2) * TILE, cy = o.y * TILE;
   var title = o.type === 'kennel' ? kennelSuiteName(nextLv) : (c.name + ' Lv ' + nextLv);
-  float(cx, cy - 12, '-' + fmtMoney(cost), '#ff8a80');
-  burst(cx, (o.y + o.h / 2) * TILE, 'dust', 14); sfx('place');
-  toast('⬆️ Upgrading to ' + title + ' (' + fmtDur(dur) + ' · still usable while upgrading!)', 'good');
+  if (instantDecor || dur <= 0) {
+    o.lvl = nextLv;
+    o.upgrading = false; o.upgradeDur = 0; o.upgradeEnd = 0;
+    o.startedBy = null; o.startedByName = null; o.helpedBy = [];
+    markDirty();
+    float(cx, cy - 12, '✨ ' + title + '!', '#ffe66d');
+    burst(cx, (o.y + o.h / 2) * TILE, 'sparkle', 18); sfx('perfect');
+    gainXP(Math.max(3, Math.round(cost / 35)));
+    toast('✨ Upgraded to ' + title + ' instantly!', 'good');
+  } else {
+    // Non-blocking upgrade: keep o.done = true so stations & kennels remain 100% usable while upgrading!
+    o.upgrading = true;
+    o.upgradeDur = dur;
+    o.upgradeEnd = Date.now() + dur * 1000;
+    o.startedBy = (typeof MP !== 'undefined' && MP.playerId) ? MP.playerId : null;
+    o.startedByName = (typeof MP !== 'undefined' && MP.playerName) ? MP.playerName : null;
+    o.helpedBy = [];
+    markDirty();
+    float(cx, cy - 12, '-' + fmtMoney(cost), '#ff8a80');
+    burst(cx, (o.y + o.h / 2) * TILE, 'dust', 14); sfx('place');
+    toast('⬆️ Upgrading to ' + title + ' (' + fmtDur(dur) + ' · still usable while upgrading!)', 'good');
+  }
   if (typeof MP !== 'undefined') MP.recordAction('upgrade_obj', { item: o.type, objId: o.id, name: title, icon: c.icon, cost: cost, x: o.x, y: o.y, level: nextLv });
   saveGame();
   return true;
@@ -3700,7 +3773,8 @@ function updateOwner(o, dt) {
   } else if (o.state === 'handover') {
     o.moving = false; o.dir = 'up';
     var staff = o.byStaff ? npcById('receptionist') : null;
-    var car = S.player.carry, okHands = staff ? true : o.kind === 'dropoff' ? true : !!(car && car.type === 'dog' && car.id === o.dogId);
+    var atDeskReady = !!(d && (d.state === 'atDesk' || d.state === 'toOwner'));
+    var car = S.player.carry, okHands = staff ? true : o.kind === 'dropoff' ? true : (atDeskReady || !!(car && car.type === 'dog' && car.id === o.dogId));
     if (okHands && (staff || playerOnMat())) { o.hoT += dt; o.awayT = 0; }
     else {
       o.hoT = Math.max(0, o.hoT - dt * 2); o.awayT = (o.awayT || 0) + dt;
@@ -3714,7 +3788,7 @@ function updateOwner(o, dt) {
     var hoNeed = staff ? staffWorkDur('receptionist', 2.6) : 0.65;
     if (o.hoT >= hoNeed && d) {
       if (o.kind === 'dropoff') { doCheckIn(o); }
-      else if (staff) {
+      else if (staff || atDeskReady) {
         if (d.state !== 'toOwner') { d.state = 'toOwner'; d.path = null; d.anim = null; d.route = [SHOP_WAY.gapN, SHOP_WAY.gapS].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }).concat([[o.x + 18, o.y + 14]]); }
         if (dist(d.x, d.y, o.x + 18, o.y + 14) < 24 || o.hoT > hoNeed + 1.8) doReturn(o);
       } else { doReturn(o); }
@@ -3863,7 +3937,7 @@ function updateDog(d, dt) {
   if (d.state === 'atDesk') {
     d.moving = false; if (!d.anim) setAnim(d, 'sit', 1e9);
     var wantsMe = S.owners.some(function (o) { return o.dogId === d.id && (o.state === 'waitPickup' || o.state === 'toHandover' || o.state === 'handover'); });
-    if (!wantsMe || !npcById('receptionist')) { d.state = 'toYard'; d.anim = null; d.route = [SHOP_WAY.gapN, SHOP_WAY.door, SHOP_WAY.yard].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }); }
+    if (!wantsMe || (!npcById('receptionist') && !npcById('runner'))) { d.state = 'toYard'; d.anim = null; d.route = [SHOP_WAY.gapN, SHOP_WAY.door, SHOP_WAY.yard].map(function (w) { return [w[0] * TILE, w[1] * TILE]; }); }
     return;
   }
   if (d.state === 'toOwner') { d.anim = null; if (followRoute(d, 170, dt)) d.moving = false; return; }
@@ -4258,8 +4332,10 @@ function sanitizeAndMigrateState(s) {
       upgradeDur = buildDur;
       buildEnd = 0;
     }
-    var isDone = !!o.done || isUpgrading || buildEnd <= 0 || Date.now() >= buildEnd;
-    if (isUpgrading && (upgradeEnd <= 0 || Date.now() >= upgradeEnd)) {
+    var isInstantDec = cDef.cat === 'decor' || !(cDef.time > 0);
+    var isDone = isInstantDec || !!o.done || isUpgrading || buildEnd <= 0 || Date.now() >= buildEnd;
+    if (isInstantDec) { buildDur = 0; buildEnd = 0; }
+    if (isUpgrading && (isInstantDec || upgradeEnd <= 0 || Date.now() >= upgradeEnd)) {
       olv++;
       isUpgrading = false;
       upgradeEnd = 0;

@@ -1633,6 +1633,436 @@ OB_def('gazebo', [-6, -50, 150, 147], function (c, o, t, env, id, ga) {
   light: function (o, env) { var T = OB_tile(); return { x: ((+o.x || 0) + 1.5) * T, y: ((+o.y || 0) + 1.6) * T, r: T * 4.4, color: '#ffd98a' }; }
 });
 
+/* ===================================== FLOOR: brick path ============================================ */
+var OB_BRICK_COLS = ['#c86f4c', '#bc6140', '#d17b56', '#b45a3a', '#c9724e'];
+function OB_brickPathArt(c, tx, ty) {
+  var r = OB_rng(tx * 4999 + ty * 8191 + 19);
+  // Warm sandy mortar bed overlapping edges cleanly
+  c.fillStyle = '#d8c8a8';
+  c.fillRect(-1, -1, 50, 50);
+  var rows = 4, bh = 10.5, gap = 1.5;
+  for (var row = 0; row < rows; row++) {
+    var y = 0.8 + row * (bh + gap);
+    var off = (row % 2) * 11.5;
+    for (var bx = -12 + off; bx < 49; bx += 23) {
+      var x0 = Math.max(0.6, bx), x1 = Math.min(47.4, bx + 21.2);
+      if (x1 - x0 < 3) continue;
+      var col = OB_BRICK_COLS[(r() * OB_BRICK_COLS.length) | 0];
+      OB_rr(c, x0, y, x1 - x0, bh, 2.2);
+      c.fillStyle = col; c.fill();
+      c.fillStyle = 'rgba(255,235,205,0.28)';
+      c.fillRect(x0 + 1.5, y + 1, Math.max(1, x1 - x0 - 3), 2.3);
+      c.fillStyle = 'rgba(70,30,18,0.22)';
+      c.fillRect(x0 + 1.5, y + bh - 2.3, Math.max(1, x1 - x0 - 3), 1.8);
+      OB_rr(c, x0, y, x1 - x0, bh, 2.2);
+      OB_s(c, 'rgba(59,42,32,0.75)', 1.1);
+    }
+  }
+  if (OB_h(tx, ty, 7) < 0.45) {
+    var mx = 10 + OB_h(tx, ty, 8) * 28, my = 12 + OB_h(tx, ty, 9) * 24;
+    OB_dot(c, mx, my, 2.1, '#68a64c'); OB_dot(c, mx + 2.4, my + 0.8, 1.5, '#82be60');
+  }
+}
+OB_def('brickpath', [-2, -2, 50, 50], function (c, o) {
+  var tx = ((Math.floor(+o.x || 0) % 4) + 4) % 4, ty = ((Math.floor(+o.y || 0) % 4) + 4) % 4;
+  OB_layer(c, 'brickp' + tx + ty, -2, -2, 50, 50, function (g) { OB_brickPathArt(g, tx + 3, ty + 7); });
+});
+
+/* ===================================== FLOOR: daisy patch =========================================== */
+function OB_daisyBaseArt(c) {
+  OB_ell(c, 24, 28, 21, 14); c.fillStyle = 'rgba(74,132,54,0.34)'; c.fill();
+  var leaves = [[12, 30, 6, 3.2, -0.3], [35, 31, 6.4, 3.2, 0.3], [22, 35, 7, 3.4, 0.1], [27, 22, 6, 3, -0.2], [15, 22, 5.5, 2.8, 0.4]];
+  for (var i = 0; i < leaves.length; i++) {
+    var l = leaves[i]; OB_ell(c, l[0], l[1], l[2], l[3], l[4]); OB_fo(c, i % 2 ? '#5da348' : '#71b856', 1.2);
+  }
+}
+function OB_daisyBloom(c, x, y, r, tint) {
+  for (var i = 0; i < 6; i++) {
+    var a = i * OB_TAU / 6;
+    OB_ell(c, x + Math.cos(a) * r * 0.72, y + Math.sin(a) * r * 0.58, r * 0.48, r * 0.34, a);
+    OB_fo(c, tint || '#fffdf5', 0.9);
+  }
+  OB_dot(c, x, y, r * 0.36, '#f2c14e');
+  c.beginPath(); c.arc(x, y, r * 0.36, 0, OB_TAU); OB_s(c, OB_OUT, 0.8);
+}
+OB_def('daisy', [-2, -2, 50, 50], function (c, o, t, env, id) {
+  OB_layer(c, 'daisyBase', 0, 10, 48, 46, OB_daisyBaseArt);
+  var sw = Math.sin(t * 2.1 + id * 1.3) * 1.4 + env.wind * 2.2;
+  var pos = [[12, 23, 5.4, '#fffdf5'], [25, 18, 6.2, '#fffdf5'], [36, 25, 5.2, '#fff5d6'], [18, 33, 5.8, '#fffdf5'], [31, 34, 5.0, '#ffe8f0']];
+  for (var i = 0; i < pos.length; i++) {
+    var p = pos[i], dx = sw * (0.7 + (i % 3) * 0.25);
+    OB_line(c, p[0], p[1] + 6, p[0] + dx, p[1], '#4d8a3c', 1.5);
+    OB_daisyBloom(c, p[0] + dx, p[1], p[2], p[3]);
+  }
+  if (id % 2 === 0) {
+    var bx = 24 + Math.cos(t * 1.4 + id) * 13, by = 14 + Math.sin(t * 2.2 + id) * 5;
+    OB_butterfly(c, bx, by, t + id, id % 4);
+  }
+}, { iconBounds: { x0: 2, y0: 8, x1: 46, y1: 44 } });
+
+/* ===================================== SOLID: boxwood hedge ========================================= */
+function OB_hedgeArt(c) {
+  OB_shadow(c, 24, 41, 21, 7.5);
+  OB_rr(c, 5, 16, 38, 25, 9); OB_fo(c, '#3f7d3a', 1.8);
+  OB_foliage(c, [
+    [13, 21, 10, 9.5], [24, 18, 11.5, 10], [35, 21, 10, 9.5],
+    [12, 30, 9.5, 8], [24, 31, 11, 8.5], [36, 30, 9.5, 8],
+  ], ['#2f632c', '#4b8f42', '#6db35a', '#8fd174'], 313, { density: 28, leaf: 2.3 });
+  var buds = [[14, 21, '#f4a4be'], [26, 17, '#fff3c4'], [34, 24, '#f4a4be'], [19, 30, '#fff3c4'], [31, 32, '#f4a4be']];
+  for (var i = 0; i < buds.length; i++) {
+    OB_dot(c, buds[i][0], buds[i][1], 2.2, buds[i][2]);
+    OB_dot(c, buds[i][0], buds[i][1], 0.8, '#f2c14e');
+  }
+}
+OB_def('hedge', [0, 4, 48, 50], function (c) {
+  OB_layer(c, 'hedge', 0, 4, 48, 50, OB_hedgeArt);
+}, { iconBounds: { x0: 2, y0: 6, x1: 46, y1: 48 } });
+
+/* ===================================== SOLID: sunflower trio ======================================== */
+function OB_sunflowerHead(c, x, y, r) {
+  for (var i = 0; i < 10; i++) {
+    var a = i * OB_TAU / 10;
+    OB_ell(c, x + Math.cos(a) * r * 0.78, y + Math.sin(a) * r * 0.72, r * 0.42, r * 0.24, a);
+    OB_fo(c, i % 2 ? '#f7c83c' : '#ffd84d', 1.0);
+  }
+  OB_ell(c, x, y, r * 0.52, r * 0.48); OB_fo(c, '#633c20', 1.3);
+  OB_dot(c, x - r * 0.14, y - r * 0.12, r * 0.14, '#8d5b34');
+}
+function OB_sunflowerPotArt(c) {
+  OB_shadow(c, 24, 42, 17, 6.5);
+  OB_blob(c, 24, 39, 15, 7, 55, 8, 0.08); OB_fo(c, '#7a5536', 1.6);
+  OB_ell(c, 15, 36, 6.5, 3.2, -0.35); OB_fo(c, '#589d46', 1.3);
+  OB_ell(c, 33, 36, 6.5, 3.2, 0.35); OB_fo(c, '#69b052', 1.3);
+}
+OB_def('sunflower', [-2, -16, 50, 50], function (c, o, t, env, id) {
+  OB_layer(c, 'sunPot', 4, 28, 44, 49, OB_sunflowerPotArt);
+  var sw = Math.sin(t * 1.9 + id * 1.7) * 2.2 + env.wind * 4.5;
+  var stems = [[15, 37, 13 + sw * 0.7, 15, 8.2], [33, 37, 35 + sw * 0.8, 17, 7.8], [24, 38, 24 + sw, 4, 10.2]];
+  for (var i = 0; i < stems.length; i++) {
+    var s = stems[i];
+    c.beginPath(); c.moveTo(s[0], s[1]); c.quadraticCurveTo((s[0] + s[2]) / 2, (s[1] + s[3]) / 2 + 2, s[2], s[3]);
+    OB_s(c, OB_OUT, 4.4); OB_s(c, '#5da348', 2.4);
+    OB_ell(c, (s[0] + s[2]) / 2 + (i === 0 ? -4 : 4), (s[1] + s[3]) / 2 + 2, 4.5, 2.3, i === 0 ? -0.5 : 0.5);
+    OB_fo(c, '#69b052', 1.1);
+    OB_sunflowerHead(c, s[2], s[3], s[4]);
+  }
+}, { iconBounds: { x0: 2, y0: -10, x1: 46, y1: 48 } });
+
+/* ===================================== SOLID: pup garden gnome ====================================== */
+function OB_gnomeArt(c) {
+  OB_shadow(c, 24, 42, 16, 6.5);
+  // Mossy stepping stone base
+  OB_ell(c, 24, 39.5, 14.5, 6); OB_fo(c, '#b7b0a2', 1.6);
+  OB_ell(c, 21, 38, 8, 2.6); c.fillStyle = '#d3cdc0'; c.fill();
+  // Boots
+  OB_ell(c, 18.5, 36.5, 4.2, 2.8); OB_fo(c, '#523421', 1.4);
+  OB_ell(c, 29.5, 36.5, 4.2, 2.8); OB_fo(c, '#523421', 1.4);
+  // Blue tunic coat & belt
+  OB_shape(c, function () {
+    c.beginPath(); c.moveTo(14, 35.5); c.quadraticCurveTo(13, 22, 24, 21);
+    c.quadraticCurveTo(35, 22, 34, 35.5); c.closePath();
+  }, '#4b86bf', function () {
+    c.fillStyle = '#386a9c'; c.fillRect(25, 21, 11, 16);
+    c.fillStyle = '#5a3a22'; c.fillRect(13, 29.5, 22, 3.2);
+    c.fillStyle = '#f2c14e'; c.fillRect(21.5, 29, 5, 4.2);
+  }, 1.6);
+  // Fluffy white beard & rosy nose
+  OB_poly(c, [16, 20, 32, 20, 29, 29, 24, 32.5, 19, 29]); OB_fo(c, '#faf4e6', 1.5);
+  OB_ell(c, 24, 19.5, 3.6, 2.8); OB_fo(c, '#f4b795', 1.3);
+  // Tall pointed red gnome hat
+  OB_shape(c, function () {
+    c.beginPath(); c.moveTo(13.5, 18.5); c.quadraticCurveTo(17, 4, 25.5, -2);
+    c.quadraticCurveTo(31, 7, 34.5, 18.5); c.quadraticCurveTo(24, 21, 13.5, 18.5); c.closePath();
+  }, '#d94d43', function () {
+    c.fillStyle = '#b4372f'; c.beginPath(); c.moveTo(25.5, -2); c.lineTo(36, 19); c.lineTo(25, 20); c.closePath(); c.fill();
+  }, 1.7);
+  OB_dot(c, 25.5, -2, 2.4, '#fff8e1');
+  // Tiny golden bone tucked under arm
+  OB_rr(c, 29.5, 24.5, 9, 3.4, 1.5); OB_fo(c, '#f5c74e', 1.1);
+  OB_dot(c, 38.5, 24.8, 2.1, '#f5c74e'); OB_dot(c, 38.5, 27.6, 2.1, '#f5c74e');
+}
+OB_def('gnome', [4, -8, 44, 49], function (c, o, t, env, id) {
+  OB_layer(c, 'gnome', 4, -8, 44, 49, OB_gnomeArt);
+  var sp = Math.sin(t * 2.5 + id);
+  if (sp > 0.6) OB_sparkle(c, 37, 25, (sp - 0.6) * 7, '#fff9d0', 0.9);
+}, { iconBounds: { x0: 6, y0: -6, x1: 42, y1: 47 } });
+
+/* ===================================== SOLID: paper lanterns ======================================== */
+function OB_lanternPostArt(c) {
+  OB_shadow(c, 24, 42, 16, 6);
+  // Stone base & timber post with arched crossarm
+  OB_ell(c, 24, 40, 10, 4.5); OB_fo(c, '#a8a196', 1.6);
+  OB_rr(c, 21.5, 0, 5, 40, 2); OB_fo(c, '#7c4d2c', 1.6);
+  OB_rr(c, 8, 2, 32, 4.2, 2); OB_fo(c, '#9a6338', 1.6);
+  OB_dot(c, 24, -1, 3.2, '#f2c14e');
+}
+function OB_lanternLampArt(c, lit) {
+  OB_rr(c, -6, 0, 12, 14, 5.5);
+  OB_fo(c, lit ? '#ff7c52' : '#d94e3f', 1.4);
+  if (lit) {
+    OB_ell(c, 0, 7, 4.2, 5.4); c.fillStyle = '#ffe590'; c.fill();
+  }
+  OB_line(c, -5.5, 4.5, 5.5, 4.5, '#7a251c', 0.9);
+  OB_line(c, -5.5, 9.5, 5.5, 9.5, '#7a251c', 0.9);
+  OB_rr(c, -3.5, -2, 7, 2.4, 1); OB_fo(c, '#3b2a20', 0.8);
+  OB_rr(c, -3.5, 13.4, 7, 2.2, 1); OB_fo(c, '#3b2a20', 0.8);
+  OB_line(c, 0, 15.6, 0, 20.5, '#f2c14e', 1.5);
+}
+OB_def('lantern', [-6, -12, 54, 50], function (c, o, t, env, id, ga) {
+  var n = env.night;
+  if (n > 0.05) {
+    c.globalAlpha = ga * n * 0.28;
+    OB_ell(c, 24, 40, 30, 12); c.fillStyle = '#ffbf70'; c.fill();
+    c.globalAlpha = ga;
+  }
+  OB_layer(c, 'lantPost', 4, -8, 44, 48, OB_lanternPostArt);
+  var sw = Math.sin(t * 2.0 + id * 1.4) * 1.8 + env.wind * 3.5;
+  var lit = n > 0.25;
+  var xs = [11.5, 36.5];
+  for (var i = 0; i < 2; i++) {
+    var lx = xs[i], sx = lx + sw * (i ? 0.9 : 1.1);
+    OB_line(c, lx, 6, sx, 11, '#3b2a20', 1.2);
+    if (n > 0.05) {
+      c.globalAlpha = ga * n * 0.55;
+      var g = c.createRadialGradient(sx, 18, 2, sx, 18, 19);
+      g.addColorStop(0, 'rgba(255,220,130,0.9)'); g.addColorStop(1, 'rgba(255,160,80,0)');
+      c.fillStyle = g; c.fillRect(sx - 19, -1, 38, 38);
+      c.globalAlpha = ga;
+    }
+    OB_layer(c, lit ? 'lantLit' : 'lantDay', -9, -4, 9, 23, function (g2) { OB_lanternLampArt(g2, lit); }, sx, 11);
+  }
+}, {
+  iconBounds: { x0: 2, y0: -6, x1: 46, y1: 47 },
+  light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 0.5) * T, y: ((+o.y || 0) + 0.35) * T, r: T * 2.7, color: '#ffc875' }; },
+});
+
+/* ===================================== SOLID: cherry blossom tree =================================== */
+function OB_cherryArt(c) {
+  OB_shadow(c, 24, 41, 20, 7.5);
+  // Graceful dark bark trunk with roots
+  OB_shape(c, function () {
+    c.beginPath(); c.moveTo(18, 41); c.quadraticCurveTo(21, 30, 21, 14);
+    c.lineTo(27.5, 14); c.quadraticCurveTo(27.5, 30, 31, 41); c.closePath();
+  }, '#6e4736', function () {
+    c.fillStyle = '#4f3124'; c.fillRect(24.5, 14, 7, 28);
+  }, 1.7);
+  // Lush sakura canopy
+  OB_foliage(c, [
+    [12, 8, 12, 10.5], [36, 9, 11.5, 10], [24, -4, 15, 12.5],
+    [16, -8, 11, 9.5], [32, -7, 11, 9.5], [24, 8, 14, 11],
+  ], ['#cf6e93', '#f4a2be', '#ffd0e0', '#fff0f6'], 607, { density: 24, leaf: 2.8 });
+  // Fallen pink petals around roots
+  var fp = [[11, 41], [17, 43], [32, 42], [37, 39], [25, 44]];
+  for (var i = 0; i < fp.length; i++) OB_dot(c, fp[i][0], fp[i][1], 1.7, i % 2 ? '#f7b2ca' : '#ffdbe8');
+}
+OB_def('cherry', [-6, -24, 54, 50], function (c, o, t, env, id, ga) {
+  OB_layer(c, 'cherry', -6, -24, 54, 50, OB_cherryArt);
+  // 3 gently drifting falling petals
+  for (var i = 0; i < 3; i++) {
+    var u = OB_fract(t * 0.28 + i * 0.33 + id * 0.17);
+    var px = 14 + i * 10 + Math.sin(u * 6.5 + i) * 7 + env.wind * u * 14;
+    var py = 6 + u * 36;
+    c.globalAlpha = ga * Math.sin(u * Math.PI) * 0.9;
+    OB_ell(c, px, py, 2.3, 1.4, u * 5 + i);
+    c.fillStyle = i % 2 ? '#ffb7d0' : '#ffe4ee'; c.fill();
+  }
+  c.globalAlpha = ga;
+}, { iconBounds: { x0: -2, y0: -20, x1: 50, y1: 47 } });
+
+/* ===================================== FLOOR: walkable rose archway ================================= */
+function OB_archArt(c) {
+  // Subtle garden gravel threshold so it blends neatly over paths or grass
+  OB_ell(c, 48, 34, 42, 11); c.fillStyle = 'rgba(218,198,162,0.45)'; c.fill();
+  // Left & right white timber trellis pillars
+  OB_shadow(c, 12, 40, 9, 4); OB_shadow(c, 84, 40, 9, 4);
+  OB_rr(c, 7, 4, 9, 36, 2.5); OB_fo(c, '#f3ebd8', 1.6);
+  OB_rr(c, 80, 4, 9, 36, 2.5); OB_fo(c, '#f3ebd8', 1.6);
+  // Curved overhead trellis arch
+  c.beginPath(); c.arc(48, 14, 36.5, Math.PI, 0); OB_s(c, OB_OUT, 10.5); OB_s(c, '#f3ebd8', 7);
+  // Climbing ivy & roses draping across the arch
+  OB_foliage(c, [
+    [13, 10, 8, 7], [22, -6, 9, 7.5], [35, -16, 10, 7.5],
+    [48, -20, 11, 8], [61, -16, 10, 7.5], [74, -6, 9, 7.5], [83, 10, 8, 7],
+  ], ['#2f6b30', '#4f9946', '#72bd62', '#95db82'], 809, { density: 26, leaf: 2.2 });
+  var roses = [[14, 7, '#eb6583'], [24, -7, '#ffd9e3'], [36, -16, '#eb6583'], [48, -21, '#fff3c4'], [60, -16, '#eb6583'], [73, -7, '#ffd9e3'], [82, 7, '#eb6583']];
+  for (var i = 0; i < roses.length; i++) {
+    OB_ell(c, roses[i][0], roses[i][1], 4.2, 3.6); OB_fo(c, roses[i][2], 1.1);
+    OB_dot(c, roses[i][0], roses[i][1], 1.2, '#f2c14e');
+  }
+}
+OB_def('arch', [-2, -32, 98, 50], function (c, o, t, env, id, ga) {
+  OB_layer(c, 'arch', -2, -32, 98, 50, OB_archArt);
+  if (env.night > 0.05) {
+    var bulbs = [[18, -2], [32, -14], [48, -19], [64, -14], [78, -2]];
+    for (var i = 0; i < bulbs.length; i++) {
+      var tw = 0.72 + Math.sin(t * 3 + i * 1.4 + id) * 0.28;
+      c.globalAlpha = ga * env.night * tw;
+      OB_dot(c, bulbs[i][0], bulbs[i][1], 5.5, 'rgba(255,232,145,0.45)');
+      OB_dot(c, bulbs[i][0], bulbs[i][1], 2.2, '#fff9d0');
+    }
+    c.globalAlpha = ga;
+  }
+}, {
+  iconBounds: { x0: 0, y0: -30, x1: 96, y1: 46 },
+  light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 1.0) * T, y: ((+o.y || 0) + 0.1) * T, r: T * 3.0, color: '#ffe0a0' }; },
+});
+
+/* ===================================== SOLID: garden windmill ======================================= */
+function OB_windmillBaseArt(c) {
+  OB_shadow(c, 24, 42, 16, 6.5);
+  // Tapered timber & cream plaster tower
+  OB_shape(c, function () {
+    c.beginPath(); c.moveTo(13, 41); c.lineTo(18, 4); c.lineTo(30, 4); c.lineTo(35, 41); c.closePath();
+  }, '#f2e3c6', function () {
+    c.fillStyle = '#dcc7a0'; c.fillRect(25, 4, 12, 38);
+    OB_line(c, 15, 25, 33, 25, '#9a6338', 2);
+  }, 1.7);
+  // Cute little arched wooden door & round window
+  OB_rr(c, 20.5, 30, 7, 11, 3.5); OB_fo(c, '#8c5530', 1.3);
+  OB_dot(c, 24, 17, 3.3, '#83c5e8'); c.beginPath(); c.arc(24, 17, 3.3, 0, OB_TAU); OB_s(c, OB_OUT, 1.2);
+  // Red conical cap
+  OB_poly(c, [14, 5, 24, -7, 34, 5]); OB_fo(c, '#d45242', 1.7);
+}
+OB_def('windmill', [-8, -22, 56, 50], function (c, o, t, env, id) {
+  OB_layer(c, 'wmBase', 4, -10, 44, 49, OB_windmillBaseArt);
+  // Spinning 4-blade wooden sails
+  var ang = t * (1.25 + Math.abs(env.wind) * 1.4) + id * 0.9;
+  c.save();
+  c.translate(24, 5);
+  c.rotate(ang);
+  for (var i = 0; i < 4; i++) {
+    c.rotate(Math.PI / 2);
+    OB_line(c, 0, 0, 0, -21, OB_OUT, 2.4);
+    OB_rr(c, 1, -20, 6.8, 13.5, 1.5); OB_fo(c, i % 2 ? '#fff6de' : '#f2c14e', 1.2);
+    OB_line(c, 1, -15.5, 7.8, -15.5, '#b8864a', 0.9);
+    OB_line(c, 1, -11, 7.8, -11, '#b8864a', 0.9);
+  }
+  OB_dot(c, 0, 0, 3.4, '#8c5530');
+  c.beginPath(); c.arc(0, 0, 3.4, 0, OB_TAU); OB_s(c, OB_OUT, 1.3);
+  c.restore();
+}, { iconBounds: { x0: 0, y0: -18, x1: 48, y1: 48 } });
+
+/* ===================================== SOLID: cozy fire pit (2x2) =================================== */
+function OB_campfireBaseArt(c) {
+  OB_shadow(c, 48, 54, 42, 26);
+  // Gravel hearth circle
+  OB_ell(c, 48, 50, 39, 25); OB_fo(c, '#c8b694', 1.6);
+  // Two cozy log benches (top-left & bottom-right)
+  OB_rr(c, 10, 14, 34, 11, 5); OB_fo(c, '#9a6338', 1.7);
+  OB_ell(c, 13, 19.5, 3.4, 5); OB_fo(c, '#d7a974', 1.2);
+  OB_rr(c, 52, 70, 34, 11, 5); OB_fo(c, '#9a6338', 1.7);
+  OB_ell(c, 83, 75.5, 3.4, 5); OB_fo(c, '#d7a974', 1.2);
+  // Stone fire ring
+  var n = 10;
+  for (var i = 0; i < n; i++) {
+    var a = i * OB_TAU / n;
+    var sx = 48 + Math.cos(a) * 18, sy = 50 + Math.sin(a) * 12;
+    OB_ell(c, sx, sy, 6.2, 4.8); OB_fo(c, i % 2 ? '#9f998e' : '#b7b1a5', 1.4);
+  }
+  // Dark ash bed & crossed fire logs
+  OB_ell(c, 48, 50, 12.5, 8); c.fillStyle = '#3d3028'; c.fill();
+  c.save(); c.translate(48, 50);
+  c.rotate(0.42); OB_rr(c, -11, -2.5, 22, 5, 2); OB_fo(c, '#784928', 1.3);
+  c.rotate(-0.84); OB_rr(c, -11, -2.5, 22, 5, 2); OB_fo(c, '#8c5630', 1.3);
+  c.restore();
+}
+OB_def('campfire', [-4, -4, 100, 98], function (c, o, t, env, id, ga) {
+  if (env.night > 0.05) {
+    c.globalAlpha = ga * env.night * 0.32;
+    OB_ell(c, 48, 52, 58, 36); c.fillStyle = '#ff9f43'; c.fill();
+    c.globalAlpha = ga;
+  }
+  OB_layer(c, 'campfireBase', 0, 4, 96, 94, OB_campfireBaseArt);
+  // Flickering animated flame + rising embers
+  var fl = Math.sin(t * 9.5 + id) * 2.2, fl2 = Math.cos(t * 7.2 + id) * 1.8;
+  c.beginPath(); c.moveTo(39, 49);
+  c.quadraticCurveTo(38, 34, 48 + fl, 24 + fl2);
+  c.quadraticCurveTo(58, 34, 57, 49); c.closePath();
+  OB_fo(c, '#f26a2e', 1.5);
+  c.beginPath(); c.moveTo(42.5, 49);
+  c.quadraticCurveTo(43, 39, 48 + fl * 0.6, 32 + fl2 * 0.6);
+  c.quadraticCurveTo(53, 39, 53.5, 49); c.closePath();
+  c.fillStyle = '#ffd54a'; c.fill();
+  OB_ell(c, 48, 46, 3.8, 4.4); c.fillStyle = '#fff9d6'; c.fill();
+  for (var i = 0; i < 3; i++) {
+    var u = OB_fract(t * 0.75 + i * 0.33 + id * 0.21);
+    c.globalAlpha = ga * (1 - u) * 0.9;
+    OB_dot(c, 48 + Math.sin(u * 9 + i * 2) * 7, 34 - u * 22, 1.7 * (1 - u * 0.5), i % 2 ? '#ffe066' : '#ff7b47');
+  }
+  c.globalAlpha = ga;
+}, {
+  iconBounds: { x0: 4, y0: 8, x1: 92, y1: 88 },
+  light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 1.0) * T, y: ((+o.y || 0) + 1.0) * T, r: T * 3.8, color: '#ffad5c' }; },
+});
+
+/* ===================================== SOLID: paw clock tower ======================================= */
+function OB_clockBaseArt(c) {
+  OB_shadow(c, 24, 42, 15, 6);
+  // Stone pedestal & dark wrought-iron column
+  OB_rr(c, 13, 34, 22, 9, 3); OB_fo(c, '#b7b0a2', 1.6);
+  OB_rr(c, 20.5, 2, 7, 33, 2); OB_fo(c, '#3d4c49', 1.6);
+  OB_rr(c, 17, 29, 14, 5, 2); OB_fo(c, '#51635f', 1.4);
+  // Brass clock bezel & finial
+  OB_ell(c, 24, -6, 13.5, 13.5); OB_fo(c, '#d6a43e', 1.7);
+  OB_ell(c, 24, -6, 10.5, 10.5); OB_fo(c, '#fffdf2', 1.3);
+  OB_poly(c, [20, -19, 24, -26, 28, -19]); OB_fo(c, '#e8bc52', 1.4);
+  // 12/3/6/9 dial ticks
+  OB_dot(c, 24, -14.2, 1.1, '#3b2a20'); OB_dot(c, 32.2, -6, 1.1, '#3b2a20');
+  OB_dot(c, 24, 2.2, 1.1, '#3b2a20'); OB_dot(c, 15.8, -6, 1.1, '#3b2a20');
+}
+OB_def('clock', [4, -30, 44, 50], function (c, o, t, env, id, ga) {
+  OB_layer(c, 'clockBase', 6, -29, 42, 49, OB_clockBaseArt);
+  if (env.night > 0.05) {
+    c.globalAlpha = ga * env.night * 0.48;
+    OB_ell(c, 24, -6, 10.2, 10.2); c.fillStyle = '#ffe7a0'; c.fill();
+    c.globalAlpha = ga;
+  }
+  // Live ticking minute & hour hands
+  var minA = t * 0.65 + id, hrA = minA / 12;
+  OB_line(c, 24, -6, 24 + Math.cos(hrA - Math.PI / 2) * 5.2, -6 + Math.sin(hrA - Math.PI / 2) * 5.2, '#3b2a20', 1.9);
+  OB_line(c, 24, -6, 24 + Math.cos(minA - Math.PI / 2) * 7.8, -6 + Math.sin(minA - Math.PI / 2) * 7.8, '#b83428', 1.3);
+  OB_dot(c, 24, -6, 1.5, '#d6a43e');
+}, {
+  iconBounds: { x0: 6, y0: -28, x1: 42, y1: 47 },
+  light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 0.5) * T, y: ((+o.y || 0) - 0.1) * T, r: T * 2.5, color: '#ffe7a0' }; },
+});
+
+/* ===================================== FLOOR: walkable rainbow arch (3x1) =========================== */
+function OB_rainbowArt(c) {
+  var bands = ['#ef6c6c', '#f5a64b', '#f7dc5e', '#76cc68', '#68b9eb', '#a783e8'];
+  var cx = 72, cy = 32;
+  // Outer dark stroke around arch
+  c.beginPath(); c.arc(cx, cy, 62, Math.PI, 0); OB_s(c, OB_OUT, 25);
+  for (var i = 0; i < bands.length; i++) {
+    c.beginPath(); c.arc(cx, cy, 61 - i * 3.6, Math.PI, 0);
+    OB_s(c, bands[i], 4.2);
+  }
+  // Inner crisp outline
+  c.beginPath(); c.arc(cx, cy, 41, Math.PI, 0); OB_s(c, OB_OUT, 1.8);
+  // Fluffy cloud anchors on left & right feet
+  OB_shadow(c, 16, 40, 15, 5.5); OB_shadow(c, 128, 40, 15, 5.5);
+  var clL = [[8, 34, 8, 7], [17, 29, 10, 8.5], [26, 34, 8.5, 7], [17, 36, 11, 6.5]];
+  var clR = [[118, 34, 8.5, 7], [127, 29, 10, 8.5], [136, 34, 8, 7], [127, 36, 11, 6.5]];
+  OB_union(c, clL, '#fffdf7', 1.7);
+  OB_union(c, clR, '#fffdf7', 1.7);
+  // Golden paw emblem at the apex
+  OB_ell(c, cx, cy - 53, 8, 8); OB_fo(c, '#ffd54a', 1.5);
+  OB_dot(c, cx, cy - 51.5, 2.7, '#8c5530');
+  OB_dot(c, cx - 3, cy - 55, 1.3, '#8c5530'); OB_dot(c, cx, cy - 56, 1.3, '#8c5530'); OB_dot(c, cx + 3, cy - 55, 1.3, '#8c5530');
+}
+OB_def('rainbow', [-4, -36, 148, 50], function (c, o, t, env, id) {
+  OB_layer(c, 'rainbow', -4, -36, 148, 50, OB_rainbowArt);
+  for (var i = 0; i < 3; i++) {
+    var tw = OB_fract(t * 0.8 + i * 0.34 + id * 0.13);
+    var a = Math.PI + (0.2 + i * 0.3) * Math.PI;
+    var sx = 72 + Math.cos(a) * 53, sy = 32 + Math.sin(a) * 53;
+    OB_sparkle(c, sx, sy, 5.5 * Math.sin(tw * Math.PI), '#fffbe6', 0.95);
+  }
+}, {
+  iconBounds: { x0: -2, y0: -34, x1: 146, y1: 46 },
+  light: function (o) { var T = OB_tile(); return { x: ((+o.x || 0) + 1.5) * T, y: ((+o.y || 0) + 0.1) * T, r: T * 3.6, color: '#ffe8b8' }; },
+});
+
 /* ===================================== shop icon =================================================== */
 // Draws any registered object scaled to fit a size x size box whose top-left corner is (x, y).
 // The icon is baked once per (type, size, scale) and then blitted, so it is cheap to call every frame.
