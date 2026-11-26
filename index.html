@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="Paws and Play">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#5d9d49">
-<link rel="stylesheet" href="style.css?v=31">
+<link rel="stylesheet" href="style.css?v=33">
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -20,25 +20,38 @@
   <div id="hud-top">
     <div id="hud-tl" class="plaque">
       <div class="top-main-row">
-        <div id="sundial"><div id="sun"></div></div>
-        <div class="clocktext"><span id="dayname">Day 1</span><span id="clock">8:00 AM</span></div>
-        <div class="top-badges">
-          <div class="stat-pill"><span class="lvnum" id="lvl">1</span><div class="bar"><div id="xpbar"></div></div></div>
-          <div class="stat-pill" id="repPill"><span id="rep"></span></div>
-          <div class="stat-pill">🐕<span id="cap">0/2</span></div>
-          <div class="stat-pill" hidden>🌸<span id="charm">0</span></div>
-          <div class="stat-pill" id="streak"></div>
-        </div>
+        <button type="button" id="topTimePill" class="top-chip" title="Tap to expand daycare details">
+          <span id="dayshort">🌅 D1</span>
+          <span id="clock">8:00a</span>
+        </button>
+        <div class="stat-pill" id="repPill" title="Tap for Star Rating details"><span class="stars">★</span><span id="repShort">5.0</span></div>
+        <button type="button" id="pupsPill" class="top-chip" title="Tap to expand Pups list">
+          <span>🐕</span><span id="cap">0/2</span><span id="pupsAlert" class="top-alert"></span><span class="p-chev" id="pupsChev">▾</span>
+        </button>
+        <button type="button" id="tasksPill" class="top-chip" title="Tap to expand Goals &amp; Tutorial">
+          <span id="tasksIco">🎯</span><span id="tasksShort">0/3</span><span class="p-chev" id="tasksChev">▾</span>
+        </button>
         <div class="top-currencies">
           <div id="heartbox" title="Paw Hearts"><span class="hico">💛</span><span id="hearts">0</span></div>
           <div id="cashbox"><span class="coin"></span><span id="cash">$0</span></div>
+        </div>
+        <button type="button" id="topExpandBtn" class="top-exp-btn" title="Expand all top stats">▾</button>
+      </div>
+      <div id="topDetails" class="top-details" hidden>
+        <div class="top-badges">
+          <div id="sundial"><div id="sun"></div></div>
+          <div class="clocktext"><span id="dayname">Day 1</span></div>
+          <div class="stat-pill"><span class="lvnum" id="lvl">1</span><div class="bar"><div id="xpbar"></div></div></div>
+          <div class="stat-pill" id="repFullPill"><span id="rep"></span></div>
+          <div class="stat-pill" id="charmPill">🌸<span id="charm">0</span></div>
+          <div class="stat-pill" id="streak"></div>
         </div>
       </div>
       <div class="daytrack"><div id="daybar"></div></div>
     </div>
     <div id="hud-tr" class="hud-pills-row">
-      <div id="tasks" class="panel"></div>
-      <div id="roster" class="panel"></div>
+      <div id="tasks" class="panel" hidden></div>
+      <div id="roster" class="panel" hidden></div>
     </div>
     <div id="toasts"></div>
     <div id="mgBanner" hidden></div>
@@ -74,7 +87,7 @@
 </div>
 <div id="fade"></div>
 <div id="splash"><div class="logo">Paws &amp; Play<span>DOGGY DAYCARE</span></div><div class="paws"><i></i><i></i><i></i></div><p>Opening the doors…</p></div>
-<!-- Bundled asset version marker: js/game.js?v=31 -->
-<script src="js/boot.js?v=31"></script>
+<!-- Bundled asset version marker: js/game.js?v=33 -->
+<script src="js/boot.js?v=33"></script>
 </body>
 </html>

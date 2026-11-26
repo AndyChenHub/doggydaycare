@@ -3,8 +3,8 @@
    minigames.js — Randomly Timed Surprise Mini-Games for Paws & Play
    - Every 10 seconds during active post-tutorial play, 20% chance of a random mini-game
    - 5..4..3..2..1 countdown warning banner (pauses daycare simulation once modal opens)
-   - Universal 3-tier difficulty system for EVERY game:
-       Easy (60%) · Medium (25%) · Hard (15%)
+   - Universal 4-tier difficulty system for EVERY game:
+       Easy (55%) · Medium (25%) · Hard (15%) · Expert (5% baseline, scales up with wins)
    - Adapted failure consequences matched to each mini-game (fines, lost stars, lost hearts,
      yard poops, muddy pups, mood drops, impatient waiting owners)
    - 10 portrait iPhone-friendly mini-games:
@@ -30,9 +30,10 @@ var MINIGAMES = (function () {
   ];
 
   var DIFFICULTIES = [
-    { id: 'easy',   label: 'Easy',   badge: '🟢 Easy',   weight: 60 },
+    { id: 'easy',   label: 'Easy',   badge: '🟢 Easy',   weight: 55 },
     { id: 'medium', label: 'Medium', badge: '🟡 Medium', weight: 25 },
     { id: 'hard',   label: 'Hard',   badge: '🔴 Hard',   weight: 15 },
+    { id: 'expert', label: 'Expert', badge: '🟣 Expert', weight: 5  },
   ];
 
   var DIFF_BY_ID = {};
@@ -127,16 +128,17 @@ var MINIGAMES = (function () {
     } catch (e) {}
   }
 
-  var MAX_HEAT = 10;
+  var MIN_HEAT = -1.5;
+  var MAX_HEAT = 12;
 
   function getHeat() {
     var h = (typeof S !== 'undefined' && S && S.life && typeof S.life.mgHeat === 'number' && isFinite(S.life.mgHeat))
       ? S.life.mgHeat : 0;
-    return Math.max(0, Math.min(MAX_HEAT, h));
+    return Math.max(MIN_HEAT, Math.min(MAX_HEAT, h));
   }
 
   function setHeat(val) {
-    var clamped = Math.max(0, Math.min(MAX_HEAT, Math.round(val * 100) / 100));
+    var clamped = Math.max(MIN_HEAT, Math.min(MAX_HEAT, Math.round(val * 100) / 100));
     if (typeof S !== 'undefined' && S) {
       if (!S.life) S.life = {};
       S.life.mgHeat = clamped;
@@ -144,43 +146,118 @@ var MINIGAMES = (function () {
     return clamped;
   }
 
-  // Adaptive difficulty odds:
-  // Baseline (heat = 0): 60% Easy / 25% Medium / 15% Hard
-  // Winning Easy (+1 heat) / Med (+0.75) / Hard (+0.5) escalates toward harder games (up to 20/40/40)
-  // Failing Hard (-3 heat) / Med (-1.5) / Easy (-1) cools the odds back down
+  // Adaptive difficulty odds (normalized to 100%):
+  // Baseline (heat = 0): 55% Easy / 25% Medium / 15% Hard / 5% Expert
+  // Passing Easy (+0.75), Medium (+1.0), Hard (+1.75), or Expert (+2.0) increases Expert & Hard chances
+  // Failing Expert (-3.5), Hard (-2.5), Medium (-1.5), or Easy (-1.0) decreases Expert & Hard chances
   function getDifficultyWeights() {
     var h = getHeat();
+    var rawEasy   = Math.max(12, 55 - h * 3.6);
+    var rawMedium = Math.max(18, 25 - Math.max(0, h - 4) * 0.8);
+    var rawHard   = Math.max(10, 15 + h * 1.1);
+    var rawExpert = Math.max(1.25, 5 + h * 2.5);
+    var tot = rawEasy + rawMedium + rawHard + rawExpert;
     return {
-      easy:   Math.max(20, 60 - h * 4.0),
-      medium: 25 + h * 1.5,
-      hard:   15 + h * 2.5,
+      easy:   (rawEasy / tot) * 100,
+      medium: (rawMedium / tot) * 100,
+      hard:   (rawHard / tot) * 100,
+      expert: (rawExpert / tot) * 100,
     };
   }
 
   function rollDifficulty(forcedId) {
-    if (forcedId === 'extreme') forcedId = 'hard';
+    if (forcedId === 'extreme') forcedId = 'expert';
     if (forcedId && DIFF_BY_ID[forcedId]) return DIFF_BY_ID[forcedId];
     var w = getDifficultyWeights();
-    var tot = w.easy + w.medium + w.hard;
+    var tot = w.easy + w.medium + w.hard + w.expert;
     var r = Math.random() * tot;
     if (r < w.easy) return DIFF_BY_ID.easy;
     if (r < w.easy + w.medium) return DIFF_BY_ID.medium;
-    return DIFF_BY_ID.hard;
+    if (r < w.easy + w.medium + w.hard) return DIFF_BY_ID.hard;
+    return DIFF_BY_ID.expert;
+  }
+
+  var localKindCounts = {};
+
+  function getKindCountsMap() {
+    if (typeof S !== 'undefined' && S) {
+      if (!S.life) S.life = {};
+      if (!S.life.mgCounts || typeof S.life.mgCounts !== 'object') S.life.mgCounts = {};
+      return S.life.mgCounts;
+    }
+    return localKindCounts;
+  }
+
+  function getRecentKindsList() {
+    if (typeof S !== 'undefined' && S) {
+      if (!S.life) S.life = {};
+      if (!Array.isArray(S.life.mgRecent)) S.life.mgRecent = recentKinds.slice();
+      return S.life.mgRecent;
+    }
+    return recentKinds;
+  }
+
+  // Weighted mini-game variety:
+  // Once a type of mini-game is played, its likelihood drops sharply compared to unplayed/less-played
+  // mini-games (plus a recency penalty), so players naturally cycle through all 30 games while keeping it random.
+  function getKindWeights() {
+    var counts = getKindCountsMap();
+    var rec = getRecentKindsList();
+    var minC = Infinity;
+    for (var i = 0; i < ALL_KINDS.length; i++) {
+      var c = counts[ALL_KINDS[i]] || 0;
+      if (c < minC) minC = c;
+    }
+    if (!isFinite(minC)) minC = 0;
+
+    var weights = {};
+    for (var j = 0; j < ALL_KINDS.length; j++) {
+      var k = ALL_KINDS[j];
+      var cnt = counts[k] || 0;
+      var delta = Math.max(0, cnt - minC);
+      var w = delta === 0 ? 100 : (10 / Math.pow(3.5, delta - 1));
+      var lastIdx = rec.lastIndexOf(k);
+      if (lastIdx >= 0) {
+        var age = rec.length - 1 - lastIdx;
+        if (age === 0) w *= 0.04;
+        else if (age < 5) w *= 0.15;
+        else if (age < 12) w *= 0.35;
+        else if (age < 22) w *= 0.65;
+      }
+      weights[k] = Math.max(0.05, w);
+    }
+    return weights;
   }
 
   function pickNextKind(forcedKind) {
     if (forcedKind && KIND_META[forcedKind]) return forcedKind;
-    var pool = ALL_KINDS.filter(function (k) { return recentKinds.indexOf(k) < 0; });
-    if (!pool.length) pool = ALL_KINDS.slice();
-    return pickOne(pool);
+    var weights = getKindWeights();
+    var tot = 0;
+    for (var i = 0; i < ALL_KINDS.length; i++) tot += weights[ALL_KINDS[i]] || 0;
+    if (!(tot > 0)) return pickOne(ALL_KINDS);
+    var r = Math.random() * tot;
+    var acc = 0;
+    for (var j = 0; j < ALL_KINDS.length; j++) {
+      var k = ALL_KINDS[j];
+      acc += weights[k] || 0;
+      if (r <= acc) return k;
+    }
+    return ALL_KINDS[ALL_KINDS.length - 1];
   }
 
   var EXTRA_GAMES = {};
 
   function rememberKind(k) {
-    recentKinds.push(k);
-    var maxHist = Math.min(8, Math.max(3, ALL_KINDS.length - 3));
-    while (recentKinds.length > maxHist) recentKinds.shift();
+    if (!k) return;
+    var counts = getKindCountsMap();
+    counts[k] = (counts[k] || 0) + 1;
+    var rec = getRecentKindsList();
+    rec.push(k);
+    var maxHist = Math.max(10, ALL_KINDS.length - 1);
+    while (rec.length > maxHist) rec.shift();
+    if (rec !== recentKinds) {
+      recentKinds = rec.slice();
+    }
   }
 
   function diffPillHtml(diff) {
@@ -310,7 +387,7 @@ var MINIGAMES = (function () {
   }
 
   function generateMathQuestion(diffId) {
-    if (diffId === 'extreme') diffId = 'hard';
+    if (diffId === 'extreme') diffId = 'expert';
     var a, b, c, ans, expr, hint = '';
 
     if (diffId === 'easy') {
@@ -356,6 +433,51 @@ var MINIGAMES = (function () {
         var r = randInt(7, 14); c = randInt(4, 18); ans = r + c;
         expr = '√' + (r * r) + ' + ' + c;
         return { expr: expr, hint: hint, choices: makeIntChoices(ans, [r + c + 2, r + c - 1, r * 2 + c]) };
+      }
+    }
+
+    if (diffId === 'expert') {
+      var xop = randInt(0, 4);
+      if (xop === 0) { // Multi-step square & division: (14² - 36) ÷ 8 + 7 × 3
+        c = pickOne([4, 5, 6, 8]);
+        var q = randInt(12, 24);
+        a = randInt(11, 17);
+        b = a * a - c * q;
+        var d = randInt(3, 8), e = randInt(4, 9);
+        ans = q + d * e;
+        var bSign = b >= 0 ? (' − ' + b) : (' + ' + Math.abs(b));
+        expr = '(' + a + '²' + bSign + ') ÷ ' + c + ' + ' + d + ' × ' + e;
+        return { expr: expr, hint: 'Parentheses & powers first, then ÷ and ×', choices: makeIntChoices(ans, [ans + d, ans - e, (q + d) * e]) };
+      } else if (xop === 1) { // Compound percentage + product: 35% of 280 + 6 × 7
+        var xpct = pickOne([15, 25, 35, 45, 65, 75]);
+        var xbase = pickOne([160, 200, 240, 280, 320, 360]);
+        a = randInt(4, 9); b = randInt(5, 11);
+        ans = Math.round(xbase * xpct / 100) + a * b;
+        expr = xpct + '% of ' + xbase + ' + ' + a + ' × ' + b;
+        return { expr: expr, hint: 'Find percentage & product before adding', choices: makeIntChoices(ans, [ans + 14, ans - 12, (Math.round(xbase * xpct / 100) + a) * b]) };
+      } else if (xop === 2) { // Radical + square expression: √225 × 6 − 4²
+        var xr = randInt(11, 18);
+        a = randInt(4, 9);
+        b = randInt(3, 8);
+        ans = xr * a - b * b;
+        expr = '√' + (xr * xr) + ' × ' + a + ' − ' + b + '²';
+        return { expr: expr, hint: 'Evaluate √ and square before × and −', choices: makeIntChoices(ans, [xr * (a - b * b), ans + b, ans - a]) };
+      } else if (xop === 3) { // Non-perfect square root with multiplier: √340 ≈ 18.4
+        var xrads = [210, 260, 290, 340, 380, 420, 460, 520];
+        var xrad = pickOne(xrads);
+        var xexact = Math.round(Math.sqrt(xrad) * 10) / 10;
+        expr = '√' + xrad;
+        return {
+          expr: expr,
+          hint: 'Estimate square root to 1 decimal place',
+          choices: makeDecimalChoices(xexact, [xexact + 0.4, xexact - 0.4, xexact + 0.9]),
+        };
+      } else { // Double product difference: 17 × 14 − 13 × 9
+        a = randInt(13, 19); b = randInt(11, 16);
+        c = randInt(8, 14); var d2 = randInt(6, 12);
+        ans = a * b - c * d2;
+        expr = a + ' × ' + b + ' − ' + c + ' × ' + d2;
+        return { expr: expr, hint: 'Compute both products before subtracting', choices: makeIntChoices(ans, [ans + 10, ans - 10, ans + c]) };
       }
     }
 
@@ -447,7 +569,6 @@ var MINIGAMES = (function () {
     var kind = pickNextKind(forcedKind);
     var diff = rollDifficulty(forcedDiffId);
     pending = { kind: kind, diff: diff, timeLeft: 5.0, lastSec: 6 };
-    rememberKind(kind);
     renderBanner();
     if (typeof sfx === 'function') sfx('bell');
     return true;
@@ -466,13 +587,15 @@ var MINIGAMES = (function () {
       S.life.mgPlayed = (S.life.mgPlayed || 0) + 1;
       if (won) S.life.mgWon = (S.life.mgWon || 0) + 1;
       if (won) {
-        if (diffId === 'easy') newHeat = setHeat(prevHeat + 1);
-        else if (diffId === 'medium') newHeat = setHeat(prevHeat + 0.75);
-        else newHeat = setHeat(prevHeat + 0.5);
+        if (diffId === 'easy') newHeat = setHeat(prevHeat + 0.75);
+        else if (diffId === 'medium') newHeat = setHeat(prevHeat + 1.0);
+        else if (diffId === 'hard') newHeat = setHeat(prevHeat + 1.75);
+        else newHeat = setHeat(prevHeat + 2.0);
       } else {
-        if (diffId === 'hard') newHeat = setHeat(prevHeat - 3);
+        if (diffId === 'expert') newHeat = setHeat(prevHeat - 3.5);
+        else if (diffId === 'hard') newHeat = setHeat(prevHeat - 2.5);
         else if (diffId === 'medium') newHeat = setHeat(prevHeat - 1.5);
-        else newHeat = setHeat(prevHeat - 1);
+        else newHeat = setHeat(prevHeat - 1.0);
       }
     }
 
@@ -564,13 +687,13 @@ var MINIGAMES = (function () {
     }
 
     var wNow = getDifficultyWeights();
+    var oddsSummary = Math.round(wNow.easy) + '% Easy · ' + Math.round(wNow.medium) + '% Med · ' +
+      Math.round(wNow.hard) + '% Hard · ' + Math.round(wNow.expert) + '% Expert';
     var heatNoteHtml = '';
     if (newHeat > prevHeat) {
-      heatNoteHtml = '<div class="mg-heat up">🔥 Challenge rising! Next odds: ' +
-        Math.round(wNow.easy) + '% Easy · ' + Math.round(wNow.medium) + '% Med · ' + Math.round(wNow.hard) + '% Hard</div>';
+      heatNoteHtml = '<div class="mg-heat up">🔥 Expert chance up! Next odds: ' + oddsSummary + '</div>';
     } else if (newHeat < prevHeat) {
-      heatNoteHtml = '<div class="mg-heat cool">🧊 Challenge cooled down! Next odds: ' +
-        Math.round(wNow.easy) + '% Easy · ' + Math.round(wNow.medium) + '% Med · ' + Math.round(wNow.hard) + '% Hard</div>';
+      heatNoteHtml = '<div class="mg-heat cool">🧊 Expert chance lowered! Next odds: ' + oddsSummary + '</div>';
     }
 
     var card = document.querySelector('#modal .card');
@@ -604,9 +727,10 @@ var MINIGAMES = (function () {
   // 1. COMPANY ACCOUNTS AUDIT (Math & Order of Operations)
   // ============================================================================================
   var AUDIT_CFG = {
-    easy:   { count: 4, time: 25, wrongPen: 2.0, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 30,  failRep: -0.08, loseHearts: 0 },
-    medium: { count: 5, time: 30, wrongPen: 2.5, cash: 90,  hearts: 5, rep: 0.15, shave: 1500, fine: 60,  failRep: -0.15, loseHearts: 1 },
-    hard:   { count: 6, time: 40, wrongPen: 3.0, cash: 175, hearts: 9, rep: 0.24, shave: 3000, fine: 105, failRep: -0.24, loseHearts: 2 },
+    easy:   { count: 4, time: 25, wrongPen: 2.0, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 30,  failRep: -0.08, loseHearts: 0 },
+    medium: { count: 5, time: 30, wrongPen: 2.5, cash: 90,  hearts: 5,  rep: 0.15, shave: 1500, fine: 60,  failRep: -0.15, loseHearts: 1 },
+    hard:   { count: 6, time: 40, wrongPen: 3.0, cash: 175, hearts: 9,  rep: 0.24, shave: 3000, fine: 105, failRep: -0.24, loseHearts: 2 },
+    expert: { count: 7, time: 42, wrongPen: 3.5, cash: 280, hearts: 14, rep: 0.35, shave: 4500, fine: 160, failRep: -0.35, loseHearts: 4 },
   };
 
   function startAudit(diff) {
@@ -706,9 +830,10 @@ var MINIGAMES = (function () {
   // 2. SPEED PHOTO CHECK (Spot Target Dogs One at a Time)
   // ============================================================================================
   var FIND_CFG = {
-    easy:   { crowd: 10, targets: 3, perDogSec: 10.0, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, failRep: -0.12, loseHearts: 1 },
-    medium: { crowd: 14, targets: 4, perDogSec: 8.5,  cash: 95,  hearts: 5, rep: 0.15, shave: 1500, fine: 40, failRep: -0.20, loseHearts: 2 },
-    hard:   { crowd: 16, targets: 5, perDogSec: 6.5,  cash: 165, hearts: 8, rep: 0.22, shave: 2700, fine: 70, failRep: -0.30, loseHearts: 3 },
+    easy:   { crowd: 10, targets: 3, perDogSec: 10.0, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  failRep: -0.12, loseHearts: 1 },
+    medium: { crowd: 14, targets: 4, perDogSec: 8.5,  cash: 95,  hearts: 5,  rep: 0.15, shave: 1500, fine: 40,  failRep: -0.20, loseHearts: 2 },
+    hard:   { crowd: 16, targets: 5, perDogSec: 6.5,  cash: 165, hearts: 8,  rep: 0.22, shave: 2700, fine: 70,  failRep: -0.30, loseHearts: 3 },
+    expert: { crowd: 16, targets: 6, perDogSec: 5.2,  cash: 265, hearts: 13, rep: 0.34, shave: 4200, fine: 115, failRep: -0.40, loseHearts: 4 },
   };
 
   function startFindDog(diff) {
@@ -891,9 +1016,10 @@ var MINIGAMES = (function () {
   // 3. TREAT DELIVERY SPILL (15s Reflex Basket Catch)
   // ============================================================================================
   var TREAT_CFG = {
-    easy:   { goal: 13, basketW: 66, spawnA: 0.42, spawnB: 0.60, junk: 0.20, spdMul: 0.90, cash: 50,  hearts: 3, rep: 0.09, shave: 900,  fine: 25, poops: 1, moodDrop: 6,  failRep: 0 },
-    medium: { goal: 18, basketW: 58, spawnA: 0.34, spawnB: 0.48, junk: 0.28, spdMul: 1.10, cash: 90,  hearts: 5, rep: 0.14, shave: 1500, fine: 45, poops: 2, moodDrop: 12, failRep: -0.06 },
-    hard:   { goal: 24, basketW: 50, spawnA: 0.26, spawnB: 0.40, junk: 0.36, spdMul: 1.32, cash: 155, hearts: 8, rep: 0.20, shave: 2400, fine: 75, poops: 3, moodDrop: 18, failRep: -0.12 },
+    easy:   { goal: 13, basketW: 66, spawnA: 0.42, spawnB: 0.60, junk: 0.20, spdMul: 0.90, cash: 50,  hearts: 3,  rep: 0.09, shave: 900,  fine: 25,  poops: 1, moodDrop: 6,  failRep: 0 },
+    medium: { goal: 18, basketW: 58, spawnA: 0.34, spawnB: 0.48, junk: 0.28, spdMul: 1.10, cash: 90,  hearts: 5,  rep: 0.14, shave: 1500, fine: 45,  poops: 2, moodDrop: 12, failRep: -0.06 },
+    hard:   { goal: 24, basketW: 50, spawnA: 0.26, spawnB: 0.40, junk: 0.36, spdMul: 1.32, cash: 155, hearts: 8,  rep: 0.20, shave: 2400, fine: 75,  poops: 3, moodDrop: 18, failRep: -0.12 },
+    expert: { goal: 30, basketW: 44, spawnA: 0.20, spawnB: 0.33, junk: 0.42, spdMul: 1.52, cash: 255, hearts: 13, rep: 0.32, shave: 3900, fine: 120, poops: 4, moodDrop: 24, failRep: -0.22 },
   };
 
   function startTreatCatch(diff) {
@@ -1030,9 +1156,10 @@ var MINIGAMES = (function () {
   ];
 
   var TRICK_CFG = {
-    easy:   { pads: 4, lens: [2, 3, 4],    showStep: 0.58, inputSec: 13.0, cash: 55,  hearts: 3, rep: 0.11, shave: 900,  fine: 0,  failRep: -0.12, loseHearts: 1 },
-    medium: { pads: 4, lens: [3, 4, 5],    showStep: 0.50, inputSec: 11.0, cash: 100, hearts: 6, rep: 0.16, shave: 1800, fine: 25, failRep: -0.20, loseHearts: 2 },
-    hard:   { pads: 6, lens: [3, 4, 5, 6], showStep: 0.42, inputSec: 10.0, cash: 175, hearts: 9, rep: 0.25, shave: 3000, fine: 50, failRep: -0.32, loseHearts: 3 },
+    easy:   { pads: 4, lens: [2, 3, 4],    showStep: 0.58, inputSec: 13.0, cash: 55,  hearts: 3,  rep: 0.11, shave: 900,  fine: 0,  failRep: -0.12, loseHearts: 1 },
+    medium: { pads: 4, lens: [3, 4, 5],    showStep: 0.50, inputSec: 11.0, cash: 100, hearts: 6,  rep: 0.16, shave: 1800, fine: 25, failRep: -0.20, loseHearts: 2 },
+    hard:   { pads: 6, lens: [3, 4, 5, 6], showStep: 0.42, inputSec: 10.0, cash: 175, hearts: 9,  rep: 0.25, shave: 3000, fine: 50, failRep: -0.32, loseHearts: 3 },
+    expert: { pads: 6, lens: [4, 5, 6, 7], showStep: 0.35, inputSec: 9.5,  cash: 280, hearts: 14, rep: 0.36, shave: 4500, fine: 90, failRep: -0.42, loseHearts: 4 },
   };
 
   function startTrickMemory(diff) {
@@ -1157,9 +1284,10 @@ var MINIGAMES = (function () {
   // 5. SUDSY BUBBLE BLITZ (14s Speed Tap Popper)
   // ============================================================================================
   var BUBBLE_CFG = {
-    easy:   { goal: 13, spawnA: 0.32, spawnB: 0.48, badP: 0.14, spdMul: 0.85, rMin: 22, rMax: 29, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, muddy: 1, failRep: -0.06 },
-    medium: { goal: 19, spawnA: 0.25, spawnB: 0.40, badP: 0.22, spdMul: 1.08, rMin: 19, rMax: 26, cash: 90,  hearts: 5, rep: 0.14, shave: 1500, fine: 40, muddy: 2, failRep: -0.12 },
-    hard:   { goal: 25, spawnA: 0.19, spawnB: 0.32, badP: 0.30, spdMul: 1.32, rMin: 17, rMax: 23, cash: 155, hearts: 8, rep: 0.20, shave: 2400, fine: 70, muddy: 3, failRep: -0.20 },
+    easy:   { goal: 13, spawnA: 0.32, spawnB: 0.48, badP: 0.14, spdMul: 0.85, rMin: 22, rMax: 29, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  muddy: 1, failRep: -0.06 },
+    medium: { goal: 19, spawnA: 0.25, spawnB: 0.40, badP: 0.22, spdMul: 1.08, rMin: 19, rMax: 26, cash: 90,  hearts: 5,  rep: 0.14, shave: 1500, fine: 40,  muddy: 2, failRep: -0.12 },
+    hard:   { goal: 25, spawnA: 0.19, spawnB: 0.32, badP: 0.30, spdMul: 1.32, rMin: 17, rMax: 23, cash: 155, hearts: 8,  rep: 0.20, shave: 2400, fine: 70,  muddy: 3, failRep: -0.20 },
+    expert: { goal: 31, spawnA: 0.15, spawnB: 0.26, badP: 0.36, spdMul: 1.52, rMin: 15, rMax: 21, cash: 255, hearts: 13, rep: 0.32, shave: 3900, fine: 115, muddy: 4, failRep: -0.30 },
   };
 
   function startBubblePop(diff) {
@@ -1294,9 +1422,10 @@ var MINIGAMES = (function () {
   ];
 
   var SORT_CFG = {
-    easy:   { goal: 10, time: 18.0, wrongPen: 2.0, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 30, moodDrop: 10, failRep: -0.08 },
-    medium: { goal: 14, time: 18.0, wrongPen: 2.5, cash: 90,  hearts: 5, rep: 0.15, shave: 1500, fine: 55, moodDrop: 16, failRep: -0.14 },
-    hard:   { goal: 18, time: 17.0, wrongPen: 3.0, cash: 160, hearts: 8, rep: 0.22, shave: 2700, fine: 90, moodDrop: 22, failRep: -0.22 },
+    easy:   { goal: 10, time: 18.0, wrongPen: 2.0, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 30,  moodDrop: 10, failRep: -0.08 },
+    medium: { goal: 14, time: 18.0, wrongPen: 2.5, cash: 90,  hearts: 5,  rep: 0.15, shave: 1500, fine: 55,  moodDrop: 16, failRep: -0.14 },
+    hard:   { goal: 18, time: 17.0, wrongPen: 3.0, cash: 160, hearts: 8,  rep: 0.22, shave: 2700, fine: 90,  moodDrop: 22, failRep: -0.22 },
+    expert: { goal: 23, time: 16.5, wrongPen: 3.5, cash: 260, hearts: 13, rep: 0.34, shave: 4200, fine: 140, moodDrop: 28, failRep: -0.32 },
   };
 
   function startKibbleSort(diff) {
@@ -1389,9 +1518,10 @@ var MINIGAMES = (function () {
   // 7. LAWN PEST PATROL (3×3 Whack-a-Mole Garden Defense)
   // ============================================================================================
   var WHACK_CFG = {
-    easy:   { goal: 10, stay: 1.25, spawnEvery: 0.68, decoyP: 0.15, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 25, poops: 1, muddy: 1, failRep: 0 },
-    medium: { goal: 15, stay: 0.95, spawnEvery: 0.50, decoyP: 0.25, cash: 90,  hearts: 5, rep: 0.15, shave: 1500, fine: 50, poops: 2, muddy: 1, failRep: -0.08 },
-    hard:   { goal: 21, stay: 0.72, spawnEvery: 0.37, decoyP: 0.33, cash: 160, hearts: 8, rep: 0.22, shave: 2700, fine: 80, poops: 3, muddy: 2, failRep: -0.15 },
+    easy:   { goal: 10, stay: 1.25, spawnEvery: 0.68, decoyP: 0.15, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 25,  poops: 1, muddy: 1, failRep: 0 },
+    medium: { goal: 15, stay: 0.95, spawnEvery: 0.50, decoyP: 0.25, cash: 90,  hearts: 5,  rep: 0.15, shave: 1500, fine: 50,  poops: 2, muddy: 1, failRep: -0.08 },
+    hard:   { goal: 21, stay: 0.72, spawnEvery: 0.37, decoyP: 0.33, cash: 160, hearts: 8,  rep: 0.22, shave: 2700, fine: 80,  poops: 3, muddy: 2, failRep: -0.15 },
+    expert: { goal: 26, stay: 0.58, spawnEvery: 0.29, decoyP: 0.40, cash: 260, hearts: 13, rep: 0.34, shave: 4200, fine: 125, poops: 4, muddy: 3, failRep: -0.25 },
   };
 
   function startWhackMole(diff) {
@@ -1503,9 +1633,10 @@ var MINIGAMES = (function () {
   // 8. CUBBY PAIR MATCH (Timed Breed Portrait Memory Cards)
   // ============================================================================================
   var PAIR_CFG = {
-    easy:   { cols: 3, pairs: 3, time: 16.0, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, failRep: -0.10, loseHearts: 1 },
-    medium: { cols: 4, pairs: 6, time: 26.0, cash: 95,  hearts: 5, rep: 0.16, shave: 1800, fine: 45, failRep: -0.18, loseHearts: 2 },
-    hard:   { cols: 4, pairs: 8, time: 34.0, cash: 170, hearts: 9, rep: 0.24, shave: 3000, fine: 80, failRep: -0.26, loseHearts: 3 },
+    easy:   { cols: 3, pairs: 3, time: 16.0, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  failRep: -0.10, loseHearts: 1 },
+    medium: { cols: 4, pairs: 6, time: 26.0, cash: 95,  hearts: 5,  rep: 0.16, shave: 1800, fine: 45,  failRep: -0.18, loseHearts: 2 },
+    hard:   { cols: 4, pairs: 8, time: 34.0, cash: 170, hearts: 9,  rep: 0.24, shave: 3000, fine: 80,  failRep: -0.26, loseHearts: 3 },
+    expert: { cols: 4, pairs: 8, time: 26.0, cash: 275, hearts: 14, rep: 0.35, shave: 4500, fine: 125, failRep: -0.36, loseHearts: 4 },
   };
 
   function startPairMatch(diff) {
@@ -1629,9 +1760,10 @@ var MINIGAMES = (function () {
   // 9. SHOW-DOG SALON TRIM (Precision Sweeping Needle Gauge)
   // ============================================================================================
   var GROOM_CFG = {
-    easy:   { goal: 4, time: 18.0, zoneW: 0.28, spd: 0.85, missPen: 1.5, cash: 55,  hearts: 3, rep: 0.11, shave: 900,  fine: 25, failRep: -0.12, loseHearts: 0 },
-    medium: { goal: 5, time: 18.0, zoneW: 0.19, spd: 1.22, missPen: 2.0, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 50, failRep: -0.22, loseHearts: 1 },
-    hard:   { goal: 6, time: 18.0, zoneW: 0.12, spd: 1.62, missPen: 2.5, cash: 165, hearts: 9, rep: 0.24, shave: 2700, fine: 85, failRep: -0.32, loseHearts: 2 },
+    easy:   { goal: 4, time: 18.0, zoneW: 0.28, spd: 0.85, missPen: 1.5, cash: 55,  hearts: 3,  rep: 0.11, shave: 900,  fine: 25,  failRep: -0.12, loseHearts: 0 },
+    medium: { goal: 5, time: 18.0, zoneW: 0.19, spd: 1.22, missPen: 2.0, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 50,  failRep: -0.22, loseHearts: 1 },
+    hard:   { goal: 6, time: 18.0, zoneW: 0.12, spd: 1.62, missPen: 2.5, cash: 165, hearts: 9,  rep: 0.24, shave: 2700, fine: 85,  failRep: -0.32, loseHearts: 2 },
+    expert: { goal: 7, time: 17.0, zoneW: 0.09, spd: 1.95, missPen: 3.0, cash: 270, hearts: 14, rep: 0.35, shave: 4200, fine: 135, failRep: -0.42, loseHearts: 3 },
   };
 
   function placeGroomZone(a) {
@@ -1721,7 +1853,7 @@ var MINIGAMES = (function () {
 
   function updateGroomTiming(dt) {
     var a = active;
-    var jitter = a.diff.id === 'hard' ? (1 + Math.sin(a.timeLeft * 5.2) * 0.18) : 1;
+    var jitter = (a.diff.id === 'hard' || a.diff.id === 'expert') ? (1 + Math.sin(a.timeLeft * 5.6) * (a.diff.id === 'expert' ? 0.24 : 0.18)) : 1;
     a.pos += a.dir * a.cfg.spd * jitter * dt;
     if (a.pos >= 0.98) { a.pos = 0.98; a.dir = -1; }
     else if (a.pos <= 0.02) { a.pos = 0.02; a.dir = 1; }
@@ -1754,9 +1886,10 @@ var MINIGAMES = (function () {
   ];
 
   var ORDER_CFG = {
-    easy:   { orders: 3, itemsPer: 2, time: 18.0, wrongPen: 1.5, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 25, failRep: -0.10, patienceDrop: 0.20, loseHearts: 0 },
-    medium: { orders: 4, itemsPer: 3, time: 22.0, wrongPen: 2.0, cash: 95,  hearts: 5, rep: 0.15, shave: 1500, fine: 50, failRep: -0.18, patienceDrop: 0.30, loseHearts: 1 },
-    hard:   { orders: 5, itemsPer: 4, time: 24.0, wrongPen: 2.5, cash: 165, hearts: 8, rep: 0.22, shave: 2700, fine: 85, failRep: -0.26, patienceDrop: 0.40, loseHearts: 2 },
+    easy:   { orders: 3, itemsPer: 2, time: 18.0, wrongPen: 1.5, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 25,  failRep: -0.10, patienceDrop: 0.20, loseHearts: 0 },
+    medium: { orders: 4, itemsPer: 3, time: 22.0, wrongPen: 2.0, cash: 95,  hearts: 5,  rep: 0.15, shave: 1500, fine: 50,  failRep: -0.18, patienceDrop: 0.30, loseHearts: 1 },
+    hard:   { orders: 5, itemsPer: 4, time: 24.0, wrongPen: 2.5, cash: 165, hearts: 8,  rep: 0.22, shave: 2700, fine: 85,  failRep: -0.26, patienceDrop: 0.40, loseHearts: 2 },
+    expert: { orders: 6, itemsPer: 5, time: 25.0, wrongPen: 3.0, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 135, failRep: -0.36, patienceDrop: 0.50, loseHearts: 3 },
   };
 
   function makeOrderTickets(count, itemsPer) {
@@ -2166,6 +2299,8 @@ var MINIGAMES = (function () {
     launch: launch,
     rollDifficulty: rollDifficulty,
     getDifficultyWeights: getDifficultyWeights,
+    getKindWeights: getKindWeights,
+    pickNextKind: pickNextKind,
     generateMathQuestion: generateMathQuestion,
     buildAuditQuestions: buildAuditQuestions,
     DIFFICULTIES: DIFFICULTIES,

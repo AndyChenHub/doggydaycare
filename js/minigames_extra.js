@@ -38,9 +38,10 @@
   // 11. BREED FLASH QUIZ (Portrait Breed Recognition Trivia)
   // ============================================================================================
   var BREED_QUIZ_CFG = {
-    easy:   { goal: 4, time: 22, pen: 1.5, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, failRep: -0.10, loseHearts: 1 },
-    medium: { goal: 6, time: 24, pen: 2.0, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 45, failRep: -0.18, loseHearts: 2 },
-    hard:   { goal: 8, time: 24, pen: 2.5, cash: 170, hearts: 8, rep: 0.24, shave: 2700, fine: 80, failRep: -0.26, loseHearts: 3 },
+    easy:   { goal: 4,  time: 22, pen: 1.5, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  failRep: -0.10, loseHearts: 1 },
+    medium: { goal: 6,  time: 24, pen: 2.0, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 45,  failRep: -0.18, loseHearts: 2 },
+    hard:   { goal: 8,  time: 24, pen: 2.5, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, fine: 80,  failRep: -0.26, loseHearts: 3 },
+    expert: { goal: 10, time: 23, pen: 3.0, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 125, failRep: -0.36, loseHearts: 4 },
   };
 
   MINIGAMES.register('breed_quiz', {
@@ -125,9 +126,10 @@
   // 12. REGISTER CHANGE RUSH (Exact Cashier Change Counter)
   // ============================================================================================
   var CHANGE_CFG = {
-    easy:   { goal: 3, time: 24, maxPaid: 20,  cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 30,  failRep: -0.08, patDrop: 0.20 },
-    medium: { goal: 4, time: 26, maxPaid: 50,  cash: 95,  hearts: 5, rep: 0.15, shave: 1500, fine: 60,  failRep: -0.14, patDrop: 0.30 },
-    hard:   { goal: 5, time: 28, maxPaid: 100, cash: 170, hearts: 8, rep: 0.22, shave: 2700, fine: 100, failRep: -0.22, patDrop: 0.40 },
+    easy:   { goal: 3, time: 24, maxPaid: 20,  cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 30,  failRep: -0.08, patDrop: 0.20 },
+    medium: { goal: 4, time: 26, maxPaid: 50,  cash: 95,  hearts: 5,  rep: 0.15, shave: 1500, fine: 60,  failRep: -0.14, patDrop: 0.30 },
+    hard:   { goal: 5, time: 28, maxPaid: 100, cash: 170, hearts: 8,  rep: 0.22, shave: 2700, fine: 100, failRep: -0.22, patDrop: 0.40 },
+    expert: { goal: 6, time: 27, maxPaid: 100, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 150, failRep: -0.32, patDrop: 0.50 },
   };
 
   MINIGAMES.register('cash_change', {
@@ -231,9 +233,10 @@
   // 13. SPOT THE ODD PUP (Visual Odd-One-Out Grid)
   // ============================================================================================
   var ODD_CFG = {
-    easy:   { rounds: 3, cols: 3, cells: 9,  time: 16, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, failRep: -0.10, loseHearts: 1 },
-    medium: { rounds: 4, cols: 4, cells: 12, time: 18, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 40, failRep: -0.18, loseHearts: 2 },
-    hard:   { rounds: 5, cols: 4, cells: 16, time: 20, cash: 165, hearts: 8, rep: 0.24, shave: 2700, fine: 70, failRep: -0.28, loseHearts: 3 },
+    easy:   { rounds: 3, cols: 3, cells: 9,  time: 16, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  failRep: -0.10, loseHearts: 1 },
+    medium: { rounds: 4, cols: 4, cells: 12, time: 18, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 40,  failRep: -0.18, loseHearts: 2 },
+    hard:   { rounds: 5, cols: 4, cells: 16, time: 20, cash: 165, hearts: 8,  rep: 0.24, shave: 2700, fine: 70,  failRep: -0.28, loseHearts: 3 },
+    expert: { rounds: 6, cols: 4, cells: 16, time: 18, cash: 265, hearts: 13, rep: 0.34, shave: 4200, fine: 115, failRep: -0.38, loseHearts: 4 },
   };
 
   MINIGAMES.register('odd_pup', {
@@ -259,7 +262,7 @@
         var bs = api.shuffle(safeBreeds());
         var mainB = bs[0], oddB = bs[1];
         var mainCoat = 0, oddCoat = 0;
-        if (diff.id === 'hard' && mainB.coats && mainB.coats.length > 1) {
+        if ((diff.id === 'hard' || diff.id === 'expert') && mainB.coats && mainB.coats.length > 1) {
           oddB = mainB;
           oddCoat = 1;
         }
@@ -319,9 +322,10 @@
   // 14. TUG-OF-WAR SHOWDOWN (Rapid Tap-Mash Rope Tug)
   // ============================================================================================
   var TUG_CFG = {
-    easy:   { time: 12, pullBack: 0.22, tapGain: 0.085, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, muddy: 1, moodDrop: 6 },
-    medium: { time: 12, pullBack: 0.34, tapGain: 0.075, cash: 90,  hearts: 5, rep: 0.15, shave: 1500, fine: 35, muddy: 2, moodDrop: 10 },
-    hard:   { time: 12, pullBack: 0.48, tapGain: 0.068, cash: 160, hearts: 8, rep: 0.22, shave: 2400, fine: 60, muddy: 3, moodDrop: 15 },
+    easy:   { time: 12, pullBack: 0.22, tapGain: 0.085, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  muddy: 1, moodDrop: 6 },
+    medium: { time: 12, pullBack: 0.34, tapGain: 0.075, cash: 90,  hearts: 5,  rep: 0.15, shave: 1500, fine: 35,  muddy: 2, moodDrop: 10 },
+    hard:   { time: 12, pullBack: 0.48, tapGain: 0.068, cash: 160, hearts: 8,  rep: 0.22, shave: 2400, fine: 60,  muddy: 3, moodDrop: 15 },
+    expert: { time: 12, pullBack: 0.58, tapGain: 0.062, cash: 260, hearts: 13, rep: 0.32, shave: 3900, fine: 100, muddy: 4, moodDrop: 22 },
   };
 
   MINIGAMES.register('tug_war', {
@@ -385,9 +389,10 @@
   // 15. HYDRATION POUR GAUGE (Hold-and-Release Water Fill)
   // ============================================================================================
   var POUR_CFG = {
-    easy:   { goal: 3, time: 18, zoneW: 0.24, rate: 0.52, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, muddy: 1, failRep: -0.06 },
-    medium: { goal: 4, time: 20, zoneW: 0.17, rate: 0.72, cash: 95,  hearts: 5, rep: 0.15, shave: 1500, fine: 40, muddy: 2, failRep: -0.12 },
-    hard:   { goal: 5, time: 22, zoneW: 0.11, rate: 0.96, cash: 165, hearts: 8, rep: 0.22, shave: 2700, fine: 70, muddy: 3, failRep: -0.20 },
+    easy:   { goal: 3, time: 18, zoneW: 0.24, rate: 0.52, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  muddy: 1, failRep: -0.06 },
+    medium: { goal: 4, time: 20, zoneW: 0.17, rate: 0.72, cash: 95,  hearts: 5,  rep: 0.15, shave: 1500, fine: 40,  muddy: 2, failRep: -0.12 },
+    hard:   { goal: 5, time: 22, zoneW: 0.11, rate: 0.96, cash: 165, hearts: 8,  rep: 0.22, shave: 2700, fine: 70,  muddy: 3, failRep: -0.20 },
+    expert: { goal: 6, time: 21, zoneW: 0.08, rate: 1.18, cash: 265, hearts: 13, rep: 0.34, shave: 4200, fine: 115, muddy: 4, failRep: -0.30 },
   };
 
   MINIGAMES.register('water_pour', {
@@ -478,9 +483,10 @@
   // 16. AGILITY HURDLE DASH (Canvas Side-Scrolling Jumper)
   // ============================================================================================
   var AGIL_CFG = {
-    easy:   { goal: 5,  time: 15, spd: 148, gapA: 1.55, gapB: 2.05, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  muddy: 1, moodDrop: 8,  failRep: -0.08 },
-    medium: { goal: 8,  time: 16, spd: 185, gapA: 1.15, gapB: 1.60, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, muddy: 2, moodDrop: 14, failRep: -0.14 },
-    hard:   { goal: 11, time: 17, spd: 225, gapA: 0.88, gapB: 1.25, cash: 165, hearts: 8, rep: 0.24, shave: 2700, muddy: 3, moodDrop: 20, failRep: -0.22 },
+    easy:   { goal: 5,  time: 15, spd: 148, gapA: 1.55, gapB: 2.05, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  muddy: 1, moodDrop: 8,  failRep: -0.08 },
+    medium: { goal: 8,  time: 16, spd: 185, gapA: 1.15, gapB: 1.60, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, muddy: 2, moodDrop: 14, failRep: -0.14 },
+    hard:   { goal: 11, time: 17, spd: 225, gapA: 0.88, gapB: 1.25, cash: 165, hearts: 8,  rep: 0.24, shave: 2700, muddy: 3, moodDrop: 20, failRep: -0.22 },
+    expert: { goal: 14, time: 18, spd: 260, gapA: 0.72, gapB: 1.05, cash: 265, hearts: 13, rep: 0.34, shave: 4200, muddy: 4, moodDrop: 26, failRep: -0.32 },
   };
 
   MINIGAMES.register('agility_hop', {
@@ -598,9 +604,10 @@
     { id: 'yellow', name: 'YELLOW', hex: '#d49a14' },
   ];
   var STROOP_CFG = {
-    easy:   { goal: 6,  time: 18, pen: 1.5, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 25, failRep: -0.10, loseHearts: 1 },
-    medium: { goal: 9,  time: 18, pen: 2.0, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 50, failRep: -0.18, loseHearts: 2 },
-    hard:   { goal: 12, time: 17, pen: 2.5, cash: 170, hearts: 8, rep: 0.24, shave: 2700, fine: 85, failRep: -0.28, loseHearts: 3 },
+    easy:   { goal: 6,  time: 18, pen: 1.5, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 25,  failRep: -0.10, loseHearts: 1 },
+    medium: { goal: 9,  time: 18, pen: 2.0, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 50,  failRep: -0.18, loseHearts: 2 },
+    hard:   { goal: 12, time: 17, pen: 2.5, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, fine: 85,  failRep: -0.28, loseHearts: 3 },
+    expert: { goal: 15, time: 16, pen: 3.0, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 135, failRep: -0.38, loseHearts: 4 },
   };
 
   MINIGAMES.register('collar_match', {
@@ -683,11 +690,13 @@
     easy:   ['LUNA', 'MILO', 'COCO', 'RUBY', 'DUKE', 'BEAR', 'ZUES', 'TOBY', 'KODA', 'LOLA'],
     medium: ['DAISY', 'BELLA', 'ROCKY', 'MOCHI', 'SUNNY', 'BUDDY', 'TEDDY', 'OLIVE', 'PENNY', 'SCOUT'],
     hard:   ['BISCUIT', 'CHARLIE', 'PEANUTS', 'WAFFLES', 'NOODLES', 'MUFFINS', 'POPCORN', 'PRETZEL', 'PANCAKE'],
+    expert: ['CINNAMON', 'DUMPLING', 'SNOWBALL', 'BLUEBERRY', 'MARSHMALLOW', 'BUTTERCUP', 'PISTACHIO', 'CROISSANT', 'GINGERBREAD'],
   };
   var SCRAMBLE_CFG = {
-    easy:   { goal: 3, time: 22, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, failRep: -0.08, patDrop: 0.20 },
-    medium: { goal: 4, time: 26, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 45, failRep: -0.15, patDrop: 0.30 },
-    hard:   { goal: 4, time: 28, cash: 170, hearts: 8, rep: 0.24, shave: 2700, fine: 75, failRep: -0.24, patDrop: 0.40 },
+    easy:   { goal: 3, time: 22, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  failRep: -0.08, patDrop: 0.20 },
+    medium: { goal: 4, time: 26, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 45,  failRep: -0.15, patDrop: 0.30 },
+    hard:   { goal: 4, time: 28, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, fine: 75,  failRep: -0.24, patDrop: 0.40 },
+    expert: { goal: 5, time: 28, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 120, failRep: -0.34, patDrop: 0.50 },
   };
 
   MINIGAMES.register('paw_scramble', {
@@ -787,9 +796,10 @@
   // 19. SWEET-SPOT BELLY RUB (Hot-or-Cold Tummy Search Canvas)
   // ============================================================================================
   var BELLY_CFG = {
-    easy:   { goal: 2, time: 16, rad: 38, holdSec: 0.75, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  moodDrop: 10, loseHearts: 1, failRep: -0.08 },
-    medium: { goal: 3, time: 18, rad: 28, holdSec: 0.85, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, moodDrop: 18, loseHearts: 2, failRep: -0.14 },
-    hard:   { goal: 4, time: 20, rad: 21, holdSec: 0.95, cash: 165, hearts: 8, rep: 0.24, shave: 2700, moodDrop: 25, loseHearts: 3, failRep: -0.22 },
+    easy:   { goal: 2, time: 16, rad: 38, holdSec: 0.75, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  moodDrop: 10, loseHearts: 1, failRep: -0.08 },
+    medium: { goal: 3, time: 18, rad: 28, holdSec: 0.85, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, moodDrop: 18, loseHearts: 2, failRep: -0.14 },
+    hard:   { goal: 4, time: 20, rad: 21, holdSec: 0.95, cash: 165, hearts: 8,  rep: 0.24, shave: 2700, moodDrop: 25, loseHearts: 3, failRep: -0.22 },
+    expert: { goal: 5, time: 20, rad: 16, holdSec: 1.00, cash: 265, hearts: 13, rep: 0.34, shave: 4200, moodDrop: 32, loseHearts: 4, failRep: -0.32 },
   };
 
   MINIGAMES.register('belly_rub', {
@@ -901,9 +911,10 @@
   // 20. TENNIS BALL KEEP-UP (Canvas Gravity Volley Juggler)
   // ============================================================================================
   var BOUNCE_CFG = {
-    easy:   { goal: 8,  time: 14, grav: 420, kick: 340, rad: 28, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 20, moodDrop: 8 },
-    medium: { goal: 12, time: 15, grav: 560, kick: 390, rad: 24, cash: 95,  hearts: 5, rep: 0.15, shave: 1500, fine: 40, moodDrop: 14 },
-    hard:   { goal: 16, time: 16, grav: 710, kick: 440, rad: 21, cash: 165, hearts: 8, rep: 0.22, shave: 2700, fine: 65, moodDrop: 20 },
+    easy:   { goal: 8,  time: 14, grav: 420, kick: 340, rad: 28, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 20,  moodDrop: 8 },
+    medium: { goal: 12, time: 15, grav: 560, kick: 390, rad: 24, cash: 95,  hearts: 5,  rep: 0.15, shave: 1500, fine: 40,  moodDrop: 14 },
+    hard:   { goal: 16, time: 16, grav: 710, kick: 440, rad: 21, cash: 165, hearts: 8,  rep: 0.22, shave: 2700, fine: 65,  moodDrop: 20 },
+    expert: { goal: 21, time: 17, grav: 850, kick: 485, rad: 18, cash: 265, hearts: 13, rep: 0.34, shave: 4200, fine: 105, moodDrop: 26 },
   };
 
   MINIGAMES.register('ball_bounce', {
@@ -1010,9 +1021,10 @@
   // 21. YARD POOP PATROL (4x4 Wave Tile Sweeper — Tap Poops, Never Squish Flowers!)
   // ============================================================================================
   var SWEEP_CFG = {
-    easy:   { waves: 3, perWave: 4, flowers: 3, time: 16, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  poops: 2, fine: 20, failRep: -0.06 },
-    medium: { waves: 4, perWave: 6, flowers: 4, time: 18, cash: 95,  hearts: 5, rep: 0.15, shave: 1500, poops: 3, fine: 40, failRep: -0.12 },
-    hard:   { waves: 5, perWave: 8, flowers: 5, time: 19, cash: 165, hearts: 8, rep: 0.22, shave: 2700, poops: 4, fine: 70, failRep: -0.20 },
+    easy:   { waves: 3, perWave: 4, flowers: 3, time: 16, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  poops: 2, fine: 20,  failRep: -0.06 },
+    medium: { waves: 4, perWave: 6, flowers: 4, time: 18, cash: 95,  hearts: 5,  rep: 0.15, shave: 1500, poops: 3, fine: 40,  failRep: -0.12 },
+    hard:   { waves: 5, perWave: 8, flowers: 5, time: 19, cash: 165, hearts: 8,  rep: 0.22, shave: 2700, poops: 4, fine: 70,  failRep: -0.20 },
+    expert: { waves: 6, perWave: 9, flowers: 6, time: 19, cash: 265, hearts: 13, rep: 0.34, shave: 4200, poops: 5, fine: 115, failRep: -0.30 },
   };
 
   MINIGAMES.register('poop_sweep', {
@@ -1097,9 +1109,10 @@
   // 22. BARK BEAT TAPPER (3-Lane Falling Note Rhythm Arcade)
   // ============================================================================================
   var RHYTHM_CFG = {
-    easy:   { goal: 8,  time: 16, spd: 115, spawnA: 0.72, spawnB: 1.00, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  failRep: -0.10, moodDrop: 8,  loseHearts: 1 },
-    medium: { goal: 13, time: 16, spd: 150, spawnA: 0.50, spawnB: 0.74, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, failRep: -0.18, moodDrop: 12, loseHearts: 2 },
-    hard:   { goal: 18, time: 16, spd: 190, spawnA: 0.36, spawnB: 0.56, cash: 170, hearts: 8, rep: 0.24, shave: 2700, failRep: -0.28, moodDrop: 18, loseHearts: 3 },
+    easy:   { goal: 8,  time: 16, spd: 115, spawnA: 0.72, spawnB: 1.00, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  failRep: -0.10, moodDrop: 8,  loseHearts: 1 },
+    medium: { goal: 13, time: 16, spd: 150, spawnA: 0.50, spawnB: 0.74, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, failRep: -0.18, moodDrop: 12, loseHearts: 2 },
+    hard:   { goal: 18, time: 16, spd: 190, spawnA: 0.36, spawnB: 0.56, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, failRep: -0.28, moodDrop: 18, loseHearts: 3 },
+    expert: { goal: 23, time: 16, spd: 230, spawnA: 0.28, spawnB: 0.44, cash: 270, hearts: 13, rep: 0.34, shave: 4200, failRep: -0.38, moodDrop: 24, loseHearts: 4 },
   };
   var LANE_META = [
     { col: '#e8796c', freq: 523.25, ico: '🐾' },
@@ -1214,9 +1227,10 @@
   // 23. ROLL-CALL HEADCOUNT (Moving Yard Pup Counter)
   // ============================================================================================
   var COUNT_CFG = {
-    easy:   { rounds: 3, minP: 5,  maxP: 9,  spd: 24, filterCol: false, time: 22, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 25, failRep: -0.12 },
-    medium: { rounds: 4, minP: 8,  maxP: 13, spd: 38, filterCol: false, time: 24, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 55, failRep: -0.20 },
-    hard:   { rounds: 4, minP: 10, maxP: 16, spd: 50, filterCol: true,  time: 26, cash: 170, hearts: 8, rep: 0.24, shave: 2700, fine: 90, failRep: -0.30 },
+    easy:   { rounds: 3, minP: 5,  maxP: 9,  spd: 24, filterCol: false, time: 22, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 25,  failRep: -0.12 },
+    medium: { rounds: 4, minP: 8,  maxP: 13, spd: 38, filterCol: false, time: 24, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 55,  failRep: -0.20 },
+    hard:   { rounds: 4, minP: 10, maxP: 16, spd: 50, filterCol: true,  time: 26, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, fine: 90,  failRep: -0.30 },
+    expert: { rounds: 5, minP: 12, maxP: 19, spd: 64, filterCol: true,  time: 25, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 140, failRep: -0.38 },
   };
 
   MINIGAMES.register('crate_count', {
@@ -1338,9 +1352,10 @@
   // 24. FIND THE LOST PUP MAZE (Guaranteed-Solvable Hedge Maze)
   // ============================================================================================
   var MAZE_CFG = {
-    easy:   { size: 5, time: 16, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 25, failRep: -0.10, patDrop: 0.25 },
-    medium: { size: 6, time: 19, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 50, failRep: -0.18, patDrop: 0.35 },
-    hard:   { size: 7, time: 22, cash: 170, hearts: 8, rep: 0.24, shave: 2700, fine: 80, failRep: -0.26, patDrop: 0.45 },
+    easy:   { size: 5, time: 16, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 25,  failRep: -0.10, patDrop: 0.25 },
+    medium: { size: 6, time: 19, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 50,  failRep: -0.18, patDrop: 0.35 },
+    hard:   { size: 7, time: 22, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, fine: 80,  failRep: -0.26, patDrop: 0.45 },
+    expert: { size: 8, time: 22, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 125, failRep: -0.36, patDrop: 0.55 },
   };
 
   function buildGuaranteedMaze(N, api) {
@@ -1460,9 +1475,10 @@
   // 25. FLEA FLICKER SPRAY (Fast-Hopping Canvas Swatter)
   // ============================================================================================
   var FLEA_CFG = {
-    easy:   { goal: 8,  time: 14, spd: 82,  maxOn: 4, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 30, muddy: 1, failRep: -0.08 },
-    medium: { goal: 13, time: 14, spd: 125, maxOn: 5, cash: 95,  hearts: 5, rep: 0.15, shave: 1500, fine: 55, muddy: 2, failRep: -0.14 },
-    hard:   { goal: 18, time: 14, spd: 168, maxOn: 6, cash: 165, hearts: 8, rep: 0.22, shave: 2700, fine: 90, muddy: 3, failRep: -0.22 },
+    easy:   { goal: 8,  time: 14, spd: 82,  maxOn: 4, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 30,  muddy: 1, failRep: -0.08 },
+    medium: { goal: 13, time: 14, spd: 125, maxOn: 5, cash: 95,  hearts: 5,  rep: 0.15, shave: 1500, fine: 55,  muddy: 2, failRep: -0.14 },
+    hard:   { goal: 18, time: 14, spd: 168, maxOn: 6, cash: 165, hearts: 8,  rep: 0.22, shave: 2700, fine: 90,  muddy: 3, failRep: -0.22 },
+    expert: { goal: 23, time: 14, spd: 210, maxOn: 7, cash: 265, hearts: 13, rep: 0.34, shave: 4200, fine: 140, muddy: 4, failRep: -0.32 },
   };
 
   MINIGAMES.register('flea_zap', {
@@ -1564,9 +1580,10 @@
   // 26. KIBBLE SCALE WEIGH-IN (Exact Binary/Scoop Weight Math)
   // ============================================================================================
   var SCALE_CFG = {
-    easy:   { goal: 3, minW: 5,  maxW: 15, scoops: [1, 2, 4, 8],         time: 22, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 25, moodDrop: 8 },
-    medium: { goal: 4, minW: 11, maxW: 29, scoops: [1, 2, 4, 8, 16],     time: 25, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 50, moodDrop: 14 },
-    hard:   { goal: 5, minW: 18, maxW: 45, scoops: [1, 2, 4, 8, 12, 20], time: 28, cash: 170, hearts: 8, rep: 0.24, shave: 2700, fine: 85, moodDrop: 20 },
+    easy:   { goal: 3, minW: 5,  maxW: 15, scoops: [1, 2, 4, 8],         time: 22, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 25,  moodDrop: 8 },
+    medium: { goal: 4, minW: 11, maxW: 29, scoops: [1, 2, 4, 8, 16],     time: 25, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 50,  moodDrop: 14 },
+    hard:   { goal: 5, minW: 18, maxW: 45, scoops: [1, 2, 4, 8, 12, 20], time: 28, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, fine: 85,  moodDrop: 20 },
+    expert: { goal: 6, minW: 23, maxW: 57, scoops: [1, 2, 4, 8, 15, 27], time: 28, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 135, moodDrop: 26 },
   };
 
   MINIGAMES.register('treat_balance', {
@@ -1655,9 +1672,10 @@
   // 27. KENNEL PIN CODE FLASH (Short-Term Numeric Memory Keypad)
   // ============================================================================================
   var LOCK_CFG = {
-    easy:   { rounds: 2, digits: 4, flashSec: 2.2, time: 16, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 30,  patDrop: 0.20 },
-    medium: { rounds: 3, digits: 5, flashSec: 2.0, time: 20, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 60,  patDrop: 0.30 },
-    hard:   { rounds: 3, digits: 6, flashSec: 1.8, time: 22, cash: 170, hearts: 8, rep: 0.24, shave: 2700, fine: 100, patDrop: 0.40 },
+    easy:   { rounds: 2, digits: 4, flashSec: 2.20, time: 16, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 30,  patDrop: 0.20 },
+    medium: { rounds: 3, digits: 5, flashSec: 2.00, time: 20, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 60,  patDrop: 0.30 },
+    hard:   { rounds: 3, digits: 6, flashSec: 1.80, time: 22, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, fine: 100, patDrop: 0.40 },
+    expert: { rounds: 4, digits: 7, flashSec: 1.55, time: 23, cash: 275, hearts: 14, rep: 0.35, shave: 4500, fine: 155, patDrop: 0.50 },
   };
 
   MINIGAMES.register('gate_lock', {
@@ -1764,9 +1782,10 @@
   // 28. TREAT BOX STACKER (Oscillating Timing Tower)
   // ============================================================================================
   var TOWER_CFG = {
-    easy:   { goal: 5, time: 18, baseW: 130, spd: 120, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  fine: 25, poops: 1 },
-    medium: { goal: 7, time: 20, baseW: 112, spd: 160, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, fine: 50, poops: 2 },
-    hard:   { goal: 9, time: 22, baseW: 96,  spd: 205, cash: 170, hearts: 8, rep: 0.24, shave: 2700, fine: 85, poops: 3 },
+    easy:   { goal: 5,  time: 18, baseW: 130, spd: 120, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  fine: 25,  poops: 1 },
+    medium: { goal: 7,  time: 20, baseW: 112, spd: 160, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, fine: 50,  poops: 2 },
+    hard:   { goal: 9,  time: 22, baseW: 96,  spd: 205, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, fine: 85,  poops: 3 },
+    expert: { goal: 11, time: 22, baseW: 84,  spd: 245, cash: 270, hearts: 13, rep: 0.34, shave: 4200, fine: 135, poops: 4 },
   };
 
   MINIGAMES.register('toy_tower', {
@@ -1870,9 +1889,10 @@
     { id: 'play',   sym: '⚡ Hyper Zoomies!',       rem: '🎾 Fetch Ball' },
   ];
   var TRIAGE_CFG = {
-    easy:   { goal: 5,  time: 18, pen: 1.5, cash: 50,  hearts: 3, rep: 0.10, shave: 900,  fine: 25, moodDrop: 10, failRep: -0.08 },
-    medium: { goal: 8,  time: 20, pen: 2.0, cash: 95,  hearts: 5, rep: 0.15, shave: 1500, fine: 50, moodDrop: 16, failRep: -0.14 },
-    hard:   { goal: 11, time: 20, pen: 2.5, cash: 165, hearts: 8, rep: 0.22, shave: 2700, fine: 85, moodDrop: 24, failRep: -0.22 },
+    easy:   { goal: 5,  time: 18, pen: 1.5, cash: 50,  hearts: 3,  rep: 0.10, shave: 900,  fine: 25,  moodDrop: 10, failRep: -0.08 },
+    medium: { goal: 8,  time: 20, pen: 2.0, cash: 95,  hearts: 5,  rep: 0.15, shave: 1500, fine: 50,  moodDrop: 16, failRep: -0.14 },
+    hard:   { goal: 11, time: 20, pen: 2.5, cash: 165, hearts: 8,  rep: 0.22, shave: 2700, fine: 85,  moodDrop: 24, failRep: -0.22 },
+    expert: { goal: 14, time: 19, pen: 3.0, cash: 265, hearts: 13, rep: 0.34, shave: 4200, fine: 135, moodDrop: 30, failRep: -0.32 },
   };
 
   MINIGAMES.register('mood_doctor', {
@@ -1946,9 +1966,10 @@
   // 30. GOLDEN FRISBEE REFLEX (Wait-for-GREEN Reaction Speed Test!)
   // ============================================================================================
   var DRAW_CFG = {
-    easy:   { goal: 3, winSec: 0.78, cash: 55,  hearts: 3, rep: 0.10, shave: 900,  failRep: -0.10, loseHearts: 1, moodDrop: 8 },
-    medium: { goal: 4, winSec: 0.56, cash: 95,  hearts: 5, rep: 0.16, shave: 1500, failRep: -0.18, loseHearts: 2, moodDrop: 12 },
-    hard:   { goal: 5, winSec: 0.40, cash: 170, hearts: 8, rep: 0.24, shave: 2700, failRep: -0.28, loseHearts: 3, moodDrop: 18 },
+    easy:   { goal: 3, winSec: 0.78, cash: 55,  hearts: 3,  rep: 0.10, shave: 900,  failRep: -0.10, loseHearts: 1, moodDrop: 8 },
+    medium: { goal: 4, winSec: 0.56, cash: 95,  hearts: 5,  rep: 0.16, shave: 1500, failRep: -0.18, loseHearts: 2, moodDrop: 12 },
+    hard:   { goal: 5, winSec: 0.40, cash: 170, hearts: 8,  rep: 0.24, shave: 2700, failRep: -0.28, loseHearts: 3, moodDrop: 18 },
+    expert: { goal: 6, winSec: 0.31, cash: 275, hearts: 14, rep: 0.35, shave: 4500, failRep: -0.38, loseHearts: 4, moodDrop: 24 },
   };
 
   MINIGAMES.register('quick_draw', {

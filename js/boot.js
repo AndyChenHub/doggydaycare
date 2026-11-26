@@ -6,7 +6,7 @@
    - Automatically falls back to bundled IPA assets if no OTA update is active or if a newer IPA is installed
    ============================================================================================ */
 (function () {
-  var BUNDLED_VER = 31;
+  var BUNDLED_VER = 33;
   var DEFAULT_SCRIPTS = [
     'js/config.js',
     'js/data.js',

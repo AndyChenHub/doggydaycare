@@ -3,7 +3,7 @@ var UI = {
   mode: 'title', prevMode: 'play', actions: null, mouse: { sx: 0, sy: 0, in: false },
   buildSel: null, buildTool: null, buildTab: 'care', buildRot: 0, moveObj: null, moveRot: 0, dragPos: null, actionObj: null,
   summary: null, cashShown: 0, cashPulse: 0, lastRoster: 0, modalStack: [], dexSel: null, dexNew: 0,
-  tasksOpen: false, rosterOpen: false,
+  tasksOpen: false, rosterOpen: false, topExpanded: false,
   camFocus: null, sceneT: 0, miniT: 0, miniDirty: true, cashWorld: null, titleT: 0,
   joy: null, touchTarget: null, pinch: null, touchBuild: null
 };
@@ -151,7 +151,7 @@ function enterPlayFromState(fresh) {
   else if (S.totalServed === 0 && !S.tutorial.checkin) toast('🐶 Tap 🔨 Shop at the bottom to select and place your first Kennel on the lawn!', 'good');
   if (!isJoiningRoom) saveGame();
 }
-var CURRENT_ASSET_VER = '31';
+var CURRENT_ASSET_VER = '33';
 function isOnlineAndSynced() {
   if (typeof MP !== 'undefined' && typeof MP.isCloudReady === 'function') {
     return MP.isCloudReady();
@@ -1636,20 +1636,30 @@ function updateHUD(dt) {
   setStyle('heartbox', 'transform', UI.heartPulse > 0 ? 'scale(' + (1 + Math.round(UI.heartPulse * 10) / 20) + ')' : '');
   if (!UI.cashRect || now - (UI.cashRectT || 0) > 1 || now < (UI.cashRectT || 0)) { UI.cashRect = $('cashbox').getBoundingClientRect(); UI.cashRectT = now; }
   UI.cashWorld = screenToWorld(UI.cashRect.left + 18, UI.cashRect.top + UI.cashRect.height / 2);
-  var rep = stars(S.rep); if (UI.repHTML !== rep) { UI.repHTML = rep; $('rep').innerHTML = rep; }
+  var rep = stars(S.rep); if (UI.repHTML !== rep) { UI.repHTML = rep; if ($('rep')) $('rep').innerHTML = rep; }
+  setText('repShort', S.rep.toFixed(1));
   setText('lvl', S.level);
   setStyle('xpbar', 'width', Math.round(S.xp / lvlNeed(S.level) * 50) * 2 + '%');
   var D = dayLen(), f = S.dayTime / D, mins = 8 * 60 + Math.floor(f * 600 / 10) * 10, hh = Math.floor(mins / 60), mm = mins % 60;
   var ph = typeof dayPhase === 'function' ? dayPhase() : { icon: '🌅', short: 'Open' };
   var dEv = typeof currentDailyEvent === 'function' ? currentDailyEvent() : null;
+  setText('dayshort', ph.icon + ' D' + S.day);
   setText('dayname', 'Day ' + S.day + ' · ' + ph.icon + ' ' + ph.short + (dEv ? ' · ' + dEv.icon : ''));
-  setText('clock', ((hh - 1) % 12 + 1) + ':' + (mm < 10 ? '0' : '') + mm + (hh < 12 ? ' AM' : ' PM'));
+  setText('clock', ((hh - 1) % 12 + 1) + ':' + (mm < 10 ? '0' : '') + mm + (hh < 12 ? 'a' : 'p'));
   var fq = Math.round(f * 60) / 60, ang = Math.PI * (1 - fq);
   setStyle('daybar', 'width', (fq * 100).toFixed(1) + '%');
   setStyle('sun', 'transform', 'translate(' + Math.round(11 + Math.cos(ang) * 7) + 'px,' + Math.round(12 - Math.sin(ang) * 7) + 'px)');
   setText('cap', activeDogCount() + '/' + capacity());
   setText('charm', charm());
   setText('streak', S.streak > 1 ? '🔥x' + S.streak : '');
+  var detEl = $('topDetails');
+  if (detEl && detEl.hidden !== !UI.topExpanded) detEl.hidden = !UI.topExpanded;
+  setText('topExpandBtn', UI.topExpanded ? '▴' : '▾');
+  setText('pupsChev', UI.rosterOpen ? '▴' : '▾');
+  setText('tasksChev', UI.tasksOpen ? '▴' : '▾');
+  if ($('pupsPill')) $('pupsPill').classList.toggle('on', !!UI.rosterOpen);
+  if ($('tasksPill')) $('tasksPill').classList.toggle('on', !!UI.tasksOpen);
+  if ($('topExpandBtn')) $('topExpandBtn').classList.toggle('on', !!UI.topExpanded);
   var badge = $('dexBadge'), bh = !UI.dexNew; if (badge.hidden !== bh) badge.hidden = bh; if (UI.dexNew) setText('dexBadge', UI.dexNew);
   // Contextual hint pill above bottom dock
   var z = UI.zone, hh2 = '';
@@ -1690,8 +1700,10 @@ function renderTasks() {
   var h;
   if (!S.tutorialDone) {
     var doneN = TUTORIAL.filter(function (t) { return S.tutorial[t.id]; }).length, nextTask = TUTORIAL.filter(function (t) { return !S.tutorial[t.id]; })[0];
+    setText('tasksIco', '🎓');
+    setText('tasksShort', doneN + '/' + TUTORIAL.length);
     var sub = UI.tasksOpen ? (doneN + '/' + TUTORIAL.length) : (nextTask ? nextTask.text : (doneN + '/' + TUTORIAL.length));
-    h = '<div class="ph" id="tasksHead"><span>🎓</span><span class="ph-sub">' + esc(sub) + '</span><span class="chev">' + (UI.tasksOpen ? '▲' : '▼') + '</span></div>';
+    h = '<div class="ph" id="tasksHead"><span>🎓 Tutorial</span><span class="ph-sub">' + esc(sub) + '</span><span class="chev">' + (UI.tasksOpen ? '▲' : '▼') + '</span></div>';
     if (UI.tasksOpen) {
       var nextSeen = false;
       h += TUTORIAL.map(function (t) {
@@ -1703,8 +1715,10 @@ function renderTasks() {
     var dn = S.goals.filter(function (g) { return g.done; }).length;
     var nextGoal = S.goals.filter(function (g) { return !g.done; })[0];
     var wv = S.goalWave || 1;
+    setText('tasksIco', '🎯');
+    setText('tasksShort', dn + '/' + S.goals.length);
     var gsub = UI.tasksOpen ? ('Wave ' + wv + ' · ' + dn + '/' + S.goals.length) : (nextGoal ? ('W' + wv + ': ' + goalText(nextGoal)) : ('Wave ' + wv + ' done!'));
-    h = '<div class="ph" id="tasksHead"><span>🎯</span><span class="ph-sub">' + esc(gsub) + '</span><span class="chev">' + (UI.tasksOpen ? '▲' : '▼') + '</span></div>';
+    h = '<div class="ph" id="tasksHead"><span>🎯 Goals</span><span class="ph-sub">' + esc(gsub) + '</span><span class="chev">' + (UI.tasksOpen ? '▲' : '▼') + '</span></div>';
     if (UI.tasksOpen) {
       var evNow = typeof currentDailyEvent === 'function' ? currentDailyEvent() : null;
       if (evNow) h += '<div class="goal done"><div class="gt"><span>' + evNow.icon + ' <b>' + esc(evNow.name) + '</b></span></div><div class="gt"><small>' + esc(evNow.desc) + '</small></div></div>';
@@ -1719,8 +1733,11 @@ function renderTasks() {
       }
     }
   }
+  var tEl = $('tasks');
+  var showTasksPanel = !!(UI.tasksOpen || UI.topExpanded);
+  if (tEl && tEl.hidden !== !showTasksPanel) tEl.hidden = !showTasksPanel;
   if (UI.tasksHTML !== h) {
-    UI.tasksHTML = h; $('tasks').innerHTML = h;
+    UI.tasksHTML = h; tEl.innerHTML = h;
     $('tasksHead').onclick = function () { UI.tasksOpen = !UI.tasksOpen; if (UI.tasksOpen) UI.rosterOpen = false; sfx('click'); renderTasks(); renderRoster(); };
   }
 }
@@ -1730,6 +1747,7 @@ function renderRoster() {
   var waiting = S.owners.filter(function (o) { return o.state === 'waitCheckin' || o.state === 'waitPickup' || o.state === 'walkIn'; }).length;
   var needy = dogs.filter(function (d) { return d.need && !d.need.self; }).length;
   var badges = (needy ? ' 🙋' + needy : '') + (waiting ? ' 🔔' + waiting : '');
+  setText('pupsAlert', (needy ? '🙋' + needy : '') + (waiting ? '🔔' + waiting : ''));
   var h = '<div class="ph" id="rosterHead"><span>🐕 Pups</span><span class="ph-sub">' + activeDogCount() + '/' + capacity() + badges + '</span><span class="chev">' + (UI.rosterOpen ? '▲' : '▼') + '</span></div>';
   if (UI.rosterOpen) {
     if (!dogs.length) h += '<div class="empty">No pups yet — welcome customers at the counter!</div>';
@@ -1745,9 +1763,17 @@ function renderRoster() {
     });
   }
   var el = $('roster');
+  var showRosterPanel = !!(UI.rosterOpen || UI.topExpanded);
+  if (el && el.hidden !== !showRosterPanel) el.hidden = !showRosterPanel;
   if (UI.rosterHTML !== h) {
     UI.rosterHTML = h; var sc = el.scrollTop; el.innerHTML = h; el.scrollTop = sc;
     $('rosterHead').onclick = function () { UI.rosterOpen = !UI.rosterOpen; if (UI.rosterOpen) UI.tasksOpen = false; sfx('click'); renderRoster(); renderTasks(); };
+    el.querySelectorAll('[data-dog]').forEach(function (row) {
+      row.onclick = function () {
+        var did = +row.getAttribute('data-dog');
+        if (did) { UI.camFocus = { id: did, t: 3.2 }; sfx('click'); }
+      };
+    });
   }
 }
 
@@ -1832,10 +1858,39 @@ if ($('netRetryBtn')) $('netRetryBtn').onclick = function () {
 };
 $('pauseBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mode === 'build') openPause(); this.blur(); };
 $('dexBtn').onclick = function () { initAudio(); if (UI.mode === 'play' || UI.mode === 'build') openDex(); this.blur(); };
-if ($('repPill')) $('repPill').onclick = function () {
+function showRepInfoToast() {
   if (!S) return;
   initAudio(); sfx('click');
   toast('⭐ ' + S.rep.toFixed(1) + '★ Rating boosts arrival speed & tips! (' + capacity() + ' Kennel slot' + (capacity() === 1 ? '' : 's') + ' · Luxury Suite Avg Lv ' + kennelSuiteLevel().toFixed(1) + ')', 'good');
+}
+if ($('repPill')) $('repPill').onclick = showRepInfoToast;
+if ($('repFullPill')) $('repFullPill').onclick = showRepInfoToast;
+function toggleTopDetails() {
+  if (!S) return;
+  initAudio(); sfx('click');
+  UI.topExpanded = !UI.topExpanded;
+  var detEl = $('topDetails');
+  if (detEl) detEl.hidden = !UI.topExpanded;
+  renderTasks();
+  renderRoster();
+}
+if ($('topExpandBtn')) $('topExpandBtn').onclick = toggleTopDetails;
+if ($('topTimePill')) $('topTimePill').onclick = toggleTopDetails;
+if ($('pupsPill')) $('pupsPill').onclick = function () {
+  if (!S) return;
+  initAudio(); sfx('click');
+  UI.rosterOpen = !UI.rosterOpen;
+  if (UI.rosterOpen) UI.tasksOpen = false;
+  renderRoster();
+  renderTasks();
+};
+if ($('tasksPill')) $('tasksPill').onclick = function () {
+  if (!S) return;
+  initAudio(); sfx('click');
+  UI.tasksOpen = !UI.tasksOpen;
+  if (UI.tasksOpen) UI.rosterOpen = false;
+  renderTasks();
+  renderRoster();
 };
 if ($('heartbox')) $('heartbox').onclick = function () {
   if (!S) return;
